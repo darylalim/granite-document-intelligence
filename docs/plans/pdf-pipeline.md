@@ -195,6 +195,8 @@ out/<pdf-stem>/
 
 `run.json` is written **last**, and only it marks a PDF as done — a crash mid-export
 leaves no `run.json`, so resume redoes that PDF instead of trusting a partial folder.
+The whole tree is built in a staging folder and swapped into place atomically (§3.12),
+so a re-run never leaves files from an earlier run beside a new `run.json`.
 
 `run.json` exists because every quality question this project has ever had was answered
 by knowing exactly which model, revision and library produced an output.
@@ -372,6 +374,56 @@ Budgets turn S4/S8's measurements into regression checks that `eval/score.py` en
 - **README** states the measured numbers ("about N s/page on an M2 Pro 16 GB") with the
   date and versions, not the budgets.
 
+### 3.12 Storage
+
+Everything is files — no database, no server. Where each thing lives:
+
+| What | Where | Size | Lifecycle |
+|---|---|---|---|
+| granite-docling, picture classifier, embedding tokenizer | Hugging Face cache (`~/.cache/huggingface/hub`) | 0.63 GB + small | downloaded on first use; kept |
+| Granite Vision **bf16 source** | Hugging Face cache | **8.0 GB** | needed only to convert (and for S6); **deletable after** |
+| Granite Vision **8-bit** | `~/.cache/granite-document-intelligence/` (`GRANITE_VISION_MLX_PATH`) | ~4.65 GB | written by `gdi convert-model`; kept |
+| Results | `OUT_DIR/<pdf>/` (§3.5) | per PDF | user-owned; never deleted by the tool except its own staging folders |
+| Eval corpus / results | `eval/` (§4.1, §8.1) | < 20 MB committed | private tier gitignored |
+| Spikes | session scratchpad | — | never in the repo |
+
+Five rules:
+
+1. **Atomic output swap — no stale files.** A PDF's tree is written to
+   `OUT_DIR/<pdf>.partial/`, `run.json` last, then swapped into place: rename any
+   existing `OUT_DIR/<pdf>/` to `<pdf>.old/`, rename `.partial` to `<pdf>/`, delete
+   `.old`. Without it, a re-run that finds three charts where the last run found five
+   leaves `chart-004.csv` and `chart-005.csv` beside a `run.json` that reports success
+   — a silent wrong result, and the same failure the `run.json`-last rule exists to
+   prevent, arriving from a previous *successful* run instead of a crash. At startup a
+   batch deletes leftover `*.partial/` folders (a crash's residue) and, if it finds a
+   `<pdf>.old/` with no `<pdf>/`, renames it back (a crash mid-swap). Errors write
+   `run.json` with `"status": "error"` through the same swap, so a failed re-run
+   replaces a stale success rather than sitting beside it. Both renames stay within
+   `OUT_DIR`, so they are same-filesystem and atomic on APFS.
+2. **Images are files, not base64.** `document.json` is saved with referenced images
+   (`ImageRefMode.REFERENCED` — verify the exact export call in S3) so the JSON stays
+   small and diffable. **Picture crops on** (`charts/chart-NNN.png`, and
+   `pictures/picture-NNN.png` for non-chart pictures); **full-page images off** by
+   default, `--save-page-images` to write `pages/page-NNN.png`. Page images are still
+   rendered in memory during conversion either way — this governs only what reaches
+   disk.
+3. **The bf16 source is cleanup the user opts into.** `gdi convert-model` ends by
+   printing the source's size and the exact command to remove it from the HF cache
+   (`hf cache delete`-style — verify the command name in S1), and accepts
+   `--delete-source` to do it after a successful load test of the 8-bit output. Never
+   by default: S6 needs bf16, and re-downloading 8 GB is slow.
+4. **The old app's model is named for the user to decide.** After the teardown,
+   `ibm-granite/granite-4.2-3b-bf16-mlx` (7.3 GB) stays in the HF cache. PR 3's
+   description (§10) names it and the command to remove it; the tool never deletes
+   another project's cache entries.
+5. **Disk is reported, not guessed.** `run.json` records the output folder's size in
+   bytes; the batch summary prints the total. The README states the space needed:
+   roughly **14 GB during setup** (bf16 source + 8-bit + granite-docling + the
+   torch-including environment) and **~6 GB after** deleting the source — estimates
+   until S1 (environment size) and S8 (output size per page) measure them; replace them
+   with the measured figures.
+
 ## 4. Phase 0 — spikes (before any production code)
 
 Each spike is a throwaway script in the scratchpad, not the repo. **Stop and report**
@@ -471,7 +523,8 @@ Order: `config.py` → `convert.py` (Phase A) → `export.py` → `memory.py` �
 `convert.py` targets the public types rather than raw Docling objects. Notes:
 
 - **Model acquisition.** `gdi convert-model` runs the S2-validated conversion into
-  `~/.cache/granite-document-intelligence/` (override: `GRANITE_VISION_MLX_PATH`).
+  `~/.cache/granite-document-intelligence/` (override: `GRANITE_VISION_MLX_PATH`),
+  load-tests the result, and offers the bf16-source cleanup in §3.12 rule 3.
   `gdi convert` with a missing conversion fails with the exact command to run — never a
   silent fallback to bf16 or to the Hub.
 - **Lazy imports.** `docling` and `mlx_vlm` imported inside functions, so `gdi --help`
@@ -509,12 +562,19 @@ Same philosophy as today: **mock at the model boundary**, never download in CI.
   page numbers present, every line valid JSON with the §3.9 keys (tokenizer mocked or
   a tiny local one — no download).
 - `test_api.py` — `convert()` writes nothing to disk (run it in a read-only tmp dir);
-  `save()` produces exactly the §3.5 tree; result types are the public dataclasses.
+  `save()` produces exactly the §3.5 tree; result types are the public dataclasses;
+  `document.json` contains no base64 image data and its image references resolve to
+  files in the tree; no `pages/` folder unless page images were requested.
 - `test_batch.py` — directory expansion (case-insensitive, sorted, `--recursive`,
   relative output paths, no collision for same-named files); resume skips only a
   matching successful `run.json`, and re-runs on a missing, failed, hash-mismatched or
   options-mismatched one; a folder with outputs but no `run.json` is re-run; `--force`;
   one failure doesn't stop the batch and makes the exit non-zero. Phase A/B mocked.
+  Storage (§3.12): a re-run that yields **fewer charts** leaves no `chart-NNN` file
+  from the earlier run; a failed re-run replaces a previous success's tree rather than
+  adding a `run.json` beside its files; a leftover `<pdf>.partial/` is deleted at
+  startup; a `<pdf>.old/` with no `<pdf>/` (crash mid-swap) is restored; the batch
+  summary reports the output size.
 - `test_cli.py` — argument parsing, missing-model error message, exit codes, and that
   it delegates to `convert_many()` rather than re-implementing resume.
 - `test_safety.py` — the §3.10 rules: a PDF over `--max-pages` / `--max-file-mb` is a
@@ -576,7 +636,8 @@ the old app with a scored check.
   `gdi convert-model` as a setup step, CLI usage, output layout, licenses (Granite
   models Apache-2.0, downloaded not vendored), and a **"Untrusted documents"** section
   covering §3.10's limits, the no-timeout limitation, KVP review and never running
-  generated chart code.
+  generated chart code. Also a **"Disk space"** section from §3.12: where models live,
+  the measured setup and steady-state sizes, and how to delete the bf16 source.
 - **README usage example** uses one PDF from the §8.1 corpus, so the documented
   command is one the eval actually exercises.
 - **Python API** documented in the README with the §3.7 example.
@@ -593,7 +654,7 @@ One PR per step, each off a fresh branch from `main`, each green in CI before me
 | 0 | `docs/pdf-pipeline-plan` | this plan | `docs:` | user approval |
 | 1 | `docs/pdf-pipeline-spikes` | spike report (§4) + any plan amendments it forces; no production code | `docs:` | **user approves the spike report** — the design is frozen from here |
 | 2 | `test/eval-corpus` | §4.1 public corpus, `SOURCES.md`, hand-written expected outputs, `eval/private/` in `.gitignore` | `test:` | every file has a licence in `SOURCES.md` |
-| 3 | `feat/teardown` | §5: delete the text app, move the tooling suites, drop deps | `feat!:` | moved suites' test count unchanged |
+| 3 | `feat/teardown` | §5: delete the text app, move the tooling suites, drop deps | `feat!:` | moved suites' test count unchanged; description names the orphaned 7.3 GB Granite 4.2 cache entry (§3.12 rule 4) |
 | 4 | `feat/phase-a` | deps, `config`, `api` stubs, `convert`, `export`, `memory`, `gdi convert-model` | `feat:` | a hand run on one corpus PDF, numbers in the PR description |
 | 5 | `feat/chunks-kvp` | `chunk`, `kvp` | `feat:` | hand run with a schema on the corpus form |
 | 6 | `feat/cli-batch` | `api` complete, `batch`, `cli`, §3.10 limits | `feat:` | hand run on the whole public corpus |
