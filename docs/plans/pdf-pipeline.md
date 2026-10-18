@@ -543,7 +543,7 @@ test count matches before and after.
 
 `pyproject.toml`: drop `streamlit`, `mlx-lm`; drop the `static/…` entries from
 `license-files` (the OFL fonts and the favicon leave with `static/`), leaving
-`["LICENSE"]`; rewrite `description`. Run `uv lock`. The README's License section loses
+`["LICENSE"]`; set `description` to the §9.2 sentence. Run `uv lock`. The README's License section loses
 its IBM Plex and favicon paragraphs in the same commit, so it never names files that are
 gone.
 
@@ -777,6 +777,52 @@ downloaded at runtime under their own Apache-2.0/MIT licences (not vendored), th
 corpus under its own licences (pointing to `SOURCES.md`), and — if it exists —
 `THIRD_PARTY_NOTICES.md`.
 
+### 9.2 GitHub repository details (decided 2026-10-18)
+
+As of that date, `darylalim/granite-document-intelligence` (public) still describes the
+text app — description *"Streamlit application for summarization, topic, intent, and
+sentiment analysis using IBM Granite on Apple Silicon with MLX."*, topics
+`summarization`, `mlx-lm`, `apple-silicon`, `ibm-granite`, `mlx`, `sentiment-analysis`,
+`streamlit`, `text-analysis`.
+
+**Description** — one sentence, used verbatim in both GitHub and
+`pyproject.toml`'s `description`:
+
+> Local PDF document intelligence on Apple Silicon: converts multi-page PDFs to
+> Markdown and JSON and extracts charts, tables and schema-driven key-values with IBM
+> Granite Docling and Granite Vision on MLX.
+
+It deliberately claims neither "fully offline" (the first run downloads from the Hub)
+nor "MLX-only" (the picture classifier runs on torch, §2.1).
+
+**Topics** (18 of GitHub's 20):
+
+| Group | Topics |
+|---|---|
+| What it does | `pdf`, `pdf-extraction`, `document-parsing`, `document-intelligence`, `chart-extraction`, `table-extraction`, `key-value-extraction`, `ocr` |
+| Models and libraries | `ibm-granite`, `granite-vision`, `docling`, `vision-language-model` |
+| Platform | `mlx`, `mlx-vlm`, `apple-silicon`, `local-first` |
+| Interface and use | `cli`, `rag` |
+
+Remove all five text-app topics (`summarization`, `sentiment-analysis`,
+`text-analysis`, `streamlit`, `mlx-lm`). `ocr` is accurate because scanned PDFs are in
+scope; `rag` because of `chunks.jsonl` — drop it if RAG should not be advertised before
+embeddings exist. `python` and `machine-learning` are left out as too generic to help
+anyone find the repo.
+
+**Timing — the public page must describe what is on `main`.** Repo metadata is public,
+takes effect immediately and is not version-controlled, so it changes with specific
+PRs, not before:
+
+- **PR 3 (teardown):** set the topics above, and an interim description: *"Being
+  rebuilt as a local PDF document-intelligence CLI (IBM Granite + Docling on MLX). See
+  docs/plans/pdf-pipeline.md."*
+- **PR 9 (release):** set the final description above; it must match `pyproject.toml`.
+
+Both changes go through `gh repo edit` (`--description`, `--add-topic`,
+`--remove-topic`) **after** the PR merges, and only with the user's confirmation at that
+moment — an outward-facing change is not covered by approval of the PR itself.
+
 ## 10. Delivery — branches and pull requests
 
 One PR per step, each off a fresh branch from `main`, each green in CI before merge;
@@ -789,13 +835,13 @@ One PR per step, each off a fresh branch from `main`, each green in CI before me
 | 0 | `docs/pdf-pipeline-plan` | this plan | `docs:` | user approval |
 | 1 | `docs/pdf-pipeline-spikes` | spike report (§4) + any plan amendments it forces; no production code | `docs:` | **user approves the spike report** — the design is frozen from here |
 | 2 | `test/eval-corpus` | §4.1 public corpus, `SOURCES.md`, `eval/corpus/README.md`, hand-written expected outputs, `/eval/private/` and `/eval/runs/` in `.gitignore` | `test:` | every file has a licence in `SOURCES.md` |
-| 3 | `feat/teardown` | §5: delete the text app, move the tooling suites, drop deps, extend `.gitignore` and add its `git check-ignore` guard (which also covers PR 2's `eval/` entries) | `feat!:` | moved suites' test count unchanged; description names the orphaned 7.3 GB Granite 4.2 cache entry (§3.12 rule 4) |
+| 3 | `feat/teardown` | §5: delete the text app, move the tooling suites, drop deps, extend `.gitignore` and add its `git check-ignore` guard (which also covers PR 2's `eval/` entries) | `feat!:` | moved suites' test count unchanged; description names the orphaned 7.3 GB Granite 4.2 cache entry (§3.12 rule 4); **after merge**, with the user's confirmation: new topics + interim GitHub description (§9.2) |
 | 4 | `feat/phase-a` | deps, `config`, `api` stubs, `convert`, `export`, `memory`, `gdi convert-model` | `feat:` | a hand run on one corpus PDF, numbers in the PR description |
 | 5 | `feat/chunks-kvp` | `chunk`, `kvp` | `feat:` | hand run with a schema on the corpus form |
 | 6 | `feat/cli-batch` | `api` complete, `batch`, `cli`, §3.10 limits | `feat:` | hand run on the whole public corpus |
 | 7 | `test/eval-harness` | `eval/score.py`, `eval/budgets.toml` from S8, the first results file as **baseline** | `test:` | baseline committed; every budget met |
 | 8 | `docs/rewrite` | `CLAUDE.md` and `README.md` rewrites (§9) | `docs:` | README commands run as written |
-| 9 | `chore/release-1.0.0` | `version = "1.0.0"` + `uv lock`, **both files** | `chore:` | eval run on the release commit meets baseline and budgets |
+| 9 | `chore/release-1.0.0` | `version = "1.0.0"` + `uv lock`, **both files** | `chore:` | eval run on the release commit meets baseline and budgets; `pyproject.toml` `description` is the §9.2 sentence; **after merge**, with the user's confirmation: final GitHub description (§9.2) |
 
 Rules:
 
