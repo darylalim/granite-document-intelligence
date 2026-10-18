@@ -454,6 +454,80 @@ Elasticsearch): a single-user, local-first tool on a 16 GB Mac would pay for one
 memory against the 10 GB Metal budget, in operations, and in the "no network beyond
 the Hugging Face Hub" stance (§3.10). Revisit only if the tool becomes multi-user.
 
+### 3.13 Security model (decided 2026-10-18)
+
+§3.10 (untrusted input), §3.12 (storage), §8.2 (adversarial eval, private results) and
+the carried-over tooling (locked `uv.lock`, least-privilege CI, the secret-edit guard)
+already implement most of this. This section states the model they serve and closes
+the gaps a check of the Hub and Docling's source found that day.
+
+**Threat model.**
+
+| | |
+|---|---|
+| **Assets** | the user's documents and everything derived from them; `HF_TOKEN`; the Mac's files, memory and GPU |
+| **Adversary** | the author of a PDF the user processes — controls every byte of it, including text the user never sees |
+| **Trusted** | the user and their CLI arguments, `ConvertOptions`, and the KVP schema they supply; model weights **at pinned revisions**; dependencies **at locked versions** |
+| **Untrusted** | every byte of the PDF and everything a model derives from it: Markdown, tables, chart CSV/summary/code, KVP values, chunks |
+| **Out of scope (v1)** | multi-user use, serving over a network, defending against the user themselves, a compromised Mac |
+
+Every rule below maps to a row: PDF-derived data never steers the program (§3.10), and
+everything the program *executes or loads* is pinned and local.
+
+**Rules:**
+
+1. **Every model is pinned to a commit SHA.** Docling pins only Granite Vision
+   (`dd48e97503de471803850df70843cf9eb5da8712`); its granite-docling MLX preset carries
+   **no revision** and the figure classifier uses **`revision="main"`** — both load
+   whatever those repos publish next. `config.py` pins all four (granite-docling MLX,
+   Granite Vision, `DocumentFigureClassifier-v2.5`, the `granite-embedding-english-r2`
+   tokenizer) and overrides Docling's presets with them; `run.json` records them;
+   `test_convert.py` asserts each reaches its loader. A pin moves only in a PR that runs
+   the eval. (On 2026-10-18 Granite Vision's `main` was already at `37d591f…`, past
+   Docling's pin — pins are what keep that from mattering silently.)
+2. **No model-repo code runs.** `granite-vision-4.1-4b` ships `modeling.py`,
+   `processing.py`, `configuration.py` and `downsampling.py`, and Docling's preset sets
+   `trust_remote_code=True` — a remnant of transformers < 5.8, which needed it. Under
+   the locked transformers ≥ 5.16 the model loads natively. Our code never passes
+   `trust_remote_code=True`; spike **S10** proves that neither `mlx_vlm.convert`, the
+   MLX engine nor the classifier imports repo code (no module from the HF cache in
+   `sys.modules` afterwards). If one does, stop and decide before writing code.
+3. **Weights are safetensors only.** `granite-embedding-english-r2` ships a pickle
+   `pytorch_model.bin` beside its safetensors. Only its tokenizer loads today; any
+   future weight load passes `use_safetensors=True` (or the library's equivalent), so a
+   missing safetensors file is an error, never a pickle fallback.
+4. **Parsers are unsandboxed in v1 — stated, not hidden.** `pdfium` and
+   `docling-parse` are C/C++ code reading attacker-controlled bytes in-process; a
+   memory-corruption bug would run with the user's privileges. Accepted for a
+   single-user tool processing the user's own documents, mitigated by keeping them
+   current (rule 6). The upgrade path, if the tool ever processes strangers' PDFs at
+   volume: conversion in a separate low-privilege process with resource limits (the
+   subprocess option §3.10 declined for v1 on model-reload cost). The README says so.
+5. **No secrets or document content in logs.** `run.json`, progress output and stored
+   tracebacks never contain environment variables, `HF_TOKEN`, or page text — errors
+   record the exception type, message and our own frames, not local variables or model
+   output. `test_safety.py` runs with a sentinel `HF_TOKEN` and a sentinel string in the
+   PDF and asserts neither appears in any output file or stderr.
+6. **Dependency vulnerabilities are watched.** Turn on **GitHub Dependabot alerts**
+   (they read `uv.lock`) — a repository setting, so applied after PR 3 merges, **with
+   the user's confirmation at that moment** (as §9.2). Add a vulnerability audit of the
+   locked environment (`uvx pip-audit` against `uv export` output — verify the exact
+   invocation when it is first run) to CLAUDE.md's "Verifying a dependency upgrade"
+   procedure.
+7. **Inputs are recognised by content.** A file is processed only if it starts with
+   `%PDF-`, whatever its extension; anything else is a per-PDF error before any parser
+   sees it.
+8. **The KVP schema is local and bounded.** Remote `$ref` resolution is disabled
+   explicitly (no retrieval function registered with `jsonschema`/`referencing`, not
+   relied on as a default), the schema is capped at 256 KB, and it must be a JSON
+   object. A schema with a remote `$ref` is rejected with a clear message, and a test
+   proves no network call is attempted.
+9. **Repository hygiene.** A `SECURITY.md` says how to report a vulnerability privately
+   (GitHub's private advisories) and states the threat model above in two lines. CI's
+   third-party actions are pinned to **commit SHAs** with the version in a comment
+   (`actions/checkout@<sha> # v7`, `astral-sh/setup-uv@<sha> # v10.0.0`) instead of
+   mutable tags; `TestCIWorkflow`'s pins move with them.
+
 ## 4. Phase 0 — spikes (before any production code)
 
 Each spike is a throwaway script in the scratchpad, not the repo. **Stop and report**
@@ -470,6 +544,7 @@ if one fails; several change the design.
 | S7 | granite-docling's own `<chart>` → table vs Granite Vision `<chart2csv>` on the same charts | if granite-docling is as good, Granite Vision's chart role shrinks to summaries — record either way |
 | S8 | Throughput | seconds/page for Phase A (born-digital and scanned separately), seconds/chart, seconds/KVP page and cold-start load time; these seed `eval/budgets.toml` (§3.11) and the README |
 | S9 | How far toward torch-free can the stack go (§2.1)? (a) Does `docling-slim` with only `format-pdf`, `feat-chunking` and `mlx-vlm` added directly — no `models-vlm-inline` — import and run `VlmPipeline` with `GRANITEDOCLING_MLX` and the MLX chart preset? (b) Does the classifier run on `ONNXRUNTIME` without importing torch (`"torch" not in sys.modules` after a run)? (c) Does granite-docling's DocTags already label picture types, making the classifier redundant? | each answered yes/no with evidence; (a) yes → drop torch from the lock; (b) yes and same chart picks on the corpus → ONNX classifier; (c) yes → note it, but keep Docling's classifier unless S7 says otherwise |
+| S10 | Does any load path execute model-repo code, and do revision overrides reach every loader (§3.13 rules 1–2)? Run `mlx_vlm.convert`, a Phase A conversion and the classifier with every model pinned, then list `sys.modules` entries whose file lives under the HF cache. | **none** from the cache; each of the four pinned SHAs observed at its loader (e.g. via `HF_HUB_OFFLINE=1` with only those revisions cached). Any repo code imported → **stop and report** |
 
 Spike results go in **`docs/plans/pdf-pipeline-spikes.md`** — one section per spike:
 what was run (exact versions), the numbers, the verdict, and any amendment it forces on
@@ -647,7 +722,9 @@ Same philosophy as today: **mock at the model boundary**, never download in CI.
 - `test_convert.py` — the `VlmPipelineOptions` actually built: `GRANITEDOCLING_MLX`,
   chart extraction on with the **`_mlx` preset**, summary on, code off, `repo_id` pointed
   at the local path. This is the silent-degradation guard: the auto preset or a dropped
-  `repo_id` still produces output, just from the wrong model.
+  `repo_id` still produces output, just from the wrong model. Also (§3.13): each of
+  the four models reaches its loader at its pinned SHA, and no call from our code
+  passes `trust_remote_code=True`.
 - `test_chunk.py` — chunks from a hand-built `DoclingDocument`: headings carried,
   page numbers present, every line valid JSON with the §3.9 keys (tokenizer mocked or
   a tiny local one — no download).
@@ -672,7 +749,12 @@ Same philosophy as today: **mock at the model boundary**, never download in CI.
   `max_tokens` lands in `run.json` warnings; `chart-NNN.py` carries the untrusted
   header and nothing imports it; an output path that would resolve outside the output
   directory is refused; a symlink out of the input directory is skipped with a warning;
-  `Image.MAX_IMAGE_PIXELS` is unchanged after a run.
+  `Image.MAX_IMAGE_PIXELS` is unchanged after a run. And the §3.13 rules: a `.pdf`
+  without the `%PDF-` header — and a real PDF renamed `.txt` passed explicitly — are
+  judged by content; a sentinel `HF_TOKEN` and a sentinel string inside the PDF appear
+  in no output file and not on stderr; a KVP schema with a remote `$ref` is rejected
+  with **no** network attempt (socket creation patched to raise), and a schema over
+  256 KB or not a JSON object is rejected.
 - `test_score.py` — the eval scorer and `eval/matching.py` on synthetic pairs (§8.2
   rule 9): deliberately bad predictions must lower each score, normalization and
   pairing rules behave as written, and a committed results file containing a private
@@ -796,7 +878,9 @@ detail rather than a quality change.
   `transformers` or `huggingface-hub`, after any model or quantization change, and
   after any KVP prompt change; pass = no score below the committed baseline and peak
   memory under budget. The reason carries over unchanged: no test executes a line of
-  `mlx`.
+  `mlx`. The same procedure runs a vulnerability audit of the locked environment
+  (§3.13 rule 6), and a model-revision bump (§3.13 rule 1) counts as a model change.
+  Also add a **Security** section summarising §3.13's threat model and rules.
 - **`README.md` — rewrite**: what it does, the 16 GB envelope and the S4/S8 numbers,
   `gdi convert-model` as a setup step, CLI usage, output layout, licenses (Granite
   models Apache-2.0, downloaded not vendored), and a **"Untrusted documents"** section
@@ -916,12 +1000,12 @@ One PR per step, each off a fresh branch from `main`, each green in CI before me
 | 0 | `docs/pdf-pipeline-plan` | this plan | `docs:` | user approval |
 | 1 | `docs/pdf-pipeline-spikes` | spike report (§4) + any plan amendments it forces; no production code | `docs:` | **user approves the spike report** — the design is frozen from here |
 | 2 | `test/eval-corpus` | §4.1 public corpus, `SOURCES.md`, `eval/corpus/README.md`, hand-written expected outputs, `/eval/private/` and `/eval/runs/` in `.gitignore` | `test:` | every file has a licence in `SOURCES.md` |
-| 3 | `feat/teardown` | §5: delete the text app, move the tooling suites, drop deps, extend `.gitignore` and add its `git check-ignore` guard (which also covers PR 2's `eval/` entries) | `feat!:` | moved suites' test count unchanged; description names the orphaned 7.3 GB Granite 4.2 cache entry (§3.12 rule 4); **after merge**, with the user's confirmation: new topics + interim GitHub description (§9.2) |
+| 3 | `feat/teardown` | §5: delete the text app, move the tooling suites, drop deps, extend `.gitignore` and add its `git check-ignore` guard (which also covers PR 2's `eval/` entries), pin CI actions to commit SHAs and move `TestCIWorkflow` with them (§3.13 rule 9) | `feat!:` | moved suites' test count unchanged; description names the orphaned 7.3 GB Granite 4.2 cache entry (§3.12 rule 4); **after merge**, with the user's confirmation: new topics + interim GitHub description (§9.2) and Dependabot alerts on (§3.13 rule 6) |
 | 4 | `feat/phase-a` | deps, `config`, `api` stubs, `convert`, `export`, `memory`, `gdi convert-model` | `feat:` | a hand run on one corpus PDF, numbers in the PR description |
 | 5 | `feat/chunks-kvp` | `chunk`, `kvp` | `feat:` | hand run with a schema on the corpus form |
 | 6 | `feat/cli-batch` | `api` complete, `batch`, `cli`, §3.10 limits | `feat:` | hand run on the whole public corpus |
 | 7 | `test/eval-harness` | `eval/score.py`, `eval/matching.py`, `tests/test_score.py`, `eval/budgets.toml` (budgets + tolerances) from S8, the first results file as **baseline** | `test:` | `test_score.py` green and each bad-prediction case mutation-checked; baseline committed; every budget met (medians of three) |
-| 8 | `docs/rewrite` | `CLAUDE.md` and `README.md` rewrites (§9) | `docs:` | README commands run as written |
+| 8 | `docs/rewrite` | `CLAUDE.md` and `README.md` rewrites (§9), `SECURITY.md` (§3.13 rule 9) | `docs:` | README commands run as written |
 | 9 | `chore/release-1.0.0` | `version = "1.0.0"` + `uv lock`, **both files** | `chore:` | eval run on the release commit meets baseline and budgets; `pyproject.toml` `description` is the §9.2 sentence; **after merge**, with the user's confirmation: final GitHub description (§9.2) |
 
 Rules:
@@ -1112,7 +1196,7 @@ The plan was written in an earlier session you have no memory of; it is the sing
 source of truth, and every decision in it carries its reason — read the reason before
 deciding a choice is safe to change.
 
-Do Phase 0 only (§4): spikes S1–S9 and Task C (§4.1). Nothing else.
+Do Phase 0 only (§4): spikes S1–S10 and Task C (§4.1). Nothing else.
 
 - Spikes are throwaway scripts in your scratchpad, never in the repo.
 - Re-check every version and API the plan cites against what is installed now; the
@@ -1120,7 +1204,7 @@ Do Phase 0 only (§4): spikes S1–S9 and Task C (§4.1). Nothing else.
 - After each spike, add its section to docs/plans/pdf-pipeline-spikes.md: exact
   versions, what you ran, the numbers, the verdict, and any amendment it forces.
 - If a spike fails its pass criterion, STOP and report to me with the options before
-  continuing — several spikes change the design (S2, S4, S6, S7).
+  continuing — several spikes change the design (S2, S4, S6, S7, S10).
 - Task C: source the public corpus under §4.1's licensing rule and draft the expected
   outputs. Ask me for (a) the PDFs for the private tier and (b) the print-and-scan
   step, which needs my hands.
