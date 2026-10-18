@@ -67,6 +67,37 @@ downloads and no published evaluation.
 MLX — older; VAREX 85.5% vs 94.2% for 4.1); `granite-vision-3.2/3.3-2b` (superseded);
 any 30B model (does not fit).
 
+### 2.1 Runtimes — not all MLX
+
+The heavy compute is MLX; the stack is not. Read from Docling's source and
+`pyproject.toml` on 2026-10-18:
+
+| Component | Runtime | Load |
+|---|---|---|
+| granite-docling-258M (every page) | **MLX** via mlx-vlm | heavy — up to 4096 tokens/page |
+| Granite Vision 4.1 8-bit (charts, KVP) | **MLX** via mlx-vlm | heavy — 4B model |
+| Picture classifier `docling-project/DocumentFigureClassifier-v2.5` (EfficientNet) | **PyTorch** via transformers (MPS/CPU) by default; `ImageClassificationEngineType.ONNXRUNTIME` available | light |
+| PDF parse and page render | `docling-parse` (C++) / `pypdfium2`, CPU | not a model |
+| Chunking tokenizer | HF `tokenizers` (Rust), CPU | not a model run |
+
+- **The classifier is not optional:** `do_chart_extraction=True` turns picture
+  classification on — it is how Docling picks which pictures reach Granite Vision.
+- **torch is installed regardless of runtime choice.** Docling's `models-vlm-inline`
+  extra — the one that brings `mlx-vlm` — also requires `open-clip-torch`, `timm`,
+  `accelerate` and `peft`, all torch-dependent. That costs disk and CI install time,
+  not runtime memory: torch loads only when the classifier runs on it.
+- **transformers ≥ 5.16 is the effective floor on this Mac**, and no single package
+  states it: Docling's `models-vlm-inline` excludes 5.9–5.15 on darwin (MPS crashes on
+  float64 position embeddings, fixed in 5.16.0), while mlx-vlm needs ≥ 5.14. A later
+  `uv lock --upgrade` must keep it; the new CLAUDE.md records it under Dependencies.
+
+**Decision for v1:** accept torch for the classifier — it is tens of MB against a
+10 GB budget. Run the classifier on ONNX Runtime **only if S9 shows it works cleanly**
+(no import of torch at runtime, identical chart picks on the corpus). A torch-free
+*install* is a goal worth one spike (S9), not a requirement. The new CLAUDE.md must
+say plainly that the project is MLX for inference but not MLX-only, since the old app
+was MLX-only in both senses.
+
 ## 3. Architecture
 
 ### 3.1 Data flow and memory phases
@@ -348,7 +379,7 @@ if one fails; several change the design.
 
 | # | Question | Pass criterion |
 |---|---|---|
-| S1 | Do `docling>=2.140` (with the `vlm` and chunking extras), `mlx-vlm>=0.7.8` and their `transformers`/`mlx` resolve together on Python 3.12? Does the `granite-embedding-english-r2` tokenizer load via `HuggingFaceTokenizer`? | `uv lock` succeeds in a scratch project; record the resolved `transformers`, `mlx`, `torch` versions; the tokenizer chunks a sample document |
+| S1 | Do `docling>=2.140` (with the `vlm` and chunking extras), `mlx-vlm>=0.7.8` and their `transformers`/`mlx` resolve together on Python 3.12? Does the `granite-embedding-english-r2` tokenizer load via `HuggingFaceTokenizer`? | `uv lock` succeeds in a scratch project; resolved `transformers` is **≥ 5.16** (§2.1); record the resolved `transformers`, `mlx`, `torch` versions; the tokenizer chunks a sample document |
 | S2 | Does Docling's MLX engine load a **local** 8-bit conversion via `repo_id`? | chart extraction runs from the local path with `HF_HUB_OFFLINE=1`; if only Hub ids work, decide between a private Hub repo and a monkeypatch |
 | S3 | Does the 2025-09 granite-docling MLX conversion (mlx-vlm 0.3.3) load and convert pages under mlx-vlm 0.7.8? Does Docling detect or stop repetition loops, and can a page hitting `max_tokens` be detected from the result? | a 5-page PDF converts with sane Markdown and at least one table; record how a capped page shows up (§3.10) |
 | S4 | Peak memory per phase, and does releasing the converter return GV's memory? | Phase A peak and post-release `mx.get_active_memory()` recorded; Phase B starts below ~5 GB active; whole run stays under ~10 GB on a 20–50 page PDF with charts |
@@ -356,6 +387,7 @@ if one fails; several change the design.
 | S6 | 8-bit vs bf16 Granite Vision quality on ~10 charts and one KVP form | CSVs match on values; KVP fields match; if 8-bit degrades, try `--q-bits 6`/bf16 and re-measure S4 |
 | S7 | granite-docling's own `<chart>` → table vs Granite Vision `<chart2csv>` on the same charts | if granite-docling is as good, Granite Vision's chart role shrinks to summaries — record either way |
 | S8 | Throughput | seconds/page for Phase A (born-digital and scanned separately), seconds/chart, seconds/KVP page and cold-start load time; these seed `eval/budgets.toml` (§3.11) and the README |
+| S9 | How far toward torch-free can the stack go (§2.1)? (a) Does `docling-slim` with only `format-pdf`, `feat-chunking` and `mlx-vlm` added directly — no `models-vlm-inline` — import and run `VlmPipeline` with `GRANITEDOCLING_MLX` and the MLX chart preset? (b) Does the classifier run on `ONNXRUNTIME` without importing torch (`"torch" not in sys.modules` after a run)? (c) Does granite-docling's DocTags already label picture types, making the classifier redundant? | each answered yes/no with evidence; (a) yes → drop torch from the lock; (b) yes and same chart picks on the corpus → ONNX classifier; (c) yes → note it, but keep Docling's classifier unless S7 says otherwise |
 
 Spike results go in **`docs/plans/pdf-pipeline-spikes.md`** — one section per spike:
 what was run (exact versions), the numbers, the verdict, and any amendment it forces on
@@ -633,7 +665,7 @@ The plan was written in an earlier session you have no memory of; it is the sing
 source of truth, and every decision in it carries its reason — read the reason before
 deciding a choice is safe to change.
 
-Do Phase 0 only (§4): spikes S1–S8 and Task C (§4.1). Nothing else.
+Do Phase 0 only (§4): spikes S1–S9 and Task C (§4.1). Nothing else.
 
 - Spikes are throwaway scripts in your scratchpad, never in the repo.
 - Re-check every version and API the plan cites against what is installed now; the
