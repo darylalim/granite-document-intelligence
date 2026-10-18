@@ -28,7 +28,8 @@ Inputs: one or more PDFs, **or a directory** of them, with resume (§3.8).
 - No UI. A Streamlit front end is on the **roadmap for v1.x**, built *on top of* the
   §3.7 library API; nothing in v1 may assume one, and the library must stay usable
   without Streamlit installed. If it needs fast listings, it gets a rebuildable SQLite
-  cache (§3.12.1), never a second source of truth.
+  cache (§3.12.1), never a second source of truth. Its theme is already designed and
+  verified (§14).
 - No embeddings, vector store or database — v1 stops at `chunks.jsonl`; files are the
   source of truth, and any later store is a derived index (§3.12.1).
 - No output localization. **English only** — Granite Vision 4.1 accepts English
@@ -534,6 +535,11 @@ uv run python -m mlx_vlm.convert --hf-path ibm-granite/granite-vision-4.1-4b \
 Delete: `streamlit_app.py`, `.streamlit/`, `static/`, `tests/test_app_ui.py`,
 `docs/images/`.
 
+**Do not delete `docs/plans/ui-theme/`** — it is the v1.x UI's theme (§14), not part of
+the text app. Its `config.toml` references `static/fonts/`, which this step removes;
+§14 says how the UI work restores them. Note in the PR description that `static/fonts/`
+and its OFL licence text are recoverable from tag `v0.6.0`.
+
 **Do not delete `tests/test_streamlit_app.py` wholesale.** Lines ~1337 to the end hold
 the tooling suites — `TestCIWorkflow`, `TestReleaseWorkflow`, `TestHooksConfig` and the
 session-scoped `stub_bin` fixture — which guard `ci.yml`, `release.sh`, `gate.sh` and
@@ -895,6 +901,61 @@ Vision's chart role (S7), 6-bit/bf16 instead of 8-bit (S6), and the chunk-size d
 - IBM's reference app: HF Space `ibm-granite/granite-vision-document-intelligence`
   (Gradio + ZeroGPU; hand-rolled crops and prompts — the approach this plan avoids by
   letting Docling orchestrate)
+
+## 14. v1.x UI theme (designed 2026-10-18)
+
+Not v1 work — recorded so the UI starts from a verified design instead of a fresh one.
+Everything lives in **`docs/plans/ui-theme/`**:
+
+- `config.toml` — the theme, ready to become `.streamlit/config.toml`, with the reason
+  for every non-obvious value in its comments
+- `preview.py` — a mock of the planned UI (sidebar options, Convert row, counts, the
+  four status messages, a six-tab results strip, a re-plotted chart, a heatmap, a
+  diverging chart, a table, badges, generated code); passes ruff and ty, so the gate
+  covers it
+- `preview-light.png`, `preview-dark.png` — 1280 px renders under that config
+
+**Design: IBM Carbon g10 (light) + g100 (dark)** — the pair Carbon itself designs to be
+used together, extending the text app's Carbon theme. The modes are complementary by
+measurement, not by eye:
+
+| Role | Light | Dark | Match |
+|---|---|---|---|
+| Text on page | `#161616` on `#f4f4f4` | `#f4f4f4` on `#161616` | 16.45:1 in both |
+| Interactive | Blue 60 `#0f62fe` | Blue 60 `#0f62fe` | one brand colour; white on it 5.00:1 |
+| Sidebar | white beside gray | black beside gray | one step away from the text in both |
+| Borders | 1.55:1 | 1.57:1 | same visual weight |
+| Chart categories | 14 Carbon slots | 14 Carbon slots | same hue per slot (≤ 5° drift), lightness inverted; all ≥ 3.0:1 on the page (min 3.03 light, 3.60 dark) |
+| Sequential | Blue 10 → 100 | Blue 100 → 10 | mirrored — lowest value at the page colour |
+| Diverging | Purple ↔ Teal, pale mid | Purple ↔ Teal, dark mid | mirrored; no red/green (red means error; deuteranopia) |
+| Status hues | 7 `TextColor`s pinned | 7 `TextColor`s pinned | no derived wash-out |
+
+**One deliberate deviation from Carbon:** dark slot 6 is Red 30 `#ffb3b8`, not Red 10
+`#fff1f1`. Red 10 measured **1.00:1 against the dark `textColor`** — its bars read as
+white in the preview, so the series lost its red identity across modes. It passed every
+check against the *background*; only checking each palette colour against every surface
+it sits on caught it.
+
+**When the UI is built:**
+
+1. Copy `config.toml` to `.streamlit/config.toml`, and restore `static/fonts/` (the six
+   Plex woff2 files + `LICENSE.txt`) from tag `v0.6.0`
+   (`git checkout v0.6.0 -- static/fonts`); re-add `static/fonts/LICENSE.txt` to
+   `license-files` (§9.1).
+2. Restore a theme guard like the old `TestThemeConfig` (git history, tag `v0.6.0`):
+   both modes present, every key registered, every `<color>TextColor` pinned per mode,
+   font files present with static serving on, a `unicodeRange` per face — and add the
+   new invariants: palette lengths (`chartSequentialColors` and `chartDivergingColors`
+   need exactly 10, or Streamlit silently uses its defaults), every categorical slot
+   ≥ 3:1 against its mode's page **and** not within 1.5:1 of its mode's text colour.
+3. Re-measure the results tab strip for the real layout at its narrowest supported
+   width: the preview measured **442 px** for six tabs at 1280 px, and
+   `baseFontSize = 15` was originally tuned for the old five-tab strip.
+4. Known trade-off: diverging bars near zero nearly vanish in both modes, because the
+   midpoint is the page colour — right for heatmaps, worth knowing for bar charts.
+5. Re-render the preview (or the real app) in both modes before shipping; the capture
+   recipe is CDP with `Emulation.setEmulatedMedia` for the mode (see the old CLAUDE.md's
+   screenshot section at tag `v0.6.0`).
 
 ## Appendix A — kickoff prompt for the implementing session
 
