@@ -4,8 +4,35 @@ Drafted 2026-10-18. Written to be executed in a **fresh session** with no memory
 conversation that produced it — every decision below carries its reason and its evidence,
 so the implementer can tell a load-bearing choice from a default.
 
-**Status:** draft — open questions resolved; awaiting final additions. Nothing here has
-been implemented. **To start implementing, paste Appendix A into a new session.**
+**Status:** complete draft, reviewed cold on 2026-10-18 (18 findings fixed). Nothing here
+has been implemented. **To start implementing, paste Appendix A into a new session.**
+
+## 0. At a glance
+
+**What:** a Python library + `gdi` CLI that turns multi-page PDFs into Markdown/JSON,
+chart CSV + summaries, tables, schema-driven key-values and RAG chunks — locally on a
+16 GB M2 Pro, replacing this repo's Streamlit text app.
+
+**Key decisions** (each argued in its section):
+
+| Decision | Section |
+|---|---|
+| granite-docling-258M-mlx on every page + Granite Vision 4.1 (8-bit, converted locally) on charts and KVP; Docling orchestrates | §2, §3.1–3.2 |
+| MLX for inference, not MLX-only — the picture classifier runs on torch | §2.1 |
+| Floors and caps for `docling` and `mlx-vlm`; any move re-runs the eval | §2.2 |
+| Phase A → release → Phase B, never both models loaded; 10 GB peak ceiling | §3.1, §3.11 |
+| Library first (`convert` returns, `save` writes); CLI is a thin wrapper | §3.7 |
+| Files are the source of truth; no database in v1 | §3.12.1 |
+| PDF content is untrusted; everything loaded or executed is pinned and local | §3.10, §3.13 |
+| Hand-written expected outputs; regressions judged against a baseline with tolerances | §8.1, §8.2 |
+| Apache-2.0 kept; obligations come from copying and publishing | §9.1 |
+| Ten PRs, release 1.0.0 last | §10, §11 |
+
+**Reading order for the implementer:** §0 → §16 (when v1 is done) → §17 (what could
+derail it) → §4 (Phase 0, where work starts) → the rest as each PR needs it.
+
+**v1 vs later:** §1–§13 and §16–§17 are v1. §14 (UI theme) and §15 (UI layout) are
+designed and verified for **v1.x** and must not shape v1 code.
 
 ## 1. Goal
 
@@ -101,6 +128,30 @@ The heavy compute is MLX; the stack is not. Read from Docling's source and
 say plainly that the project is MLX for inference but not MLX-only, since the old app
 was MLX-only in both senses.
 
+### 2.2 Dependency policy (decided 2026-10-18)
+
+The old repo capped `mlx-lm` because its API drifted; the two libraries this plan
+leans on move faster still. Measured on PyPI over the three months to 2026-10-18:
+**docling** shipped **31** releases (2.114 → 2.140), **mlx-vlm 20** (0.6.6 → 0.7.8),
+docling-core 21, mlx 4.
+
+| Package | Constraint in `pyproject.toml` | Why |
+|---|---|---|
+| `docling` | `>=2.140,<3` | its minor *is* its release unit (~2.5 a week) — a minor cap would block every release; the major cap guards a rewrite |
+| `docling-core` | `>=<S1-resolved>,<3` | imported directly (DoclingDocument types), so declared, not left transitive |
+| `mlx-vlm` | `>=0.7.8,<0.8` | pre-1.0, a minor can break the API (0.6 → 0.7 inside the window) — the old `mlx-lm<0.32` precedent; 0.7.8 is the first version researched |
+| `transformers` | `>=5.16,<6` | the effective floor from §2.1, declared so `uv` enforces it instead of a comment |
+| `jsonschema` | `>=4.18` | the `referencing`-based API rule 8 of §3.13 relies on |
+| `mlx` | not declared | floats under `mlx-vlm`, as it did under `mlx-lm` — the lock pins it |
+
+`uv.lock` pins exact versions as today. **Upgrades are deliberate and per package**
+(`uv lock --upgrade-package docling`), never folded into a blanket `uv lock --upgrade`
+alongside unrelated moves. Moving `docling`, `docling-core`, `mlx`, `mlx-vlm`,
+`transformers` or `huggingface-hub` requires, before merge: the eval (§8.1) at or above
+baseline, S10's no-repo-code check re-run, and the vulnerability audit (§3.13 rule 6).
+Moving a cap (`<0.8`, `<3`) is its own PR. Exact floors come from S1's resolution and
+are written in when PR 4 adds the dependencies.
+
 ## 3. Architecture
 
 ### 3.1 Data flow and memory phases
@@ -191,13 +242,18 @@ out/<pdf-stem>/
   charts/chart-001.csv
   charts/chart-001.summary.txt
   charts/chart-001.py      # only with --chart-code
+  pictures/picture-001.png # non-chart pictures (§3.12 rule 2)
+  pages/page-001.png       # only with --save-page-images (§3.12 rule 2)
   kvp.json                 # only with --schema; {"pages": {...}, "merged": {...},
                            #   "conflicts": [...], "valid": bool, "raw": {...}}
   chunks.jsonl             # one chunk per line (§3.9)
-  run.json                 # model ids + revisions, package versions, per-phase timings,
-                           # per-stage and per-page timings + tokens (§3.14),
-                           # peak memory (mx.get_peak_memory), page count, warnings,
-                           # input SHA-256 and the options used (for §3.8 resume)
+  run.json                 # "status" ("ok" | "error") + error type/message (§3.8);
+                           # the four model ids + pinned SHAs (§3.13 rule 1),
+                           # package versions; per-phase, per-stage and per-page
+                           # timings + tokens (§3.14); peak memory; page count;
+                           # warnings incl. pages that hit max_tokens (§3.10);
+                           # output-folder bytes (§3.12 rule 5); input SHA-256 and
+                           # the options used (for §3.8 resume)
 ```
 
 `run.json` is written **last**, and only it marks a PDF as done — a crash mid-export
@@ -208,31 +264,41 @@ so a re-run never leaves files from an earlier run beside a new `run.json`.
 `run.json` exists because every quality question this project has ever had was answered
 by knowing exactly which model, revision and library produced an output.
 
-### 3.6 Package layout (proposal)
+### 3.6 Package layout (decided 2026-10-18; module boundaries may be refined in PR 4)
 
 ```text
 src/granite_document_intelligence/
   __init__.py
-  cli.py          # argparse; console script `gdi`
-  config.py       # model ids, revision pin, env vars (GRANITE_VISION_MLX_PATH, HF_TOKEN)
+  cli.py          # argparse; console script `gdi` (convert-model in PR 4, convert in PR 6)
+  config.py       # model ids + the four pinned SHAs (§3.13 rule 1), paths, env vars
+                  # (GDI_CACHE_DIR, GRANITE_VISION_MLX_PATH, HF_TOKEN)
   api.py          # the public surface (§3.7); cli.py is a thin wrapper over it
+  models.py       # convert_model(): the 8-bit Granite Vision conversion (§4.2, §3.12 rule 3)
   convert.py      # Phase A: build + run the DocumentConverter, then release it
   kvp.py          # Phase B: prompt, generate, parse, validate
   chunk.py        # §3.9
   export.py       # writes §3.5 from a DoclingDocument
   batch.py        # §3.8: input expansion, done-detection, continue-on-error
-  memory.py       # release helper + peak-memory reporting
+  safety.py       # §3.10 limits, %PDF- check, path containment, symlinks; schema checks (§3.13)
+  runlock.py      # §3.14 rule 4: the process-level run lock
+  memory.py       # release helper, cache limit, peak-memory reporting
 ```
 
-`src/` layout so tests import the installed package, not the working directory. CLI:
+`src/` layout so tests import the installed package, not the working directory — which
+needs packaging the old app never had (PR 4): a `[build-system]` (`uv_build`),
+`[project.scripts] gdi = "granite_document_intelligence.cli:main"`, and
+`[tool.pytest.ini_options] pythonpath` no longer `["."]` (tests import the installed
+package). **`GDI_CACHE_DIR`** (default `~/.cache/granite-document-intelligence`) holds
+the converted model and `run.lock`; tests point it at `tmp_path`, so no test touches the
+developer's real cache. CLI:
 
 ```text
 gdi convert INPUT [INPUT ...] -o OUT_DIR      # INPUT: a .pdf or a directory
     [--schema fields.json] [--pages 1,3-4|all]
     [--text-source vlm|pdf] [--no-charts] [--chart-code] [--no-chunks]
-    [--chunk-tokens 512] [--recursive] [--force]
+    [--chunk-tokens 512] [--save-page-images] [--recursive] [--force]
     [--max-pages 500] [--max-file-mb 200] [--quiet] [--no-wait]
-gdi convert-model           # one-time: produce the 8-bit Granite Vision (see Phase 2)
+gdi convert-model [--delete-source]   # one-time: the 8-bit Granite Vision (§4.2, §3.12)
 ```
 
 ### 3.7 Python API
@@ -255,9 +321,10 @@ result = convert(Path("report.pdf"), options=opts)
 
 result.document  # docling_core DoclingDocument
 result.charts  # list[Chart]: index, page_no, csv (str | None), summary, code, image
+result.pictures  # list[Picture]: index, page_no, image (non-chart pictures)
 result.tables  # list[Table]: index, page_no, dataframe, html
 result.kvp  # KvpResult | None: pages, merged, conflicts, valid, raw
-result.chunks  # list[Chunk]: text, contextualized, headings, page_nos
+result.chunks  # list[Chunk]: id, text, contextualized, headings, page_nos, refs, kind
 result.run  # RunInfo: models, versions, timings, peak_memory_bytes, warnings
 
 result.save(Path("out/report"))  # writes the §3.5 tree
@@ -367,11 +434,12 @@ Budgets turn S4/S8's measurements into regression checks that `eval/score.py` en
   **≤ 10 GB**. This comes from the Metal working set (~10.7 GB on 16 GB), not from a
   measurement, so it does not move. If S4 exceeds it, the design changes (the §3.1
   fallback) — the budget is not raised.
-- **Time — set from S8, not guessed:** after S8, record in `eval/budgets.toml` the
-  measured median seconds/page for Phase A (born-digital and scanned separately),
-  seconds per chart for chart extraction, seconds per KVP page, and the cold-start
-  model-load time, each **× 1.25** headroom. Initial values are whatever S8 measures;
-  the plan does not presuppose them.
+- **Time — measured, not guessed:** PR 7 sets `eval/budgets.toml` from **its own
+  baseline run of the production pipeline** — the median of three (§8.2 rule 8)
+  seconds/page for Phase A (born-digital and scanned separately), seconds per chart,
+  seconds per KVP page, and cold-start load time, each **× 1.25** headroom. S8's spike
+  numbers are a sanity reference only (a spike script is not the shipped code); a
+  baseline more than ~25% off S8 is investigated before it is committed.
 - **Degeneration count:** pages that hit `max_tokens` (§3.10) — budget **0** on the
   public corpus.
 - **Enforcement:** `score.py` reports each metric against its budget and fails the run
@@ -527,7 +595,8 @@ everything the program *executes or loads* is pinned and local.
    (GitHub's private advisories) and states the threat model above in two lines. CI's
    third-party actions are pinned to **commit SHAs** with the version in a comment
    (`actions/checkout@<sha> # v7`, `astral-sh/setup-uv@<sha> # v10.0.0`) instead of
-   mutable tags; `TestCIWorkflow`'s pins move with them.
+   mutable tags. `TestCIWorkflow` asserts no `uses:` version today, so it **gains** an
+   assertion that every `uses:` is a 40-hex SHA followed by a `# v…` comment.
 
 ### 3.14 Performance (decided 2026-10-18)
 
@@ -556,8 +625,7 @@ fastest configuration" — and by quality per second through the eval (§8.1).
 4. **One run at a time per Mac.** Two `gdi` processes (two terminals, or a v1.x UI
    beside the CLI) would each load the models and push a 16 GB Mac into swap — the old
    app's `_inference_lock` problem across processes instead of threads. Hold an
-   exclusive `fcntl.flock` on `~/.cache/granite-document-intelligence/run.lock` for the
-   whole run; a second run prints "waiting for another gdi run (pid N)" and waits, or
+   exclusive `fcntl.flock` on `$GDI_CACHE_DIR/run.lock` (§3.6) for the whole run; a second run prints "waiting for another gdi run (pid N)" and waits, or
    exits non-zero with `--no-wait`. The lock is released by the OS if the process dies,
    so a crash cannot leave it stuck.
 5. **MLX's buffer cache is bounded.** Freed buffers stay in MLX's cache and can grow
@@ -585,19 +653,27 @@ fastest configuration" — and by quality per second through the eval (§8.1).
 
 ## 4. Phase 0 — spikes (before any production code)
 
-Each spike is a throwaway script in the scratchpad, not the repo. **Stop and report**
-if one fails; several change the design.
+Each spike is a throwaway script in the scratchpad, not the repo. **Stop and report
+if any spike fails its pass criterion** — S1 and S3 block outright, and S2, S4, S6,
+S7, S10 change the design.
+
+**Scoring in Phase 0.** `eval/score.py` does not exist until PR 7, so the spikes that
+need quality numbers (S6, S7, S11) compare their outputs against the hand-written
+`eval/expected/` files (§4.1) with a scratchpad script applying the §8.1 metrics and
+§8.2 matching rules by hand. PR 7 then **re-runs S6, S7 and the S11 sweep through
+`score.py`** and records whether each verdict still holds; a reversed verdict is a plan
+amendment in that PR.
 
 | # | Question | Pass criterion |
 |---|---|---|
-| S1 | Do `docling>=2.140` (with the `vlm` and chunking extras), `mlx-vlm>=0.7.8` and their `transformers`/`mlx` resolve together on Python 3.12? Does the `granite-embedding-english-r2` tokenizer load via `HuggingFaceTokenizer`? | `uv lock` succeeds in a scratch project; resolved `transformers` is **≥ 5.16** (§2.1); record the resolved `transformers`, `mlx`, `torch` versions; the tokenizer chunks a sample document |
+| S1 | Do `docling>=2.140` (with its `models-vlm-inline` and `feat-chunking` extras), `mlx-vlm>=0.7.8` and their `transformers`/`mlx` resolve together on Python 3.12? Does the `granite-embedding-english-r2` tokenizer load via `HuggingFaceTokenizer`? | `uv lock` succeeds in a scratch project; resolved `transformers` is **≥ 5.16** (§2.1); record the resolved `transformers`, `mlx`, `torch` versions; the tokenizer chunks a sample document |
 | S2 | Does Docling's MLX engine load a **local** 8-bit conversion via `repo_id`? | chart extraction runs from the local path with `HF_HUB_OFFLINE=1`; if only Hub ids work, decide between a private Hub repo and a monkeypatch |
 | S3 | Does the 2025-09 granite-docling MLX conversion (mlx-vlm 0.3.3) load and convert pages under mlx-vlm 0.7.8? Does Docling detect or stop repetition loops, and can a page hitting `max_tokens` be detected from the result? | a 5-page PDF converts with sane Markdown and at least one table; record how a capped page shows up (§3.10) |
 | S4 | Peak memory per phase, and does releasing the converter return GV's memory? Does memory stay flat across a long document (§3.14 rule 5)? | Phase A peak and post-release `mx.get_active_memory()` recorded; Phase B starts below ~5 GB active; whole run stays under ~10 GB on a 20–50 page PDF with charts; per-page peak shows **no upward trend** across the run, with the `mx.set_cache_limit` value that achieves it recorded |
 | S5 | `force_backend_text` on vs off, on one born-digital and one scanned PDF | pick the default from a read of the output, not a metric alone |
 | S6 | 8-bit vs bf16 Granite Vision quality on ~10 charts and one KVP form | CSVs match on values; KVP fields match; if 8-bit degrades, try `--q-bits 6`/bf16 and re-measure S4 |
 | S7 | granite-docling's own `<chart>` → table vs Granite Vision `<chart2csv>` on the same charts | if granite-docling is as good, Granite Vision's chart role shrinks to summaries — record either way |
-| S8 | Throughput | seconds/page for Phase A (born-digital and scanned separately), seconds/chart, seconds/KVP page and cold-start load time; **sustained** pages/min across the 30+ page document, first page to last (§3.14 rule 6); whether a typical PDF exceeds ~5 min (the page-level-resume trigger, rule 7); these seed `eval/budgets.toml` (§3.11) and the README |
+| S8 | Throughput | seconds/page for Phase A (born-digital and scanned separately), seconds/chart, seconds/KVP page and cold-start load time; **sustained** pages/min across the 30+ page document, first page to last (§3.14 rule 6); whether a typical PDF exceeds ~5 min (the page-level-resume trigger, rule 7); a sanity reference for PR 7's budgets (§3.11) and the README's first numbers |
 | S9 | How far toward torch-free can the stack go (§2.1)? (a) Does `docling-slim` with only `format-pdf`, `feat-chunking` and `mlx-vlm` added directly — no `models-vlm-inline` — import and run `VlmPipeline` with `GRANITEDOCLING_MLX` and the MLX chart preset? (b) Does the classifier run on `ONNXRUNTIME` without importing torch (`"torch" not in sys.modules` after a run)? (c) Does granite-docling's DocTags already label picture types, making the classifier redundant? | each answered yes/no with evidence; (a) yes → drop torch from the lock; (b) yes and same chart picks on the corpus → ONNX classifier; (c) yes → note it, but keep Docling's classifier unless S7 says otherwise |
 | S10 | Does any load path execute model-repo code, and do revision overrides reach every loader (§3.13 rules 1–2)? Run `mlx_vlm.convert`, a Phase A conversion and the classifier with every model pinned, then list `sys.modules` entries whose file lives under the HF cache. | **none** from the cache; each of the four pinned SHAs observed at its loader (e.g. via `HF_HUB_OFFLINE=1` with only those revisions cached). Any repo code imported → **stop and report** |
 | S11 | Speed levers under the 10 GB ceiling (§3.14 rules 1–3): page batch size 1/2/4 and CPU–GPU overlap, if Docling or mlx-vlm exposes them; `images_scale` 1.5/2.0/2.5; whether Docling exposes per-stage timing hooks | pages/min, peak memory and eval scores per setting; the shipped setting is the fastest that fits **and** does not regress the eval; batch 1 / scale 2.0 recorded as fallbacks |
@@ -609,8 +685,8 @@ source of truth.
 
 ### 4.1 Task C — assemble the eval corpus (runs alongside the spikes)
 
-The spikes need real PDFs, and S6/S7 are scored through §8.1, so the corpus is built in
-Phase 0, not after. It is a sourcing-and-labelling task, not a decision — the criteria
+The spikes need real PDFs, and S6/S7/S11 are scored against the expected outputs (§4
+"Scoring in Phase 0"), so the corpus is built in Phase 0, not after. It is a sourcing-and-labelling task, not a decision — the criteria
 below are the decision.
 
 **Two tiers, one scorer:**
@@ -666,25 +742,35 @@ uv run python -m mlx_vlm.convert --hf-path ibm-granite/granite-vision-4.1-4b \
 ## 5. Phase 1 — tear down the text app (one commit, gate green)
 
 Delete: `streamlit_app.py`, `.streamlit/`, `static/`, `tests/test_app_ui.py`,
-`docs/images/`.
+`docs/images/`. `README.md` embeds `docs/images/screenshot-dark.png` (line 9), so the
+same commit removes that image line and adds a one-line note that the project is being
+rebuilt (pointing to this plan) — the full rewrite is PR 8.
 
 **Do not delete `docs/plans/ui-theme/`** — it is the v1.x UI's theme (§14), not part of
 the text app. Its `config.toml` references `static/fonts/`, which this step removes;
 §14 says how the UI work restores them. Note in the PR description that `static/fonts/`
 and its OFL licence text are recoverable from tag `v0.6.0`.
 
-**Do not delete `tests/test_streamlit_app.py` wholesale.** Lines ~1337 to the end hold
-the tooling suites — `TestCIWorkflow`, `TestReleaseWorkflow`, `TestHooksConfig` and the
-session-scoped `stub_bin` fixture — which guard `ci.yml`, `release.sh`, `gate.sh` and
-`.claude/settings.json` and carry over unchanged. Move them (with their imports and
-fixtures) to `tests/test_tooling.py`, delete the rest, and confirm the moved suites'
-test count matches before and after.
+**Do not delete `tests/test_streamlit_app.py` wholesale.** From line ~1320 to the end
+(starting at `CI_WORKFLOW` and `_load_ci_workflow()`, which `TestCIWorkflow` and
+`TestReleaseWorkflow` both use) it holds the tooling suites — `TestCIWorkflow`,
+`TestReleaseWorkflow`, `TestHooksConfig`, `_STUB_SOURCES` and the session-scoped
+`stub_bin` fixture — which guard `ci.yml`, `release.sh`, `gate.sh` and
+`.claude/settings.json` and carry over. Move them (with their imports and helpers) to
+`tests/test_tooling.py`, delete the rest, and confirm the moved suites' test count
+matches before and after. Fix the two stale mentions they carry: `TestReleaseWorkflow`'s
+docstring names `TestThemeConfig`, and a comment cites `streamlit_app.py`.
 
-`pyproject.toml`: drop `streamlit`, `mlx-lm`; drop the `static/…` entries from
-`license-files` (the OFL fonts and the favicon leave with `static/`), leaving
-`["LICENSE"]`; set `description` to the §9.2 sentence. Run `uv lock`. The README's License section loses
-its IBM Plex and favicon paragraphs in the same commit, so it never names files that are
-gone.
+`pyproject.toml`: drop `mlx-lm`; **move `streamlit` from `dependencies` into a `ui`
+dependency group** listed with `dev` in `[tool.uv] default-groups`, so the §14/§15
+prototypes (`docs/plans/ui-theme/preview.py`, `docs/plans/ui-layout/layout.py`) keep
+resolving under `ty` and keep running — dropping it outright would turn the gate red on
+their unresolved imports, since ty has no exclude configured. The library never imports
+Streamlit (§1). Drop the `static/…` entries from `license-files` (the OFL fonts and the
+favicon leave with `static/`), leaving `["LICENSE"]`; set `description` to §9.2's
+**interim** sentence (the final one lands in PR 9). Run `uv lock`. The README's License
+section loses its IBM Plex and favicon paragraphs in the same commit, so it never names
+files that are gone.
 
 **`.gitignore` — extend, don't replace.** The existing hand-written file stays as is
 (including `.streamlit/secrets.toml`: a v1.x UI may bring Streamlit back, and the
@@ -731,13 +817,16 @@ bumped (§11).
 
 ## 6. Phase 2 — library
 
-Order: `config.py` → `convert.py` (Phase A) → `export.py` → `memory.py` → `chunk.py`
-→ `kvp.py` (Phase B) → `api.py` → `batch.py` → `cli.py`. Each lands with its tests
-(§8). Write `api.py`'s dataclasses **first** as stubs, so every module after
-`convert.py` targets the public types rather than raw Docling objects. Notes:
+Order: packaging (§3.6) → `config.py` → `models.py` + a minimal `cli.py` exposing only
+`gdi convert-model` → `convert.py` (Phase A) → `export.py` → `memory.py` → `chunk.py` →
+`kvp.py` (Phase B) → `api.py` → `safety.py`, `runlock.py`, `batch.py` → `cli.py`'s
+`gdi convert`. Each lands with its tests (§8). Write `api.py`'s dataclasses **first** as
+stubs, so every module after `convert.py` targets the public types rather than raw
+Docling objects. Notes:
 
 - **Model acquisition.** `gdi convert-model` runs the S2-validated conversion into
-  `~/.cache/granite-document-intelligence/` (override: `GRANITE_VISION_MLX_PATH`),
+  `$GDI_CACHE_DIR` (default `~/.cache/granite-document-intelligence/`; the model path
+  alone can be overridden with `GRANITE_VISION_MLX_PATH`),
   load-tests the result, and offers the bf16-source cleanup in §3.12 rule 3.
   `gdi convert` with a missing conversion fails with the exact command to run — never a
   silent fallback to bf16 or to the Hub.
@@ -770,6 +859,8 @@ Same philosophy as today: **mock at the model boundary**, never download in CI.
   `docs/plans/pdf-pipeline.md` as **not ignored**. Paths need not exist —
   `git check-ignore --no-index` evaluates patterns only. This makes an edit that hides
   the corpus or exposes weights a gate failure, not a file someone misses months later.
+  Also: every `license-files` entry in `pyproject.toml` exists (§9.1 rule 1); every
+  CI `uses:` is a 40-hex SHA with a `# v…` comment (§3.13 rule 9).
 - `test_export.py` — build small `DoclingDocument`s in code (docling-core, no models) and
   assert the §3.5 tree, filenames, CSV contents, and that a chart without
   `tabular_chart` produces no CSV rather than an empty one.
@@ -799,7 +890,9 @@ Same philosophy as today: **mock at the model boundary**, never download in CI.
   startup; a `<pdf>.old/` with no `<pdf>/` (crash mid-swap) is restored; the batch
   summary reports the output size.
 - `test_cli.py` — argument parsing, missing-model error message, exit codes, and that
-  it delegates to `convert_many()` rather than re-implementing resume.
+  it delegates to `convert_many()` rather than re-implementing resume. `gdi
+  convert-model --delete-source` (conversion and HF cache mocked): the source is
+  deleted only after the 8-bit output passes its load test, and never without the flag.
 - `test_safety.py` — the §3.10 rules: a PDF over `--max-pages` / `--max-file-mb` is a
   recorded per-PDF error and the batch continues; a page reported as hitting
   `max_tokens` lands in `run.json` warnings; `chart-NNN.py` carries the untrusted
@@ -1044,7 +1137,9 @@ PRs, not before:
 - **PR 3 (teardown):** set the topics above, and an interim description: *"Being
   rebuilt as a local PDF document-intelligence CLI (IBM Granite + Docling on MLX). See
   docs/plans/pdf-pipeline.md."*
-- **PR 9 (release):** set the final description above; it must match `pyproject.toml`.
+- **PR 9 (release):** set the final description above; it must match `pyproject.toml`,
+  which carries the interim sentence from PR 3 to PR 9 and the final one from PR 9 on —
+  so both public texts always describe what is on `main`.
 
 Both changes go through `gh repo edit` (`--description`, `--add-topic`,
 `--remove-topic`) **after** the PR merges, and only with the user's confirmation at that
@@ -1063,18 +1158,17 @@ One PR per step, each off a fresh branch from `main`, each green in CI before me
 | 1 | `docs/pdf-pipeline-spikes` | spike report (§4) + any plan amendments it forces; no production code | `docs:` | **user approves the spike report** — the design is frozen from here |
 | 2 | `test/eval-corpus` | §4.1 public corpus, `SOURCES.md`, `eval/corpus/README.md`, hand-written expected outputs, `/eval/private/` and `/eval/runs/` in `.gitignore` | `test:` | every file has a licence in `SOURCES.md` |
 | 3 | `feat/teardown` | §5: delete the text app, move the tooling suites, drop deps, extend `.gitignore` and add its `git check-ignore` guard (which also covers PR 2's `eval/` entries), pin CI actions to commit SHAs and move `TestCIWorkflow` with them (§3.13 rule 9) | `feat!:` | moved suites' test count unchanged; description names the orphaned 7.3 GB Granite 4.2 cache entry (§3.12 rule 4); **after merge**, with the user's confirmation: new topics + interim GitHub description (§9.2) and Dependabot alerts on (§3.13 rule 6) |
-| 4 | `feat/phase-a` | deps, `config`, `api` stubs, `convert`, `export`, `memory`, `gdi convert-model` | `feat:` | a hand run on one corpus PDF, numbers in the PR description |
+| 4 | `feat/phase-a` | packaging (`[build-system]`, `[project.scripts]`, `pythonpath`, §3.6), deps under §2.2's constraints, `config`, `models` + minimal `cli` (`gdi convert-model` only), `api` stubs, `convert`, `export`, `memory` | `feat:` | a hand run on one corpus PDF, numbers in the PR description; gate ≤ 15 s (§3.14 rule 9) |
 | 5 | `feat/chunks-kvp` | `chunk`, `kvp` | `feat:` | hand run with a schema on the corpus form |
-| 6 | `feat/cli-batch` | `api` complete, `batch`, `cli`, §3.10 limits | `feat:` | hand run on the whole public corpus |
-| 7 | `test/eval-harness` | `eval/score.py`, `eval/matching.py`, `tests/test_score.py`, `eval/budgets.toml` (budgets + tolerances) from S8, the first results file as **baseline** | `test:` | `test_score.py` green and each bad-prediction case mutation-checked; baseline committed; every budget met (medians of three) |
+| 6 | `feat/cli-batch` | `api` complete, `safety`, `runlock`, `batch`, `gdi convert` | `feat:` | hand run on the whole public corpus |
+| 7 | `test/eval-harness` | `eval/score.py`, `eval/matching.py`, `tests/test_score.py`, `eval/budgets.toml` (budgets + tolerances) from **this PR's own** median-of-three baseline (§3.11), the first results file as **baseline**, and S6/S7/S11 re-run through `score.py` (§4) | `test:` | `test_score.py` green and each bad-prediction case mutation-checked; baseline committed; every budget met; spike verdicts confirmed or amended |
 | 8 | `docs/rewrite` | `CLAUDE.md` and `README.md` rewrites (§9), `SECURITY.md` (§3.13 rule 9) | `docs:` | README commands run as written |
-| 9 | `chore/release-1.0.0` | `version = "1.0.0"` + `uv lock`, **both files** | `chore:` | eval run on the release commit meets baseline and budgets; `pyproject.toml` `description` is the §9.2 sentence; **after merge**, with the user's confirmation: final GitHub description (§9.2) |
+| 9 | `chore/release-1.0.0` | `version = "1.0.0"` + `uv lock`, **both files** | `chore:` | **every §16 item checked**; eval run on the release commit meets baseline and budgets; `pyproject.toml` `description` set to §9.2's final sentence in this PR; **after merge**, with the user's confirmation: final GitHub description (§9.2) |
 
 Rules:
 
 - **Each PR leaves `main` coherent.** After PR 3, `main` is tooling-only — acceptable
-  because nothing is released; the README says so if PR 3 lands well before PR 8 (a
-  one-line "being rewritten" note in PR 3).
+  because nothing is released, and PR 3's README note says so (§5).
 - **No model-touching PR merges on unit tests alone** — the "Merge gate" column is the
   same rule as CLAUDE.md's hand-run smoke test. Until PR 7 exists, the hand run's
   output summary goes in the PR description; from PR 7 on, it is an `eval/score.py`
@@ -1092,20 +1186,37 @@ after the pipeline works end to end; an earlier bump would publish a tag for a
 tooling-only repo. Follow the existing rule: bump `version` in `pyproject.toml`, run
 `uv lock`, land **both** files.
 
-## 12. Open questions
+## 12. Decisions and deferred items
 
-None blocking. Decided 2026-10-18:
+None blocking. **Decided 2026-10-18:** names (§3.7); package layout (§3.6); dependency
+policy (§2.2); eval corpus as a Phase 0 task, public + private tiers (§4.1); chunk size
+512, configurable (§3.9); KVP on page 1 by default (§3.3); chart2code off behind
+`--chart-code`; storage and the atomic swap (§3.12); no database (§3.12.1); security
+model (§3.13); performance rules (§3.14); evaluation rules (§8.2); licensing (§9.1);
+GitHub details (§9.2); UI theme and layout for v1.x (§14, §15).
 
-- Names: `granite_document_intelligence` / `gdi` / `convert`, `convert_many`,
-  `ConvertOptions` (§3.7)
-- Eval corpus: a Phase 0 task with acceptance criteria, public + private tiers (§4.1)
-- Chunk size: default 512, configurable, recorded for resume (§3.9)
-- KVP defaults to **page 1** (§3.3); chart2code **off** behind `--chart-code`; a
-  Streamlit UI is **v1.x roadmap**, not v1 (§1)
+**Settled by a spike** — the plan states the question and the decision rule:
 
-Deferred by design, revisited with evidence: the `--text-source` default (S5), Granite
-Vision's chart role (S7), 6-bit/bf16 instead of 8-bit (S6), and the chunk-size default
-(once an embedding model is chosen).
+| Item | Spike |
+|---|---|
+| local-path model loading | S2 |
+| Phase B ordering in batches (per PDF vs all-A-then-all-B) | S4 |
+| `mx.set_cache_limit` value | S4 |
+| `--text-source` default | S5 |
+| 8-bit vs 6-bit/bf16 Granite Vision | S6 |
+| Granite Vision's chart role | S7 |
+| page-level resume (trigger: typical PDF > ~5 min) | S8 |
+| torch-free install, ONNX classifier | S9 |
+| page batch size, CPU–GPU overlap, `images_scale` | S11 |
+
+**Settled during implementation:** TEDS vs cell-exact for tables (§8.1, PR 7);
+whether `--delete-source` gets more than a mocked test (§8).
+
+**Deferred past v1, with the condition that reopens each:** per-PDF timeout and process
+isolation (§3.10 — if a PDF ever hangs); parser sandboxing (§3.13 rule 4 — if the tool
+processes strangers' PDFs at volume); KVP prompt caching (§3.14 rule 8); a database or
+vector index (§3.12.1 — on its named triggers); the chunk-size default (when an
+embedding model is chosen); the v1.x UI (§14, §15).
 
 ## 13. References (as of 2026-10-18)
 
@@ -1247,16 +1358,63 @@ collapse to one stack at 640 px, which the wrapping grid does better.
 CDP assertion in the screenshot recipe, and re-check `CARD_WIDTH` if `baseFontSize`
 or the gap changes — the 768 px two-per-row margin is ~10 px.
 
+## 16. Definition of done for v1 (1.0.0)
+
+PR 9 merges only when **every** item holds; the PR description ticks each with its
+evidence (a link, a results file, a test name).
+
+- [ ] **Phase 0:** every spike S1–S11 has a verdict in `pdf-pipeline-spikes.md`, the
+      user approved the report (PR 1), and PR 7 confirmed or amended S6/S7/S11.
+- [ ] **Outputs:** `gdi convert` produces the full §3.5 tree for every public-corpus
+      PDF, including `--schema` KVP and `chunks.jsonl`.
+- [ ] **Library:** `convert`, `convert_many`, `ConvertOptions` and the §3.7 result types
+      are public, typed and documented; `convert()` writes nothing.
+- [ ] **Resume and storage:** every §3.8 and §3.12 behaviour has a passing test.
+- [ ] **Safety and security:** every §3.10 and §3.13 rule has a passing test; S10 found
+      no repo code; all four model SHAs pinned and recorded in `run.json`.
+- [ ] **Eval:** baseline committed; the release commit's run (median of three) meets
+      every score within tolerance and every budget; adversarial PDF passes.
+- [ ] **Memory:** peak ≤ 10 GB on every corpus PDF; flat across the 30+ page document.
+- [ ] **Gate:** `GATE_FORCE=1 ./scripts/gate.sh` green and ≤ 15 s; CI green on
+      `macos-26` with SHA-pinned actions.
+- [ ] **Docs:** README and CLAUDE.md rewritten (§9), `SECURITY.md`, the README's
+      measured numbers dated with versions; every README command run as written.
+- [ ] **Licensing:** `license-files` entries all exist (tested); `SOURCES.md` complete;
+      `THIRD_PARTY_NOTICES.md` present if any code was copied (§9.1).
+- [ ] **Release mechanics:** `version = "1.0.0"` and `uv.lock` land together (§11);
+      after merge, with the user's confirmation, the GitHub description (§9.2).
+
+## 17. Risk register
+
+The risks most able to derail v1, each with the earliest signal and the fallback the plan
+already holds. **Rollback point for the whole rebuild: tag `v0.6.0`** — the last release
+of the working text app; `git checkout v0.6.0` restores it intact if the rebuild stalls.
+
+| Risk | Earliest signal | Fallback |
+|---|---|---|
+| Docling's MLX engine won't load a local conversion | S2 | publish the conversion to a private Hub repo, or a narrow, tested monkeypatch (S2 decides) |
+| Memory isn't released between phases, or creeps across pages | S4 | run chart extraction in our own code against one Granite Vision instance (§3.1); `mx.set_cache_limit` |
+| Model-repo code executes despite native transformers | S10 | stop; pin a transformers version that loads natively, or patch the loader — user decides |
+| 8-bit Granite Vision degrades charts or KVP | S6 | 6-bit or bf16, re-measured against the 10 GB ceiling |
+| Too slow to be useful on 16 GB | S8, S11 | batch/scale tuning (S11); page-level resume (§3.14 rule 7); fewer charts by default |
+| A Docling or mlx-vlm release breaks the API mid-build | a lock move fails the eval | §2.2: caps + per-package deliberate upgrades; stay on the locked version |
+| `main` stays tooling-only for weeks after PR 3 | calendar | nothing ships until PR 9; `v0.6.0` remains installable; PR 3's README note says so |
+| The eval corpus can't be licensed cleanly | Task C | public-domain US federal sources + project-made PDFs only (§4.1) |
+
 ## Appendix A — kickoff prompt for the implementing session
 
 Paste this as the first message of a new Claude Code session in this repository. It
 starts Phase 0 only; each later phase begins from the PR table in §10.
 
 ```text
-You are implementing docs/plans/pdf-pipeline.md. Read it in full, then CLAUDE.md.
-The plan was written in an earlier session you have no memory of; it is the single
-source of truth, and every decision in it carries its reason — read the reason before
-deciding a choice is safe to change.
+You are implementing docs/plans/pdf-pipeline.md. Read §0, §16 and §17 first, then the
+rest. The plan was written in an earlier session you have no memory of; it is the
+single source of truth, and every decision in it carries its reason — read the reason
+before deciding a choice is safe to change.
+
+CLAUDE.md describes the OLD Streamlit text app this plan replaces. Follow its tooling
+rules (uv.lock never hand-edited, Conventional Commits, the gate, the hooks); ignore
+its app-specific rules (the smoke test, MODEL_NAME, language_directive, the theme).
 
 Do Phase 0 only (§4): spikes S1–S11 and Task C (§4.1). Nothing else.
 
@@ -1265,8 +1423,10 @@ Do Phase 0 only (§4): spikes S1–S11 and Task C (§4.1). Nothing else.
   plan was researched on 2026-10-18 and says "unverified" where it is.
 - After each spike, add its section to docs/plans/pdf-pipeline-spikes.md: exact
   versions, what you ran, the numbers, the verdict, and any amendment it forces.
-- If a spike fails its pass criterion, STOP and report to me with the options before
-  continuing — several spikes change the design (S2, S4, S6, S7, S10).
+- If ANY spike fails its pass criterion, STOP and report to me with the options before
+  continuing — S1 and S3 block outright; S2, S4, S6, S7 and S10 change the design.
+- score.py does not exist yet: score S6, S7 and S11 against eval/expected/ with a
+  scratchpad script, as §4 "Scoring in Phase 0" describes.
 - Task C: source the public corpus under §4.1's licensing rule and draft the expected
   outputs. Ask me for (a) the PDFs for the private tier and (b) the print-and-scan
   step, which needs my hands.
