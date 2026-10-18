@@ -27,8 +27,10 @@ Inputs: one or more PDFs, **or a directory** of them, with resume (§3.8).
 
 - No UI. A Streamlit front end is on the **roadmap for v1.x**, built *on top of* the
   §3.7 library API; nothing in v1 may assume one, and the library must stay usable
-  without Streamlit installed.
-- No embeddings or vector store — v1 stops at `chunks.jsonl`.
+  without Streamlit installed. If it needs fast listings, it gets a rebuildable SQLite
+  cache (§3.12.1), never a second source of truth.
+- No embeddings, vector store or database — v1 stops at `chunks.jsonl`; files are the
+  source of truth, and any later store is a derived index (§3.12.1).
 - No output localization. **English only** — Granite Vision 4.1 accepts English
   instructions only, and granite-docling is English-primary (Japanese, Arabic and
   Chinese are "experimental" on its card).
@@ -423,6 +425,30 @@ Five rules:
    torch-including environment) and **~6 GB after** deleting the source — estimates
    until S1 (environment size) and S8 (output size per page) measure them; replace them
    with the measured figures.
+
+#### 3.12.1 Persistence — no database in v1 (decided 2026-10-18)
+
+**Rule: files in `OUT_DIR` are the source of truth. Any database added later is a
+derived index — rebuildable from `OUT_DIR` by a scan, and deletable without loss.**
+
+Why no database now: every PDF's output is independent and written once; `run.json`
+already holds the per-PDF record resume needs (§3.8); and a second store of "done"
+state would reintroduce the drift the atomic swap (rule 1) closes — a crash between
+the folder swap and a database write leaves the two disagreeing. Plain CSV, Markdown
+and JSONL also need no export step for the user.
+
+When a database earns its place, and which:
+
+| Trigger | Choice | Why this one |
+|---|---|---|
+| Querying across many processed PDFs (all charts on a topic, every invoice total over X) | **DuckDB**, reading the output files in place | SQL over `OUT_DIR/*/charts/*.csv`, `*/kvp.json`, `*/chunks.jsonl` with **no ingestion** — the files stay the only copy, so nothing can drift. Embedded, single-file. The §3.5 layout *is* its schema, so changing that layout is a breaking change for any saved query. |
+| Search / RAG over chunks (the roadmap after `chunks.jsonl`) | **LanceDB** or **SQLite + sqlite-vec** — choose with a spike when embeddings arrive | Both embedded, no server. Either is a derived index rebuilt from `chunks.jsonl` plus the chosen embedding model; record the embedding model id and `chunk_tokens` in the index so a mismatch forces a rebuild. |
+| The v1.x UI needs fast listings and run history | **SQLite** (Python stdlib) | A cache of `run.json` contents, rebuilt by scanning `OUT_DIR`; delete it and it rebuilds — the same contract as `scripts/gate.sh`'s memo. |
+
+**Avoid server databases** (Postgres + pgvector, a Chroma or Qdrant server,
+Elasticsearch): a single-user, local-first tool on a 16 GB Mac would pay for one in
+memory against the 10 GB Metal budget, in operations, and in the "no network beyond
+the Hugging Face Hub" stance (§3.10). Revisit only if the tool becomes multi-user.
 
 ## 4. Phase 0 — spikes (before any production code)
 
