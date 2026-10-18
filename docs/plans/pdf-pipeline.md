@@ -488,7 +488,8 @@ below are the decision.
   be found); a **scanned** multi-page document; a **form** for KVP; and one **30+ page**
   document for memory and throughput.
 - **Private** — `eval/private/corpus/` + `eval/private/expected/`, **gitignored** (add
-  `eval/private/` to `.gitignore` in the same commit). For the user's own PDFs, which are
+  `/eval/private/` and `/eval/runs/` to `.gitignore` in the same commit — the latter is
+  where `score.py` writes its conversions, §8.1). For the user's own PDFs, which are
   what the pipeline must actually handle well and are likely not shareable. `score.py`
   scores it when present and says so in its output; absent, it is skipped silently.
 
@@ -546,6 +547,46 @@ test count matches before and after.
 its IBM Plex and favicon paragraphs in the same commit, so it never names files that are
 gone.
 
+**`.gitignore` — extend, don't replace.** The existing hand-written file stays as is
+(including `.streamlit/secrets.toml`: a v1.x UI may bring Streamlit back, and the
+hook's secret guard still names it). A generic template would add dozens of irrelevant
+entries and still miss this plan's paths. Here `.gitignore` configures three tools, not
+one: **git**; **ruff**, which respects it by default — a non-ignored output folder puts
+model-generated `chart-NNN.py` under `ruff check .` / `ruff format --check .` and fails
+the gate; and **`scripts/gate.sh`'s memo**, which fingerprints
+`git ls-files -co --exclude-standard`, so every non-ignored output file would be hashed
+on each Stop and invalidate the memo on every run. Add, in this PR:
+
+```gitignore
+# Pipeline output (§3.5) — kept out of git, ruff and the gate's fingerprint
+/out/
+*.partial/
+*.old/
+
+# Docling's --debug-vlm-native-output writes debug_<document>/ in the working dir
+debug_*/
+
+# Model weights must never be committed (8-bit GV is ~4.65 GB)
+/models/
+*.safetensors
+*.gguf
+*.npz
+
+# User documents dropped at the repo root; the corpus lives in eval/corpus/
+/*.pdf
+
+# Packaging (src/ layout, uv build)
+build/
+dist/
+*.egg-info/
+```
+
+Anchoring is deliberate: `/*.pdf` catches private documents at the root without hiding
+the committed `eval/corpus/*.pdf` (an unanchored `*.pdf` would), and `/out/` ignores
+only the top-level folder. Left out on purpose: coverage files (no coverage tool
+planned) and a ty cache (unverified that one exists — add it when it appears). The
+`eval/` entries land with the corpus in PR 2 (§4.1).
+
 At this point the repo is tooling-only, the gate is green, and `version` is **not** yet
 bumped (§11).
 
@@ -582,7 +623,14 @@ Order: `config.py` → `convert.py` (Phase A) → `export.py` → `memory.py` �
 
 Same philosophy as today: **mock at the model boundary**, never download in CI.
 
-- `test_tooling.py` — moved verbatim (§5).
+- `test_tooling.py` — moved verbatim (§5), plus a `.gitignore` guard in the style of
+  `TestHooksConfig`: `git check-ignore` reports `out/x/chart-001.py`,
+  `models/a.safetensors`, `report.pdf`, `eval/private/x.pdf`, `eval/runs/x/run.json`
+  and `debug_report/x` as **ignored**, and `eval/corpus/x.pdf`,
+  `eval/expected/x/chart-001.csv`, `eval/results/x.json`, `.env.example` and
+  `docs/plans/pdf-pipeline.md` as **not ignored**. Paths need not exist —
+  `git check-ignore --no-index` evaluates patterns only. This makes an edit that hides
+  the corpus or exposes weights a gate failure, not a file someone misses months later.
 - `test_export.py` — build small `DoclingDocument`s in code (docling-core, no models) and
   assert the §3.5 tree, filenames, CSV contents, and that a chart without
   `tabular_chart` produces no CSV rather than an empty one.
@@ -641,6 +689,8 @@ the old app with a scored check.
   - document: expected headings present, page count
   - run: wall time, seconds/page, seconds/chart, peak memory, pages that hit
     `max_tokens` — each checked against `eval/budgets.toml` (§3.11)
+- **Working output:** `score.py` converts into `eval/runs/<date>-<git-sha>/`
+  (gitignored); only the small results summary below is ever committed.
 - **Output:** a Markdown table to stdout plus `eval/results/<date>-<git-sha>.json`, so
   two runs (bf16 vs 8-bit, old vs new Docling) diff mechanically. Results files are
   committed when they back a decision, as the old app's A/B figures were recorded in
@@ -738,8 +788,8 @@ One PR per step, each off a fresh branch from `main`, each green in CI before me
 |---|---|---|---|---|
 | 0 | `docs/pdf-pipeline-plan` | this plan | `docs:` | user approval |
 | 1 | `docs/pdf-pipeline-spikes` | spike report (§4) + any plan amendments it forces; no production code | `docs:` | **user approves the spike report** — the design is frozen from here |
-| 2 | `test/eval-corpus` | §4.1 public corpus, `SOURCES.md`, hand-written expected outputs, `eval/private/` in `.gitignore` | `test:` | every file has a licence in `SOURCES.md` |
-| 3 | `feat/teardown` | §5: delete the text app, move the tooling suites, drop deps | `feat!:` | moved suites' test count unchanged; description names the orphaned 7.3 GB Granite 4.2 cache entry (§3.12 rule 4) |
+| 2 | `test/eval-corpus` | §4.1 public corpus, `SOURCES.md`, `eval/corpus/README.md`, hand-written expected outputs, `/eval/private/` and `/eval/runs/` in `.gitignore` | `test:` | every file has a licence in `SOURCES.md` |
+| 3 | `feat/teardown` | §5: delete the text app, move the tooling suites, drop deps, extend `.gitignore` and add its `git check-ignore` guard (which also covers PR 2's `eval/` entries) | `feat!:` | moved suites' test count unchanged; description names the orphaned 7.3 GB Granite 4.2 cache entry (§3.12 rule 4) |
 | 4 | `feat/phase-a` | deps, `config`, `api` stubs, `convert`, `export`, `memory`, `gdi convert-model` | `feat:` | a hand run on one corpus PDF, numbers in the PR description |
 | 5 | `feat/chunks-kvp` | `chunk`, `kvp` | `feat:` | hand run with a schema on the corpus form |
 | 6 | `feat/cli-batch` | `api` complete, `batch`, `cli`, §3.10 limits | `feat:` | hand run on the whole public corpus |
