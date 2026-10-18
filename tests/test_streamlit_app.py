@@ -1770,7 +1770,7 @@ class TestReleaseWorkflow:
         "reported",
         [
             pytest.param("uv 0.6.14", id="uv-own-version"),
-            pytest.param("granite-text-intelligence 9.9.9", id="name-and-version"),
+            pytest.param("granite-document-intelligence 9.9.9", id="name-and-version"),
             pytest.param("0.1.0 (from pyproject.toml)", id="decorated"),
             pytest.param("", id="empty"),
         ],

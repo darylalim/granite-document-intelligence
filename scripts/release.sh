@@ -52,7 +52,7 @@ version=$(uv version --short) || {
 }
 
 # Rejects every shape `uv version` prints that is not a bare version — "uv 0.6.14"
-# and "granite-text-intelligence 0.1.0" fail the leading-digit test — and anything
+# and "granite-document-intelligence 0.1.0" fail the leading-digit test — and anything
 # carrying a character that has no business in a tag. Checking only the first
 # character would admit "0.1.0 (from pyproject.toml)" and any future stdout
 # decoration that happens to lead with a digit, and tag it verbatim.

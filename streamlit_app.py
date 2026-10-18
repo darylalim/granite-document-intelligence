@@ -245,7 +245,7 @@ _LOCALIZED_TOKEN_MULTIPLIER = 2
 _PAGE_ICON = Path(__file__).parent / "static" / "icons" / "psychology.svg"
 
 st.set_page_config(
-    page_title="Granite Text Intelligence",
+    page_title="Granite Document Intelligence",
     page_icon=_PAGE_ICON,
     # Wide, because the sidebar takes 300 px of the viewport and the input and
     # results panels are full-width blocks in what is left; the centered layout
@@ -831,7 +831,7 @@ with st.sidebar:
         f"input capped at {MAX_INPUT_TOKENS:,} tokens"
     )
 
-st.title("Granite Text Intelligence")
+st.title("Granite Document Intelligence")
 
 # ---- Input: Text > Upload > Sample (first non-empty wins) ----
 text_tab, upload_tab, sample_tab = st.tabs(

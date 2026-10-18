@@ -1,5 +1,5 @@
 [project]
-name = "granite-text-intelligence"
+name = "granite-document-intelligence"
 version = "0.5.0"
 description = "Streamlit application for summarization, topic, intent, and sentiment analysis using IBM Granite on Apple Silicon with MLX."
 license = "Apache-2.0"
