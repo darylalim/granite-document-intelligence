@@ -155,8 +155,11 @@ exists to avoid. So:
 
 - Reuse Docling's **prompt formatting** for `ExtractionPromptStyle.GRANITE_VISION`
   (find it under `docling/models/extraction/`) rather than inventing one — it is IBM's
-  integration of IBM's prompt format. If it is private API, copy it with attribution and
-  a comment naming the source file and Docling version.
+  integration of IBM's prompt format. Import it if it is public API. If it is private
+  and must be copied, the copy carries **Docling's MIT notice** — copyright line and
+  licence text in `THIRD_PARTY_NOTICES.md`, and a header comment on the copied code
+  naming the source file, the Docling version and that file (§9.1). Attribution alone
+  does not satisfy MIT.
 - Run it with `mlx_vlm` against the 8-bit model, **greedy** (`temperature=0.0`).
 - Parse defensively — first JSON object in the output (the current app's
   `parse_json_output` is a proven implementation; port it with its tests).
@@ -509,7 +512,9 @@ model-written expectation would score the model against itself). This, not findi
 files, is most of the effort — budget for it. Keep the corpus small enough (target
 < 20 MB) that cloning the repo stays cheap.
 
-**Done when:** the public tier covers every bullet above, `SOURCES.md` has a licence for
+**Done when:** `eval/corpus/README.md` states that the corpus files keep their own
+licences and are not covered by the project's `LICENSE` (§9.1), the public tier covers
+every bullet above, `SOURCES.md` has a licence for
 every file, and `eval/expected/` holds hand-verified chart CSVs, table CSVs, a KVP schema
 with its expected JSON, and the must-appear headings.
 
@@ -536,7 +541,10 @@ fixtures) to `tests/test_tooling.py`, delete the rest, and confirm the moved sui
 test count matches before and after.
 
 `pyproject.toml`: drop `streamlit`, `mlx-lm`; drop the `static/…` entries from
-`license-files`; rewrite `description`. Run `uv lock`.
+`license-files` (the OFL fonts and the favicon leave with `static/`), leaving
+`["LICENSE"]`; rewrite `description`. Run `uv lock`. The README's License section loses
+its IBM Plex and favicon paragraphs in the same commit, so it never names files that are
+gone.
 
 At this point the repo is tooling-only, the gate is green, and `version` is **not** yet
 bumped (§11).
@@ -667,6 +675,57 @@ the old app with a scored check.
 - **README usage example** uses one PDF from the §8.1 corpus, so the documented
   command is one the eval actually exercises.
 - **Python API** documented in the README with the §3.7 example.
+
+### 9.1 Licensing (decided 2026-10-18)
+
+**The project stays Apache-2.0.** Everything the new stack uses is permissive — checked
+on PyPI and Hugging Face that day:
+
+| Component | Licence |
+|---|---|
+| granite-docling-258M-mlx, granite-vision-4.1-4b, granite-embedding-english-r2 | Apache-2.0 |
+| DocumentFigureClassifier-v2.5 | MIT |
+| docling, docling-core, docling-parse, docling-ibm-models | MIT |
+| mlx, mlx-vlm | MIT |
+| transformers | Apache-2.0 |
+| torch | Apache-2.0 / BSD / MIT mix |
+| pypdfium2 | BSD-3-Clause / Apache-2.0 |
+| jsonschema | MIT |
+
+No copyleft forces a choice. Apache-2.0 is kept over MIT for its **explicit patent
+grant**, it matches IBM's licence for the Granite models, and it is already wired
+(`LICENSE`, PEP 639 `license` / `license-files`). Dependencies installed by `uv` create
+no obligation — they are not redistributed. Obligations come from **copying** and
+**publishing**:
+
+1. **Copied third-party code carries its notice.** If any Docling code is copied (§3.3),
+   add `THIRD_PARTY_NOTICES.md` with Docling's copyright line and the full MIT text, add
+   it to `license-files`, and put a header comment on the copied code pointing to it.
+   The same applies to anything else copied in later. `test_tooling.py` (or a small new
+   test) asserts that every `license-files` entry exists — the old app's
+   `license-files` named vendored fonts for the same reason.
+2. **`license-files` after teardown** is `["LICENSE"]`, plus `THIRD_PARTY_NOTICES.md`
+   once (1) applies (§5).
+3. **The eval corpus is not under the project licence.** Public-domain files (US federal
+   works, IRS forms) need nothing; **CC BY files need attribution**, and
+   `eval/corpus/SOURCES.md` *is* that attribution — so each CC BY entry names the
+   author, title, source, licence and any changes, per CC BY's terms.
+   `eval/corpus/README.md` says the files keep their own licences. The project's own
+   scans and the hand-written expected outputs are Apache-2.0 like the rest of the repo.
+4. **The 8-bit conversion is a derivative of Apache-2.0 weights.** It is produced
+   locally and never redistributed, so nothing is owed today. **Publishing it** (to the
+   Hub or anywhere) would require shipping the Apache-2.0 licence and a prominent notice
+   that the weights were modified (quantized to 8-bit, with the source revision) — no
+   one uploads it without adding both.
+5. **Output rights follow the input.** The Apache-2.0 models restrict nothing they
+   generate, but Markdown, tables and chart data extracted from a copyrighted PDF are
+   still derived from that PDF. The README says so in one line, so the tool never
+   implies its output is free to reuse.
+
+The README's License section is rewritten to match: project code Apache-2.0, models
+downloaded at runtime under their own Apache-2.0/MIT licences (not vendored), the
+corpus under its own licences (pointing to `SOURCES.md`), and — if it exists —
+`THIRD_PARTY_NOTICES.md`.
 
 ## 10. Delivery — branches and pull requests
 
