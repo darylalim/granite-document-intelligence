@@ -28,8 +28,8 @@ Inputs: one or more PDFs, **or a directory** of them, with resume (§3.8).
 - No UI. A Streamlit front end is on the **roadmap for v1.x**, built *on top of* the
   §3.7 library API; nothing in v1 may assume one, and the library must stay usable
   without Streamlit installed. If it needs fast listings, it gets a rebuildable SQLite
-  cache (§3.12.1), never a second source of truth. Its theme is already designed and
-  verified (§14).
+  cache (§3.12.1), never a second source of truth. Its theme (§14) and responsive
+  layout (§15) are already designed and verified.
 - No embeddings, vector store or database — v1 stops at `chunks.jsonl`; files are the
   source of truth, and any later store is a derived index (§3.12.1).
 - No output localization. **English only** — Granite Vision 4.1 accepts English
@@ -956,6 +956,75 @@ it sits on caught it.
 5. Re-render the preview (or the real app) in both modes before shipping; the capture
    recipe is CDP with `Emulation.setEmulatedMedia` for the mode (see the old CLAUDE.md's
    screenshot section at tag `v0.6.0`).
+
+## 15. v1.x UI layout (designed 2026-10-18)
+
+Not v1 work — like §14, recorded so the UI starts from a measured design. Everything
+lives in **`docs/plans/ui-layout/`**: `layout.py` (the prototype; passes ruff and ty,
+so the gate covers it) and three captures — `390-and-768.png` (phone beside tablet),
+`1280.png`, and `2560-half-scale.png`.
+
+**The constraint that shapes it:** Streamlit gives the script no viewport width
+(`st.context` has `theme`, `locale`, `url` and others, but no width — checked on
+1.64.0), so **nothing may branch on screen size**. Every adaptation is the browser's,
+from two behaviours measured in headless Chrome:
+
+1. A horizontal `st.container` **wraps** its children onto new rows when they don't fit.
+2. An integer `width=` acts as a **maximum**: a 760 px column or a 344 px card shrank to
+   a 330 px phone's content width with no horizontal overflow.
+
+**The layout**, measured at 360, 390, 768, 1024, 1280, 1440, 1920 and 2560 px — page
+horizontal overflow **0 at every width**:
+
+| Region | Built with | Phone 360–390 | Tablet 768 | Laptop 1024 / 1280–1440 | Wide 1920 / 2560 |
+|---|---|---|---|---|---|
+| Settings | `st.sidebar` (settings only, never Convert or results) | collapsed | collapsed | open, 300 px | open |
+| Convert row | horizontal container: button + one caption | caption under button | 1 line | 1 line | 1 line |
+| Counts | 4 × `st.metric(border=True, width=130)` in a horizontal container | 2 × 2 | 1 row | 1 row | 1 row |
+| Notices | `st.empty()` slot (the old app's reason holds: a container keeps stale notes) | — | — | — | — |
+| View switcher | `st.pills`, single-select, `bind="query-params"` | 2 rows, all visible | 1 row | 1 row | 1 row |
+| Chart cards | horizontal container of `st.container(border=True, width=344)` | 1 / row | 2 / row | 1 / 2 per row | 4 / 5 per row |
+| Document text | `st.container(width=760)` | fills width | fills width | max 760 | max 760 — a readable line |
+| Tables | `st.dataframe(width="content")` | scrolls inside itself | natural width | natural width | natural width, no stretched columns |
+
+**Why pills, not tabs** — four switchers measured with the six view labels:
+
+| Switcher | Phone | 768 | 1024 (sidebar open) | ≥ 1280 |
+|---|---|---|---|---|
+| `st.tabs` | **2 of 6 labels hidden** behind a scroll chevron | 1 row | 1 row | 1 row |
+| **`st.pills`** | **2 rows, all visible** | 1 row | 1 row | 1 row |
+| `st.segmented_control` | 2 rows | 1 row | 2 rows | 1 row |
+| `st.radio(horizontal=True)` | 3 rows | 2 rows | 3 rows | 2 rows |
+
+Pills also make views **lazy by construction** — only the selected view's code runs, so
+a PDF with 40 charts does not render them to show the Tables view — and binding the
+key to the URL makes a view linkable.
+
+**Behaviour, tested with `AppTest`:** clicking the selected pill off would leave no
+view, so an `on_change` callback restores the last one (`_keep_view` in the
+prototype) — deselect left the view on Tables with no exception; selecting Tables
+rendered its dataframe and no chart; `?view=…` seeded the Document view.
+
+**Values that came from measuring, not taste:**
+
+- Count tiles at 150 px wrapped **3 + 1** at 1024 px; at 130 they hold one row of four
+  from 574 px of content and go 2 × 2 on a phone.
+- Cards at 440 px gave **one per row on a 1280 px laptop**; at 360 they missed two per
+  row at 768 px by ~6 px (the `medium` gap); 344 gives 1-2-1-2-2-4-5 across the eight
+  widths.
+- 760 px keeps prose readable on wide displays; it is a maximum, so phones are
+  unaffected.
+
+**Accepted trade-offs:** at 1024 px the open sidebar leaves 574 px, so one card per row
+(inherent to the 300 px sidebar, as in the old app); on 2560 px the card grid is
+left-aligned with free space to its right, chosen over centring so cards stay aligned
+with the text above them. No `st.columns` for content — they hold a fixed count and
+collapse to one stack at 640 px, which the wrapping grid does better.
+
+**When the UI is built:** re-measure with real content at the same eight widths
+(chart crops and long table headers change widths), keep the 0-overflow check as a
+CDP assertion in the screenshot recipe, and re-check `CARD_WIDTH` if `baseFontSize`
+or the gap changes — the 768 px two-per-row margin is ~10 px.
 
 ## Appendix A — kickoff prompt for the implementing session
 
