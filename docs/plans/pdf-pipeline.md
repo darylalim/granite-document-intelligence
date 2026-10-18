@@ -486,8 +486,10 @@ below are the decision.
 
 - **Public** — `eval/corpus/` + `eval/expected/`, committed. 4–6 PDFs covering, between
   them: bar, line and pie charts; tables (at least one spanning a page break if one can
-  be found); a **scanned** multi-page document; a **form** for KVP; and one **30+ page**
-  document for memory and throughput.
+  be found); a **scanned** multi-page document; a **form** for KVP; one **30+ page**
+  document for memory and throughput; at least one **non-chart picture** (a photo or
+  diagram, for false-positive chart detection, §8.2); and one **adversarial** PDF
+  made by the project (§8.2) — so 5–7 PDFs in all.
 - **Private** — `eval/private/corpus/` + `eval/private/expected/`, **gitignored** (add
   `/eval/private/` and `/eval/runs/` to `.gitignore` in the same commit — the latter is
   where `score.py` writes its conversions, §8.1). For the user's own PDFs, which are
@@ -671,6 +673,10 @@ Same philosophy as today: **mock at the model boundary**, never download in CI.
   header and nothing imports it; an output path that would resolve outside the output
   directory is refused; a symlink out of the input directory is skipped with a warning;
   `Image.MAX_IMAGE_PIXELS` is unchanged after a run.
+- `test_score.py` — the eval scorer and `eval/matching.py` on synthetic pairs (§8.2
+  rule 9): deliberately bad predictions must lower each score, normalization and
+  pairing rules behave as written, and a committed results file containing a private
+  path is refused. Runs in CI like every other test — it needs no model.
 
 **CI cost check:** `docling` pulls `torch`; measure `uv sync --locked` time on the
 `macos-26` runner in the first PR and record it. The job's 15-minute timeout is the
@@ -702,12 +708,81 @@ the old app with a scored check.
   committed when they back a decision, as the old app's A/B figures were recorded in
   CLAUDE.md.
 - **Pass/fail:** no fixed bar in v1 — the first run on the shipped configuration *is*
-  the baseline, and a change fails if it drops any score below it. S6 (8-bit vs bf16)
+  the baseline, and a change fails if it drops any score below it **by more than that
+  metric's tolerance** (§8.2 rule 1). S6 (8-bit vs bf16)
   and S7 (granite-docling vs Granite Vision charts) should be run **through this
   harness** once it exists, and re-run if the spike-time conclusions are revisited.
 - **Meaningfulness, not just parse rate:** the scorer must compare values, never only
   "did it parse" — the old app learned that a script check passes degenerate output
   (CLAUDE.md, 2026-08-12 design decision).
+
+### 8.2 Evaluation rules (decided 2026-10-18)
+
+The harness above says *what* is compared; these rules say *how* a comparison is made
+and *how* a failure is judged. Without them a score can move because of a matching
+detail rather than a quality change.
+
+1. **Tolerances and re-baselining.** `eval/budgets.toml` carries a per-metric
+   regression tolerance next to the time budgets (proposed: 0 for KVP field matches and
+   chart/table counts; 1 percentage point for cell-match rates; 0.01 for text edit
+   distance). A change that **intends** to move a score — a Docling upgrade that writes
+   `41` for `41.0`, a better model — re-baselines through a PR that commits the new
+   `eval/results/` file and states, per moved metric, why the new value is right. A
+   re-baseline is never a side effect of another change, and lowering a baseline needs
+   the user's approval in that PR.
+2. **Document text is scored, not just headings.** For born-digital PDFs the PDF's own
+   text layer (`pypdfium2`) is a free reference: score normalized edit distance of
+   `document.md`'s text against it, and reading order as the rank correlation of
+   paragraph positions. For the print-and-scan file the born-digital original is the
+   reference (§4.1 already derives its expected output that way). Normalize before
+   comparing — whitespace, hyphenation at line ends, ligatures, Unicode NFKC — and
+   strip Markdown syntax from the prediction.
+3. **Matching rules are written down.** A predicted chart or table pairs with an
+   expected one on the **same page** by **reading order**; if counts differ on a page,
+   pair by bounding-box IoU ≥ 0.5 from the DoclingDocument provenance, and anything
+   unpaired is a miss or a false positive. Values are normalized before comparison:
+   strip thousands separators and currency symbols, parse `12%` as 12 with a `%` unit,
+   treat `−` (U+2212) as `-`, and compare numbers within the 1% relative tolerance;
+   headers compare case- and whitespace-insensitively. These rules live in
+   `eval/matching.py` with their own tests (rule 9).
+4. **Chart summaries and chunks are checked.**
+   - Summaries: a **hallucination check** — every number in a summary must appear,
+     within tolerance, in that chart's expected CSV (or be a simple derivative: a
+     difference, a ratio, a year); report the unsupported-number rate per chart.
+   - Chunks: each chunk ≤ `chunk_tokens` by the configured tokenizer; every
+     `page_nos` entry is a page the chunk's text actually comes from (checked against
+     the text-layer reference); heading breadcrumbs match the expected headings.
+5. **False positives count.** Chart detection reports precision as well as recall: a
+   photo or diagram treated as a chart produces a bogus CSV, and that is scored. The
+   corpus carries at least one non-chart picture for it (§4.1).
+6. **One adversarial PDF.** Made by the project (so licence-clean, Apache-2.0): a form
+   page with visible *and* white-on-white text instructing the model to ignore the
+   schema and output something else, plus a page built to trigger a repetition loop
+   (e.g. a long run of identical table rows). Pass = KVP output still schema-valid and
+   not the injected content; the loop page appears in `run.json` warnings (§3.10). It
+   is scored, but kept out of the quality averages so it cannot mask a regression.
+7. **Private results never reach git.** Private-tier runs write to
+   `eval/private/results/` (already gitignored via `/eval/private/`), never
+   `eval/results/`. The committed results file carries **only aggregate private
+   numbers** (counts and mean scores, no filenames, page text or extracted values),
+   and `score.py` refuses to write a committed results file containing a private
+   path. `test_score.py` pins that refusal.
+8. **Timing is a median of three.** Each PDF runs three times on an otherwise idle Mac
+   (on power, not battery); time metrics use the median, memory uses the maximum. One
+   cold run is recorded separately as cold-start. Budgets (§3.11) compare medians only.
+9. **The scorer is tested in CI.** `tests/test_score.py` runs the scoring and matching
+   functions on synthetic pairs — no models, no corpus PDFs — including **deliberately
+   bad** predictions that must lower the score: a wrong cell, swapped rows, a missing
+   chart, an extra chart, a hallucinated summary number, an oversized chunk, a private
+   path in a committed result. Each was mutation-checked: a scorer that passes
+   everything fails this file. The same lesson as `gate.sh`'s exit code — a check must
+   be shown to fail before its passes mean anything.
+10. **The corpus is for regressions, not model selection.** 5–7 PDFs and ~10 charts can
+    show that a change made things worse; they cannot show which of two models is
+    better in general. S6 (8-bit vs bf16) and S7 (granite-docling vs Granite Vision for
+    charts) record their sample size beside the verdict and state the decision as
+    "no measurable regression on this corpus", not as a general ranking. A choice that
+    matters beyond that needs a larger, purpose-built set.
 
 ## 9. Documentation
 
@@ -845,7 +920,7 @@ One PR per step, each off a fresh branch from `main`, each green in CI before me
 | 4 | `feat/phase-a` | deps, `config`, `api` stubs, `convert`, `export`, `memory`, `gdi convert-model` | `feat:` | a hand run on one corpus PDF, numbers in the PR description |
 | 5 | `feat/chunks-kvp` | `chunk`, `kvp` | `feat:` | hand run with a schema on the corpus form |
 | 6 | `feat/cli-batch` | `api` complete, `batch`, `cli`, §3.10 limits | `feat:` | hand run on the whole public corpus |
-| 7 | `test/eval-harness` | `eval/score.py`, `eval/budgets.toml` from S8, the first results file as **baseline** | `test:` | baseline committed; every budget met |
+| 7 | `test/eval-harness` | `eval/score.py`, `eval/matching.py`, `tests/test_score.py`, `eval/budgets.toml` (budgets + tolerances) from S8, the first results file as **baseline** | `test:` | `test_score.py` green and each bad-prediction case mutation-checked; baseline committed; every budget met (medians of three) |
 | 8 | `docs/rewrite` | `CLAUDE.md` and `README.md` rewrites (§9) | `docs:` | README commands run as written |
 | 9 | `chore/release-1.0.0` | `version = "1.0.0"` + `uv lock`, **both files** | `chore:` | eval run on the release commit meets baseline and budgets; `pyproject.toml` `description` is the §9.2 sentence; **after merge**, with the user's confirmation: final GitHub description (§9.2) |
 
