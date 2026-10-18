@@ -195,6 +195,7 @@ out/<pdf-stem>/
                            #   "conflicts": [...], "valid": bool, "raw": {...}}
   chunks.jsonl             # one chunk per line (§3.9)
   run.json                 # model ids + revisions, package versions, per-phase timings,
+                           # per-stage and per-page timings + tokens (§3.14),
                            # peak memory (mx.get_peak_memory), page count, warnings,
                            # input SHA-256 and the options used (for §3.8 resume)
 ```
@@ -230,7 +231,7 @@ gdi convert INPUT [INPUT ...] -o OUT_DIR      # INPUT: a .pdf or a directory
     [--schema fields.json] [--pages 1,3-4|all]
     [--text-source vlm|pdf] [--no-charts] [--chart-code] [--no-chunks]
     [--chunk-tokens 512] [--recursive] [--force]
-    [--max-pages 500] [--max-file-mb 200] [--quiet]
+    [--max-pages 500] [--max-file-mb 200] [--quiet] [--no-wait]
 gdi convert-model           # one-time: produce the 8-bit Granite Vision (see Phase 2)
 ```
 
@@ -528,6 +529,60 @@ everything the program *executes or loads* is pinned and local.
    (`actions/checkout@<sha> # v7`, `astral-sh/setup-uv@<sha> # v10.0.0`) instead of
    mutable tags; `TestCIWorkflow`'s pins move with them.
 
+### 3.14 Performance (decided 2026-10-18)
+
+Memory is the hard constraint and is already designed (§3.1 phases, §2 8-bit weights,
+§3.11 ceiling). Speed is where the cost is: granite-docling generates up to 4096 tokens
+**per page, one page after another**. Every speed lever below is judged **under** the
+10 GB ceiling — the question is "the fastest configuration that fits", never "the
+fastest configuration" — and by quality per second through the eval (§8.1).
+
+1. **Batching and overlap — spike S11.** Measure pages/min for Phase A at page batch
+   sizes 1, 2 and 4 (whatever Docling's VLM pipeline or mlx-vlm exposes — find the
+   option, don't assume one), and whether CPU work (parse, render) overlaps GPU
+   generation (Docling's `ThreadedPdfPipelineOptions` exists for the standard pipeline;
+   check whether the VLM pipeline has an equivalent). Ship the fastest setting whose
+   peak stays under the ceiling; record batch 1 as the fallback.
+2. **Image resolution is a tuned knob.** `images_scale` (2.0 = 144 DPI) sets
+   granite-docling's input size *and* chart-crop size, hence Granite Vision's 384 px
+   tile count. Sweep 1.5 / 2.0 / 2.5 through the eval in S11; choose by quality per
+   second, recorded with the numbers. Not a CLI flag in v1 — one tested value.
+3. **Per-stage, per-page timings.** `run.json` records, per page: render ms,
+   generation ms, **tokens generated**, and whether it hit `max_tokens`; per chart:
+   extraction ms; per PDF: parse, classification, export and chunking ms, and per-phase
+   peak memory. This is what turns "slow" into "page 17: 4096 tokens, 40 s". Timings
+   are wall-clock (`time.perf_counter`), collected by our code around Docling calls or
+   from Docling's own timing hooks if it exposes them (check in S11).
+4. **One run at a time per Mac.** Two `gdi` processes (two terminals, or a v1.x UI
+   beside the CLI) would each load the models and push a 16 GB Mac into swap — the old
+   app's `_inference_lock` problem across processes instead of threads. Hold an
+   exclusive `fcntl.flock` on `~/.cache/granite-document-intelligence/run.lock` for the
+   whole run; a second run prints "waiting for another gdi run (pid N)" and waits, or
+   exits non-zero with `--no-wait`. The lock is released by the OS if the process dies,
+   so a crash cannot leave it stuck.
+5. **MLX's buffer cache is bounded.** Freed buffers stay in MLX's cache and can grow
+   across a long document. Set `mx.set_cache_limit` (value chosen in S4), record peak
+   memory per page, and **S4 also checks memory is flat across a 50-page run** — not
+   only that each phase fits once.
+6. **Sustained throughput, not best case.** A MacBook throttles under sustained load.
+   S8 reports pages/min over the 30+ page corpus document from first page to last, and
+   the README states the **sustained** rate with machine, date and versions.
+7. **Page-level resume — deferred, with a trigger.** Resume is per PDF (§3.8), so a
+   crash on page 49 of 50 redoes all 50. Keeping each page's DocTags in `.partial/`
+   would fix that at real complexity (invalidating on option or revision change).
+   Deferred until S8 shows a typical PDF takes **more than ~5 minutes**; the S8 write-up
+   records whether the trigger fired.
+8. **KVP prompt caching — later, not v1.** With `--pages all` every page re-encodes the
+   same schema. MLX supports prompt caching, but if Granite Vision's prompt puts the
+   image before the schema (check the chat template), little is reusable. Noted as a
+   post-v1 optimisation with that caveat.
+9. **The gate stays fast.** The Stop hook runs the suite every turn; the old repo
+   already paid once for a slow gate (21 s → 5 s via `$STUB_*`). Unit tests must not
+   import `docling`, `torch` or `mlx_vlm` at module level — import inside the test that
+   needs it, mock the rest — and **`GATE_FORCE=1 ./scripts/gate.sh` must stay ≤ 15 s**
+   on the development Mac. PR 3 measures it after the teardown; PR 4 (the first PR to
+   bring Docling in) re-measures it, and a breach is fixed before merge.
+
 ## 4. Phase 0 — spikes (before any production code)
 
 Each spike is a throwaway script in the scratchpad, not the repo. **Stop and report**
@@ -538,13 +593,14 @@ if one fails; several change the design.
 | S1 | Do `docling>=2.140` (with the `vlm` and chunking extras), `mlx-vlm>=0.7.8` and their `transformers`/`mlx` resolve together on Python 3.12? Does the `granite-embedding-english-r2` tokenizer load via `HuggingFaceTokenizer`? | `uv lock` succeeds in a scratch project; resolved `transformers` is **≥ 5.16** (§2.1); record the resolved `transformers`, `mlx`, `torch` versions; the tokenizer chunks a sample document |
 | S2 | Does Docling's MLX engine load a **local** 8-bit conversion via `repo_id`? | chart extraction runs from the local path with `HF_HUB_OFFLINE=1`; if only Hub ids work, decide between a private Hub repo and a monkeypatch |
 | S3 | Does the 2025-09 granite-docling MLX conversion (mlx-vlm 0.3.3) load and convert pages under mlx-vlm 0.7.8? Does Docling detect or stop repetition loops, and can a page hitting `max_tokens` be detected from the result? | a 5-page PDF converts with sane Markdown and at least one table; record how a capped page shows up (§3.10) |
-| S4 | Peak memory per phase, and does releasing the converter return GV's memory? | Phase A peak and post-release `mx.get_active_memory()` recorded; Phase B starts below ~5 GB active; whole run stays under ~10 GB on a 20–50 page PDF with charts |
+| S4 | Peak memory per phase, and does releasing the converter return GV's memory? Does memory stay flat across a long document (§3.14 rule 5)? | Phase A peak and post-release `mx.get_active_memory()` recorded; Phase B starts below ~5 GB active; whole run stays under ~10 GB on a 20–50 page PDF with charts; per-page peak shows **no upward trend** across the run, with the `mx.set_cache_limit` value that achieves it recorded |
 | S5 | `force_backend_text` on vs off, on one born-digital and one scanned PDF | pick the default from a read of the output, not a metric alone |
 | S6 | 8-bit vs bf16 Granite Vision quality on ~10 charts and one KVP form | CSVs match on values; KVP fields match; if 8-bit degrades, try `--q-bits 6`/bf16 and re-measure S4 |
 | S7 | granite-docling's own `<chart>` → table vs Granite Vision `<chart2csv>` on the same charts | if granite-docling is as good, Granite Vision's chart role shrinks to summaries — record either way |
-| S8 | Throughput | seconds/page for Phase A (born-digital and scanned separately), seconds/chart, seconds/KVP page and cold-start load time; these seed `eval/budgets.toml` (§3.11) and the README |
+| S8 | Throughput | seconds/page for Phase A (born-digital and scanned separately), seconds/chart, seconds/KVP page and cold-start load time; **sustained** pages/min across the 30+ page document, first page to last (§3.14 rule 6); whether a typical PDF exceeds ~5 min (the page-level-resume trigger, rule 7); these seed `eval/budgets.toml` (§3.11) and the README |
 | S9 | How far toward torch-free can the stack go (§2.1)? (a) Does `docling-slim` with only `format-pdf`, `feat-chunking` and `mlx-vlm` added directly — no `models-vlm-inline` — import and run `VlmPipeline` with `GRANITEDOCLING_MLX` and the MLX chart preset? (b) Does the classifier run on `ONNXRUNTIME` without importing torch (`"torch" not in sys.modules` after a run)? (c) Does granite-docling's DocTags already label picture types, making the classifier redundant? | each answered yes/no with evidence; (a) yes → drop torch from the lock; (b) yes and same chart picks on the corpus → ONNX classifier; (c) yes → note it, but keep Docling's classifier unless S7 says otherwise |
 | S10 | Does any load path execute model-repo code, and do revision overrides reach every loader (§3.13 rules 1–2)? Run `mlx_vlm.convert`, a Phase A conversion and the classifier with every model pinned, then list `sys.modules` entries whose file lives under the HF cache. | **none** from the cache; each of the four pinned SHAs observed at its loader (e.g. via `HF_HUB_OFFLINE=1` with only those revisions cached). Any repo code imported → **stop and report** |
+| S11 | Speed levers under the 10 GB ceiling (§3.14 rules 1–3): page batch size 1/2/4 and CPU–GPU overlap, if Docling or mlx-vlm exposes them; `images_scale` 1.5/2.0/2.5; whether Docling exposes per-stage timing hooks | pages/min, peak memory and eval scores per setting; the shipped setting is the fastest that fits **and** does not regress the eval; batch 1 / scale 2.0 recorded as fallbacks |
 
 Spike results go in **`docs/plans/pdf-pipeline-spikes.md`** — one section per spike:
 what was run (exact versions), the numbers, the verdict, and any amendment it forces on
@@ -754,7 +810,13 @@ Same philosophy as today: **mock at the model boundary**, never download in CI.
   judged by content; a sentinel `HF_TOKEN` and a sentinel string inside the PDF appear
   in no output file and not on stderr; a KVP schema with a remote `$ref` is rejected
   with **no** network attempt (socket creation patched to raise), and a schema over
-  256 KB or not a JSON object is rejected.
+  256 KB or not a JSON object is rejected. And §3.14 rule 4: with the run lock held by
+  another process, a second run waits (and says so) or, with `--no-wait`, exits
+  non-zero without loading a model; a lock held by a process that has exited does not
+  block.
+- Every test module: no module-level import of `docling`, `torch` or `mlx_vlm`
+  (§3.14 rule 9) — a small test in `test_tooling.py` parses each test file's top-level
+  imports and fails on one.
 - `test_score.py` — the eval scorer and `eval/matching.py` on synthetic pairs (§8.2
   rule 9): deliberately bad predictions must lower each score, normalization and
   pairing rules behave as written, and a committed results file containing a private
@@ -762,7 +824,7 @@ Same philosophy as today: **mock at the model boundary**, never download in CI.
 
 **CI cost check:** `docling` pulls `torch`; measure `uv sync --locked` time on the
 `macos-26` runner in the first PR and record it. The job's 15-minute timeout is the
-constraint.
+constraint. Locally, `GATE_FORCE=1 ./scripts/gate.sh` stays **≤ 15 s** (§3.14 rule 9).
 
 ### 8.1 Quality eval harness (real models, run by hand — never in CI)
 
@@ -1196,7 +1258,7 @@ The plan was written in an earlier session you have no memory of; it is the sing
 source of truth, and every decision in it carries its reason — read the reason before
 deciding a choice is safe to change.
 
-Do Phase 0 only (§4): spikes S1–S10 and Task C (§4.1). Nothing else.
+Do Phase 0 only (§4): spikes S1–S11 and Task C (§4.1). Nothing else.
 
 - Spikes are throwaway scripts in your scratchpad, never in the repo.
 - Re-check every version and API the plan cites against what is installed now; the
