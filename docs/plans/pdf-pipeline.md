@@ -84,8 +84,8 @@ reading order — which is what lets the pipeline find the charts to hand Granit
 It also costs 0.63 GB to read every page, against 4.92 GB for the 4B model.
 
 **Why 8-bit Granite Vision.** IBM publishes **no** MLX build of 4.1 (bf16 safetensors
-8.0 GB, and GGUF). On 16 GB the Metal working set is ~10.7 GB
-(`max_recommended_working_set_size` ≈ ⅔ of RAM); bf16 GV + granite-docling is ~8.6 GB
+8.0 GB, and GGUF). On 16 GB the Metal working set is **12.71 GB**
+(`max_recommended_working_set_size`, measured in S4 on macOS 27; ~10.7 GB was assumed); bf16 GV + granite-docling is ~8.6 GB
 before KV cache, page rasters, Docling's own models and the OS. 8-bit brings GV to
 **4.92 GB** (S2: 9.26 bits per weight, because mlx-vlm leaves the 0.86 GB vision tower
 in bf16). Convert it ourselves rather than use a community build: the four on the Hub
@@ -191,10 +191,14 @@ PDF ──► Phase A: Docling DocumentConverter (VlmPipeline)
 
 Phase A and Phase B each load Granite Vision **separately** — Docling's engine owns its
 instance and exposes no handle to it. Running both at once would hold two copies
-(~9.3 GB + granite-docling). The phases must therefore be **sequential with an explicit
-release between them**, and Spike S4 must prove the release actually returns memory.
-Fallback if it does not: drop Docling's chart enrichment and run chart extraction in our
-own code against the single Phase-B model instance (crop via `generate_picture_images`).
+(~9.9 GB + granite-docling). The phases must therefore be **sequential with an explicit
+release between them**. **S4 (2026-10-25) proved the release works:** dropping the
+converter, `gc.collect()` and `mx.clear_cache()` free every model and take active memory
+to 0; Phase A peaks at 7.00 GB on a 42-page PDF with nine charts, Phase B at 6.52 GB.
+Docling loads Granite Vision when the pipeline is built, so its 4.93 GB is resident for
+all of Phase A even on a PDF without charts. The fallback — drop Docling's chart
+enrichment and run chart extraction in our own code against the single Phase-B model
+instance (crop via `generate_picture_images`) — is not needed.
 
 ### 3.2 Docling configuration (verify against the installed version)
 
@@ -378,9 +382,12 @@ diverge on it.
   the file, and its recorded options equal the current ones. Anything else re-runs —
   every uncertainty runs, the same rule `scripts/gate.sh`'s memo follows. `--force`
   re-runs everything.
-- One `DocumentConverter` for the whole batch (models load once). Phase B per PDF after
-  its Phase A — or, if S4 shows reloading Granite Vision per PDF is the dominant cost,
-  all Phase A first, then all Phase B; record the choice.
+- One `DocumentConverter` for the whole batch (models load once) when there is no
+  `--schema`. With `--schema`, **Phase B runs per PDF after its Phase A** (decided by S4,
+  2026-10-25): the converter is released before each Phase B and rebuilt after, which
+  reloads all three models per PDF — ~4.6 s on a warm page cache, ~2% of a 42-page
+  PDF's Phase A. All Phase A first, then all Phase B, stays the alternative if S8 finds
+  cold loads or batches of small PDFs make the reloads dominate.
 - A failed PDF writes `run.json` with `"status": "error"` and the traceback, and the
   batch continues; exit status is non-zero if any PDF failed. A batch summary
   (done / skipped / failed, with paths) goes to stderr at the end.
@@ -474,8 +481,9 @@ Budgets turn S4/S8's measurements into regression checks that `eval/score.py` en
 (§8.1).
 
 - **Memory — a hard ceiling, set now:** peak `mx.get_peak_memory()` per phase
-  **≤ 10 GB**. This comes from the Metal working set (~10.7 GB on 16 GB), not from a
-  measurement, so it does not move. If S4 exceeds it, the design changes (the §3.1
+  **≤ 10 GB**. This came from the Metal working set (assumed ~10.7 GB on 16 GB; S4
+  measured 12.71 GB), not from a measurement of the pipeline, so it does not move. S4's
+  whole-run peak was 7.00 GB. If S4 exceeds it, the design changes (the §3.1
   fallback) — the budget is not raised.
 - **Time — measured, not guessed:** PR 7 sets `eval/budgets.toml` from **its own
   baseline run of the production pipeline** — the median of three (§8.2 rule 8)
@@ -683,9 +691,10 @@ fastest configuration" — and by quality per second through the eval (§8.1).
    exits non-zero with `--no-wait`. The lock is released by the OS if the process dies,
    so a crash cannot leave it stuck.
 5. **MLX's buffer cache is bounded.** Freed buffers stay in MLX's cache and can grow
-   across a long document. Set `mx.set_cache_limit` (value chosen in S4), record peak
-   memory per page, and **S4 also checks memory is flat across a 50-page run** — not
-   only that each phase fits once.
+   across a long document. Set **`mx.set_cache_limit(1 << 30)`** (1 GiB, chosen in
+   S4: MLX's default limit is 16.32 GB, above the working set, so it bounds nothing; a
+   limit of 0 was the slowest of three runs), and record peak memory per page. S4 found
+   the per-page peak flat across 42 pages (±0.01 MB/page) at every limit tried.
 6. **Sustained throughput, not best case.** A MacBook throttles under sustained load.
    S8 reports pages/min over the 30+ page corpus document from first page to last, and
    the README states the **sustained** rate with machine, date and versions.
@@ -1268,8 +1277,8 @@ GitHub details (§9.2); UI theme and layout for v1.x (§14, §15).
 | Item | Spike |
 |---|---|
 | local-path model loading | S2 — **settled 2026-10-25:** one `artifacts_path` models directory (§3.2) |
-| Phase B ordering in batches (per PDF vs all-A-then-all-B) | S4 |
-| `mx.set_cache_limit` value | S4 |
+| Phase B ordering in batches (per PDF vs all-A-then-all-B) | S4 — **settled 2026-10-25:** per PDF (§3.8) |
+| `mx.set_cache_limit` value | S4 — **settled 2026-10-25:** 1 GiB (§3.14 rule 5) |
 | `--text-source` default | S5 |
 | 8-bit vs 6-bit/bf16 Granite Vision | S6 |
 | Granite Vision's chart role | S7 |
@@ -1462,7 +1471,7 @@ of the working text app; `git checkout v0.6.0` restores it intact if the rebuild
 |---|---|---|
 | Docling's MLX engine won't load a local conversion | S2 — **retired 2026-10-25**: it loads through `artifacts_path` (§3.2) | — |
 | Docling silently drops a chart's CSV when the model writes a label containing a comma unquoted (`status=success`, `errors=[]`, raw response not kept) | S2 (2 of 5 Census charts) | capture the raw chart2csv response in our code and parse it leniently; S7 and PR 4 decide how; S6 counts a drop as a failure |
-| Memory isn't released between phases, or creeps across pages | S4 | run chart extraction in our own code against one Granite Vision instance (§3.1); `mx.set_cache_limit` |
+| Memory isn't released between phases, or creeps across pages | S4 — **retired 2026-10-25**: release returns active memory to 0, per-page peak flat over 42 pages, 7.00 GB run peak (§3.1) | — |
 | Model-repo code executes despite native transformers | S10 | stop; pin a transformers version that loads natively, or patch the loader — user decides |
 | 8-bit Granite Vision degrades charts or KVP | S6 | 6-bit or bf16, re-measured against the 10 GB ceiling |
 | Too slow to be useful on 16 GB | S8, S11 | batch/scale tuning (S11); page-level resume (§3.14 rule 7); fewer charts by default |

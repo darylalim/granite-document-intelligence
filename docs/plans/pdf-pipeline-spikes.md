@@ -9,7 +9,8 @@ Spike scripts live in the session scratchpad, never in the repo.
 | S1 | **Pass** | yes — extra names (§2.1, §3.9, §4); floors are verified versions (§2.2) |
 | S2 | **Pass**, through `artifacts_path` | yes — every Docling model loads from one models directory; pins enforced at fetch; 4.92 GB; command form (§2, §3.2, §3.12, §3.13, §4, §4.2, §6, §8, §12, §17) |
 | S3 | **Pass**, with findings | yes — `VlmConvertOptions` preset, 8192-token cap, loop and cap detection are our code (§2, §2.1, §3.2, §3.10, §3.13, §3.14, §4, §8, §17) |
-| S4–S11 | not run | — |
+| S4 | **Pass** | yes — `mx.set_cache_limit` 1 GiB; Phase B per PDF; working set 12.71 GB (§2, §3.1, §3.8, §3.11, §3.14, §12, §17) |
+| S5–S11 | not run | — |
 
 ## S1 — dependency resolution and the chunking tokenizer (2026-10-24)
 
@@ -373,3 +374,128 @@ cannot be passed as `repo_id`. Neither fallback in the §17 risk row is needed.
   goes to `table`. That is S9(c) and eval territory.
 - Docling prints `Exception ignored in: …__del__` at exit for both VLM stages
   (`VlmConvertModel` and `ChartExtractionVlmEngineModel`); harmless, as S3 found.
+
+## S4 — memory per phase, release between phases, flatness across pages (2026-10-25)
+
+**Question.** What does each phase peak at, does releasing the converter return
+Granite Vision's memory, and does memory stay flat across a long document (§3.14
+rule 5)? Pass: Phase A peak and post-release `mx.get_active_memory()` recorded; Phase B
+starts below ~5 GB active; the whole run stays under ~10 GB on a 20–50 page PDF with
+charts; per-page peak shows no upward trend, with the `mx.set_cache_limit` value that
+achieves it recorded.
+
+**Environment.** The S2 scratch project and models directory, unchanged: docling /
+docling-slim 2.142.1, **mlx-vlm 0.7.10**, mlx 0.32.4, transformers 5.20.2, torch
+2.14.1; granite-docling `e9939db…`, the classifier `f859dfb…`, the 8-bit Granite Vision
+converted from `dd48e97…`. macOS 27.0.1, M2 Pro, 16 GB. `HF_HUB_OFFLINE=1` and the S2
+socket guard: 0 network attempts in every run. On this machine
+`max_recommended_working_set_size` is **12.71 GB**, not the ~10.7 GB §2 assumed, and
+MLX's default cache limit is **16.32 GB** — larger than the working set, so by default
+the buffer cache is bounded by nothing.
+
+**Test PDF.** GAO-07-631, *Defense Budget: Trends in Operation and Maintenance Costs
+and Support Services Contracting* (2007-05-18): **42 pages**, born-digital, nine
+figures (two line charts, seven bar charts), each sourced "GAO analysis of DOD (or
+congressional) data", so no third-party figure. A US federal work, public domain
+(17 U.S.C. § 105). gao.gov still answers scripted downloads with HTTP 403, but govinfo
+mirrors its reports and does not:
+`https://www.govinfo.gov/content/pkg/GAOREPORTS-GAO-07-631/pdf/GAOREPORTS-GAO-07-631.pdf`
+(631,484 bytes, SHA-256 `51f6dca9…360790471f`). It is the candidate for Task C's
+30+ page document, and S8 should measure throughput on the same file.
+
+**What was run.** One probe script, the §3.2 configuration (granite-docling preset,
+`granite_vision_v4_mlx` chart preset with chart2csv and chart2summary,
+`generate_page_images` and `generate_picture_images` on, `artifacts_path` = the models
+directory), three times over the whole PDF — with MLX's default cache limit,
+`mx.set_cache_limit(0)` and `mx.set_cache_limit(1 GiB)`:
+
+1. **Phase A** — `DocumentConverter.convert`, with `mlx_vlm.load` and
+   `mlx_vlm.stream_generate` wrapped so every generation (one per page, two per chart)
+   records active, cache and peak memory (`mx.reset_peak_memory()` around each), tokens
+   and seconds. The wrapper has to report from a `finally`: Docling stops consuming the
+   stream at `</doctag>`, so code after the loop never runs for page generations.
+2. **Release** — `del` the converter and the result (keeping the `DoclingDocument`),
+   `gc.collect()`, `mx.clear_cache()`, then check weakrefs to every model
+   `mlx_vlm.load` returned.
+3. **Phase B** — load the 8-bit Granite Vision again with `mlx_vlm.load` and run one
+   greedy KVP-style generation on page 1 (a four-field schema), as §3.3's code will.
+
+**Results** (memory is `mx` memory in GB; per-generation figures are min–max over the run):
+
+| | default limit | limit 0 | limit 1 GiB |
+|---|---|---|---|
+| Phase A wall, 42 pages + 9 charts | 255 s | 278 s | 247 s |
+| Active after both loads | 5.56 | 5.56 | 5.56 |
+| Page peak (42 granite-docling generations) | 6.535–6.539 | 6.506 | 6.535–6.539 |
+| Chart peak (18 Granite Vision generations) | ≤ 7.00 | ≤ 7.00 | ≤ 7.00 |
+| Cache between generations | 0.06–0.31 | 0 | 0.06–0.31 |
+| **Phase A peak** | **7.00** | **7.00** | **7.00** |
+| Active after release | **0.00** (no model alive) | 0.00 | 0.00 |
+| Active after Phase B load | 4.93 | 4.93 | 4.93 |
+| Phase B peak | 6.52 | 6.52 | 6.52 |
+| **Whole-run peak** | **7.00** | **7.00** | **7.00** |
+| Per-page peak trend (least squares on page index, controlling for tokens) | −0.01 MB/page | 0.00 MB/page | +0.01 MB/page |
+
+- **Phase A's memory is set by the weights, not the document.** Active memory sat at
+  exactly 5.559 GB from the second load to the last generation, so nothing
+  accumulated. The per-page peak did not move with tokens either: page 25 generated 8193
+  tokens and peaked where a 200-token page did. granite-docling's KV cache is small
+  beside its vision encoding, and Granite Vision's chart generations (≤ 384 tokens here)
+  set the run's peak at 7.00 GB, the same figure as the 3-page smoke test and S2's
+  5-page run (7.32 GB there, with page images at a different size).
+- **Docling loads Granite Vision when the pipeline is built**, before granite-docling
+  and before any chart is found. So 4.93 GB is resident throughout Phase A even on a
+  PDF with no charts.
+- **The release is complete with plain Python.** Dropping the converter, `gc.collect()`
+  and `mx.clear_cache()` freed every model (weakrefs dead) and took active memory to
+  0.00 GB. `MlxVlmEngine.cleanup()` was not needed, and no Docling-level cache held a
+  model. torch's MPS allocation for the classifier was 16 MB and went to 0 after
+  `torch.mps.empty_cache()`.
+- **Reloads are cheap on a warm page cache:** ~2.7 s for both Phase A models and
+  ~1.9 s for Phase B's Granite Vision. Cold loads after a reboot are S8's to measure.
+- **Process RSS** (sampled at each event) peaked at 5.5 GB. It overlaps the MLX figures
+  on unified memory, so the two are not added; §3.11's ceiling is stated in
+  `mx.get_peak_memory()` and that is what the verdict uses.
+- **Cache limit.** Under the default the cache never passed 0.31 GB, so nothing crept,
+  but only because this document never asked for more; the 16.32 GB default bounds
+  nothing. A limit of 0 kept the cache at 0 and lowered the page peak by 30 MB, but was
+  the slowest run (278 s against 247–255 s; one run each, so that margin is indicative,
+  not measured noise). A 1 GiB limit was as fast as the default and bounds the cache
+  well inside the ceiling.
+
+**Verdict: pass.** Phase A peaks at 7.00 GB, the release returns active memory to 0,
+Phase B starts at 0 GB before its load and 4.93 GB after it, the whole run peaks at
+7.00 GB (3 GB under the 10 GB ceiling), and the per-page peak is flat across 42
+pages. The §3.1 fallback (chart extraction in our own code) is not needed.
+
+**What it costs the design (amendments, applied to the plan).**
+
+- **`mx.set_cache_limit(1 << 30)`** (1 GiB) at startup (§3.14 rule 5, §12).
+- **Phase B runs per PDF** (§3.8, §12). Interleaving needs the converter released before
+  each Phase B, since both Granite Vision copies plus granite-docling would hold
+  ~10.5 GB, so a batch with `--schema` reloads all three models per PDF: ~4.6 s warm,
+  ~2% of this PDF's Phase A. Without `--schema` there is no Phase B and one converter
+  serves the whole batch. All-A-then-all-B stays the documented alternative if S8 finds
+  cold loads or many small PDFs make the reloads matter.
+- **The working set is 12.71 GB on this machine** (§2, §3.11), not ~10.7 GB. The 10 GB
+  ceiling stays where it is — §3.11 says a measurement does not move it — and now sits
+  2.7 GB under the working set instead of 0.7 GB.
+- §17's memory-release risk is retired.
+
+**Found on the way: for S5, S8 and the eval, not S4 failures.**
+
+- **Page 25 hit the 8192-token cap in all three runs** (8193 tokens, 36–40 s,
+  `status=success`). It is Figure 8: two bar charts side by side under one caption.
+  Docling kept only six text items for the page, and both charts were still classified
+  and given CSVs and summaries. The DocTags were not saved, so what looped is unknown;
+  §3.10's cap detection would flag it. A second capped-page shape after S3's sideways
+  table, and one more reason the corpus needs this PDF.
+- All nine figures were classified as charts (`line_chart` / `bar_chart`, eight at
+  ≥ 0.99 and one at 0.83) and all nine kept their CSV, unlike S2's comma-labelled Census
+  charts. Logos (5) and a signature (1) were not sent to Granite Vision.
+- The Phase B check returned correct fields from the cover:
+  `{"report_number": "GAO-07-631", "title": "Trends in Operation and Maintenance Costs
+  and Support Services Contracting", "date": "May 2007", "addressee": "Congressional
+  Committees"}` (50 tokens, 5.3 s). That is a single smoke check, not S6.
+- Phase A took ~6 s per page including charts (247–278 s for 42 pages). That is a
+  sanity point for S8, not its measurement.
