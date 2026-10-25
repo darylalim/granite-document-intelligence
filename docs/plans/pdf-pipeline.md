@@ -112,12 +112,19 @@ The heavy compute is MLX; the stack is not. Read from Docling's source and
 
 - **The classifier is not optional:** `do_chart_extraction=True` turns picture
   classification on — it is how Docling picks which pictures reach Granite Vision.
-- **torch is installed regardless of runtime choice.** Docling's `models-vlm-inline`
-  extra — the one that brings `mlx-vlm` — also requires `open-clip-torch`, `timm`,
-  `accelerate` and `peft`, all torch-dependent. That costs disk and CI install time,
-  not runtime memory: torch loads only when the classifier runs on it.
+- **Extra names (amended by S1, 2026-10-24).** `docling` is a meta-package over
+  `docling-slim`: `docling` itself requires `docling-slim[standard]` and exposes the VLM
+  stack as **`docling[vlm]`** (= `docling-slim[models-vlm-inline]`). `models-vlm-inline`
+  and `feat-chunking` are `docling-slim`'s names — on `docling` they do not exist, and
+  `uv` only *warns* and resolves without them. Chunking needs no extra on `docling`:
+  `standard` already brings `docling-core[chunking]`.
+- **torch is installed regardless of runtime choice.** `docling-slim[standard]` (what
+  plain `docling` installs) requires `torch` and `torchvision` outright, and the
+  `models-vlm-inline` extra — the one that brings `mlx-vlm` — adds `open-clip-torch`,
+  `timm`, `accelerate` and `peft`. That costs disk and CI install time (the S1 venv is
+  1.5 GB), not runtime memory: torch loads only when the classifier runs on it.
 - **transformers ≥ 5.16 is the effective floor on this Mac**, and no single package
-  states it: Docling's `models-vlm-inline` excludes 5.9–5.15 on darwin (MPS crashes on
+  states it: `docling-slim`'s `models-vlm-inline` excludes 5.9–5.15 on darwin (MPS crashes on
   float64 position embeddings, fixed in 5.16.0), while mlx-vlm needs ≥ 5.14. A later
   `uv lock --upgrade` must keep it; the new CLAUDE.md records it under Dependencies.
 
@@ -137,10 +144,10 @@ docling-core 21, mlx 4.
 
 | Package | Constraint in `pyproject.toml` | Why |
 |---|---|---|
-| `docling` | `>=2.140,<3` | its minor *is* its release unit (~2.5 a week) — a minor cap would block every release; the major cap guards a rewrite |
-| `docling-core` | `>=<S1-resolved>,<3` | imported directly (DoclingDocument types), so declared, not left transitive |
-| `mlx-vlm` | `>=0.7.8,<0.8` | pre-1.0, a minor can break the API (0.6 → 0.7 inside the window) — the old `mlx-lm<0.32` precedent; 0.7.8 is the first version researched |
-| `transformers` | `>=5.16,<6` | the effective floor from §2.1, declared so `uv` enforces it instead of a comment |
+| `docling[vlm]` | `>=<verified>,<3` | its minor *is* its release unit (~2.5 a week) — a minor cap would block every release; the major cap guards a rewrite. `[vlm]` is the `docling` name for the VLM extra (§2.1) |
+| `docling-core` | `>=<verified>,<3` | imported directly (DoclingDocument types), so declared, not left transitive |
+| `mlx-vlm` | `>=<verified>,<0.8` | pre-1.0, a minor can break the API (0.6 → 0.7 inside the window) — the old `mlx-lm<0.32` precedent |
+| `transformers` | `>=<verified>,<6` | never below **5.16**, the effective floor from §2.1; declared so `uv` enforces it instead of a comment |
 | `jsonschema` | `>=4.18` | the `referencing`-based API rule 8 of §3.13 relies on |
 | `mlx` | not declared | floats under `mlx-vlm`, as it did under `mlx-lm` — the lock pins it |
 
@@ -149,8 +156,20 @@ docling-core 21, mlx 4.
 alongside unrelated moves. Moving `docling`, `docling-core`, `mlx`, `mlx-vlm`,
 `transformers` or `huggingface-hub` requires, before merge: the eval (§8.1) at or above
 baseline, S10's no-repo-code check re-run, and the vulnerability audit (§3.13 rule 6).
-Moving a cap (`<0.8`, `<3`) is its own PR. Exact floors come from S1's resolution and
-are written in when PR 4 adds the dependencies.
+Moving a cap (`<0.8`, `<3`) is its own PR.
+
+**Floors are verified versions, not researched ones (amended 2026-10-24).** `<verified>`
+is the version the Phase 0 spikes and PR 4's hand run actually executed the models on —
+the version in PR 4's `uv.lock` — written in when PR 4 adds the dependencies. The
+versions this plan was researched against (`docling` 2.140, `mlx-vlm` 0.7.8,
+`transformers` 5.16) are **not** floors: S1 showed only that they install and chunk,
+and no model run ever touches them, because every spike and eval resolves to the
+latest versions inside the caps. A floor declares support, and an older version nobody
+ran the pipeline on is a guess — the old app's rule for its `streamlit` floor. Lowering
+a floor later needs the same evidence as moving any of these packages: the eval on the
+lower version, run with `uv lock --resolution lowest-direct` and `uv sync --frozen`
+(S1 found a plain `uv sync` silently re-resolves to highest). Floors are raised only
+when code needs a newer version, not on every upgrade.
 
 ## 3. Architecture
 
@@ -358,9 +377,10 @@ Docling's `HybridChunker` (heading hierarchy first, then token-count splits;
 `merge_peers=True`). It needs a `BaseTokenizer`; use
 `HuggingFaceTokenizer.from_pretrained(model_name="ibm-granite/granite-embedding-english-r2", max_tokens=chunk_tokens)`
 so chunk sizes match the Granite embedding model a later stage would most likely use
-(English-only pipeline, so not the multilingual one). **Unverified:** that the model's
-tokenizer loads through this API — check in S1. Chunking needs Docling's
-`feat-chunking` extra.
+(English-only pipeline, so not the multilingual one). **Verified by S1 (2026-10-24):**
+the tokenizer loads through this API (as transformers 5's `TokenizersBackend`) and
+chunks with heading context and budget splits. Chunking needs `docling-core[chunking]`,
+which plain `docling` already installs (§2.1).
 
 **Chunk size (decided 2026-10-18):** `chunk_tokens` defaults to **512** and is
 configurable (`--chunk-tokens`, `ConvertOptions.chunk_tokens`). It is a retrieval
@@ -666,9 +686,9 @@ amendment in that PR.
 
 | # | Question | Pass criterion |
 |---|---|---|
-| S1 | Do `docling>=2.140` (with its `models-vlm-inline` and `feat-chunking` extras), `mlx-vlm>=0.7.8` and their `transformers`/`mlx` resolve together on Python 3.12? Does the `granite-embedding-english-r2` tokenizer load via `HuggingFaceTokenizer`? | `uv lock` succeeds in a scratch project; resolved `transformers` is **≥ 5.16** (§2.1); record the resolved `transformers`, `mlx`, `torch` versions; the tokenizer chunks a sample document |
+| S1 | Do `docling[vlm]>=2.140` (the `docling` spelling of `docling-slim`'s `models-vlm-inline`; chunking comes with `standard` — §2.1), `mlx-vlm>=0.7.8` and their `transformers`/`mlx` resolve together on Python 3.12? Does the `granite-embedding-english-r2` tokenizer load via `HuggingFaceTokenizer`? | `uv lock` succeeds in a scratch project; resolved `transformers` is **≥ 5.16** (§2.1); record the resolved `transformers`, `mlx`, `torch` versions; the tokenizer chunks a sample document |
 | S2 | Does Docling's MLX engine load a **local** 8-bit conversion via `repo_id`? | chart extraction runs from the local path with `HF_HUB_OFFLINE=1`; if only Hub ids work, decide between a private Hub repo and a monkeypatch |
-| S3 | Does the 2025-09 granite-docling MLX conversion (mlx-vlm 0.3.3) load and convert pages under mlx-vlm 0.7.8? Does Docling detect or stop repetition loops, and can a page hitting `max_tokens` be detected from the result? | a 5-page PDF converts with sane Markdown and at least one table; record how a capped page shows up (§3.10) |
+| S3 | Does the 2025-09 granite-docling MLX conversion (mlx-vlm 0.3.3) load and convert pages under the locked mlx-vlm (latest inside `<0.8`; record the version — §2.2)? Does Docling detect or stop repetition loops, and can a page hitting `max_tokens` be detected from the result? | a 5-page PDF converts with sane Markdown and at least one table; record how a capped page shows up (§3.10) |
 | S4 | Peak memory per phase, and does releasing the converter return GV's memory? Does memory stay flat across a long document (§3.14 rule 5)? | Phase A peak and post-release `mx.get_active_memory()` recorded; Phase B starts below ~5 GB active; whole run stays under ~10 GB on a 20–50 page PDF with charts; per-page peak shows **no upward trend** across the run, with the `mx.set_cache_limit` value that achieves it recorded |
 | S5 | `force_backend_text` on vs off, on one born-digital and one scanned PDF | pick the default from a read of the output, not a metric alone |
 | S6 | 8-bit vs bf16 Granite Vision quality on ~10 charts and one KVP form | CSVs match on values; KVP fields match; if 8-bit degrades, try `--q-bits 6`/bf16 and re-measure S4 |
