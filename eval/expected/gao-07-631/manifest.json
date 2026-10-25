@@ -155,6 +155,6 @@
   },
   "headings": "headings.txt",
   "notes": [
-    "PDF page 24 (a prose page) hit the 8192-token cap in spikes S4, S5 and S8; that is a model behaviour, not ground truth, so it is recorded here and not as an expectation."
+    "PDF page 24 (the letter's closing prose and Figure 7, charts p024-1 and p024-2) hit the 8192-token cap in spikes S4, S5 and S8, and in S6 no picture came back for it, so Figure 7 never reached chart extraction. That is a model behaviour, not ground truth, so it is recorded here and not as an expectation; p024-1 and p024-2 stay expected."
   ]
 }
