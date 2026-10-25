@@ -403,7 +403,11 @@ diverge on it.
   2026-10-25): the converter is released before each Phase B and rebuilt after, which
   reloads all three models per PDF — ~4.6 s on a warm page cache, ~2% of a 42-page
   PDF's Phase A. All Phase A first, then all Phase B, stays the alternative if S8 finds
-  cold loads or batches of small PDFs make the reloads dominate.
+  cold loads or batches of small PDFs make the reloads dominate. **S8 (2026-10-25)
+  kept per PDF:** the reload is ~4.5 s (rebuild 2.6 s + Granite Vision 1.9 s), and a
+  cold load after `purge` adds only ~1 s. That is ~2% of a 42-page PDF but about a
+  third of a one-page form's ~9 s. A batch of one-page forms is the case that
+  would reopen this decision.
 - A failed PDF writes `run.json` with `"status": "error"` and the traceback, and the
   batch continues; exit status is non-zero if any PDF failed. A batch summary
   (done / skipped / failed, with paths) goes to stderr at the end.
@@ -509,9 +513,17 @@ Budgets turn S4/S8's measurements into regression checks that `eval/score.py` en
   seconds/page for Phase A (born-digital and scanned separately), seconds per chart,
   seconds per KVP page, and cold-start load time, each **× 1.25** headroom. S8's spike
   numbers are a sanity reference only (a spike script is not the shipped code); a
-  baseline more than ~25% off S8 is investigated before it is committed.
+  baseline more than ~25% off S8 is investigated before it is committed. **S8's
+  reference** (born-digital, M2 Pro 16 GB, 2026-10-25): Phase A ~6 s/page all-in
+  (5.9–6.2), uncapped page generation 3.3–4.2 s, a capped page 36 s, a chart 8–15 s
+  (it varies 2× between PDFs, so the chart budget is a corpus median), a KVP page
+  ~5 s, model loads 2.2–2.8 s (Phase A) and 1.9 s (Phase B). Scanned: not yet
+  measured (S8's image-only stand-in collapsed; §17).
 - **Degeneration count:** pages that hit `max_tokens` (§3.10) — budget **0** on the
-  public corpus.
+  public corpus. **Open conflict (S8):** both born-digital PDFs S8 timed have one
+  capped page (GAO-07-631 p. 24, GAO-07-535 p. 38), and GAO-07-631 is the 30+ page
+  candidate. PR 2 or PR 7 either fixes those pages or lists them as named exceptions
+  against a fixed count; the budget is not quietly raised.
 - **Enforcement:** `score.py` reports each metric against its budget and fails the run
   if any is exceeded, exactly as a quality drop fails it. **Raising a time budget needs
   a committed `eval/results/` file showing why** (a new Docling version that is
@@ -568,7 +580,10 @@ Five rules:
    roughly **14 GB during setup** (bf16 source + 8-bit + granite-docling + the
    torch-including environment) and **~6 GB after** deleting the source — estimates
    until S1 (environment size) and S8 (output size per page) measure them; replace them
-   with the measured figures.
+   with the measured figures. S8 measured output at **23–61 KB/page** in the default
+   layout (JSON, Markdown, picture crops) and **160–187 KB/page** with
+   `--save-page-images`, before tables and chunks. Output is negligible beside the
+   models.
 
 #### 3.12.1 Persistence — no database in v1 (decided 2026-10-18)
 
@@ -721,7 +736,10 @@ fastest configuration" — and by quality per second through the eval (§8.1).
    crash on page 49 of 50 redoes all 50. Keeping each page's DocTags in `.partial/`
    would fix that at real complexity (invalidating on option or revision change).
    Deferred until S8 shows a typical PDF takes **more than ~5 minutes**; the S8 write-up
-   records whether the trigger fired.
+   records whether the trigger fired. **It fired (S8, 2026-10-25):** a 69-page GAO
+   report took 7.1 min of Phase A, and 8 of the 10 GAO candidates run 59–216 pages
+   (~6–22 min at ~6 s/page). Page-level resume moves into v1, in PR 6, **subject to the
+   user's approval of the spike report**.
 8. **KVP prompt caching — later, not v1.** With `--pages all` every page re-encodes the
    same schema. MLX supports prompt caching, but if Granite Vision's prompt puts the
    image before the schema (check the chat template), little is reusable. Noted as a
@@ -1258,7 +1276,7 @@ One PR per step, each off a fresh branch from `main`, each green in CI before me
 | 3 | `feat/teardown` | §5: delete the text app, move the tooling suites, drop deps, extend `.gitignore` and add its `git check-ignore` guard (which also covers PR 2's `eval/` entries), pin CI actions to commit SHAs and move `TestCIWorkflow` with them (§3.13 rule 9) | `feat!:` | moved suites' test count unchanged; description names the orphaned 7.3 GB Granite 4.2 cache entry (§3.12 rule 4); **after merge**, with the user's confirmation: new topics + interim GitHub description (§9.2) and Dependabot alerts on (§3.13 rule 6) |
 | 4 | `feat/phase-a` | packaging (`[build-system]`, `[project.scripts]`, `pythonpath`, §3.6), deps under §2.2's constraints, `config`, `models` + minimal `cli` (`gdi convert-model` only), `api` stubs, `convert`, `export`, `memory` | `feat:` | a hand run on one corpus PDF, numbers in the PR description; gate ≤ 15 s (§3.14 rule 9) |
 | 5 | `feat/chunks-kvp` | `chunk`, `kvp` | `feat:` | hand run with a schema on the corpus form |
-| 6 | `feat/cli-batch` | `api` complete, `safety`, `runlock`, `batch`, `gdi convert` | `feat:` | hand run on the whole public corpus |
+| 6 | `feat/cli-batch` | `api` complete, `safety`, `runlock`, `batch`, `gdi convert`, page-level resume (§3.14 rule 7 — S8 fired the trigger; in scope once the spike report is approved) | `feat:` | hand run on the whole public corpus |
 | 7 | `test/eval-harness` | `eval/score.py`, `eval/matching.py`, `tests/test_score.py`, `eval/budgets.toml` (budgets + tolerances) from **this PR's own** median-of-three baseline (§3.11), the first results file as **baseline**, and S6/S7/S11 re-run through `score.py` (§4) | `test:` | `test_score.py` green and each bad-prediction case mutation-checked; baseline committed; every budget met; spike verdicts confirmed or amended |
 | 8 | `docs/rewrite` | `CLAUDE.md` and `README.md` rewrites (§9), `SECURITY.md` (§3.13 rule 9) | `docs:` | README commands run as written |
 | 9 | `chore/release-1.0.0` | `version = "1.0.0"` + `uv lock`, **both files** | `chore:` | **every §16 item checked**; eval run on the release commit meets baseline and budgets; `pyproject.toml` `description` set to §9.2's final sentence in this PR; **after merge**, with the user's confirmation: final GitHub description (§9.2) |
@@ -1303,7 +1321,7 @@ GitHub details (§9.2); UI theme and layout for v1.x (§14, §15).
 | `--text-source` default | S5 — **settled 2026-10-25:** `vlm`; `pdf` is opt-in for trusted born-digital text layers (§3.2) |
 | 8-bit vs 6-bit/bf16 Granite Vision | S6 |
 | Granite Vision's chart role | S7 |
-| page-level resume (trigger: typical PDF > ~5 min) | S8 |
+| page-level resume (trigger: typical PDF > ~5 min) | S8 — **trigger fired 2026-10-25:** in v1, PR 6, pending approval of the spike report (§3.14 rule 7) |
 | torch-free install, ONNX classifier | S9 |
 | page batch size, CPU–GPU overlap, `images_scale` | S11 |
 
@@ -1495,7 +1513,8 @@ of the working text app; `git checkout v0.6.0` restores it intact if the rebuild
 | Memory isn't released between phases, or creeps across pages | S4 — **retired 2026-10-25**: release returns active memory to 0, per-page peak flat over 42 pages, 7.00 GB run peak (§3.1) | — |
 | Model-repo code executes despite native transformers | S10 | stop; pin a transformers version that loads natively, or patch the loader — user decides |
 | 8-bit Granite Vision degrades charts or KVP | S6 | 6-bit or bf16, re-measured against the 10 GB ceiling |
-| Too slow to be useful on 16 GB | S8, S11 | batch/scale tuning (S11); page-level resume (§3.14 rule 7); fewer charts by default |
+| Too slow to be useful on 16 GB | S8 — born-digital measured: ~6 s/page, ~10 pages/min sustained, no throttling over ~10 min; S11 | batch/scale tuning (S11); page-level resume (§3.14 rule 7, now in v1); fewer charts by default |
+| On image-only pages granite-docling drops the page's text (`<logo></picture></doctag>`, 25 tokens, `status=success`) or emits hundreds of false pictures, and the false charts multiply Granite Vision's time (S8's stand-in: 441 pictures, 102 chart pairs, 3.4× slower). It reproduces from Docling's softer page render; pypdfium2's render of the same page converts in full | S8 (image-only stand-in) | confirm on the real scan (S5 and S8 scanned halves); then test a sharper render (`images_scale`, S11) or a different render path; a cap on pictures per page sent to Granite Vision; §3.10's detection extended to near-empty pages |
 | A Docling or mlx-vlm release breaks the API mid-build | a lock move fails the eval | §2.2: caps + per-package deliberate upgrades; stay on the locked version |
 | `main` stays tooling-only for weeks after PR 3 | calendar | nothing ships until PR 9; `v0.6.0` remains installable; PR 3's README note says so |
 | A sideways-printed or very wide table loops silently in granite-docling | S3 (seen: Table A-2 of the Census P60-282 report) | post-hoc loop/cap detection puts the page in `run.json` warnings (§3.10); `force_backend_text` does **not** recover it (S5: it empties the looped items and leaves the table absent); the corpus includes one such page (§4.1) |
