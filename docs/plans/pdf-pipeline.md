@@ -1556,7 +1556,7 @@ Phase 0 may already be under way. Before anything else:
 Finish by summarizing each spike's verdict and every plan amendment, and ask me to
 approve the spike report before any Phase 1 work starts.
 
-This session: do S5 only, then commit, push and stop.
+This session: do S8 only, then commit, push and stop.
 ```
 
 The last line limits one session to one spike. Change it to the next open spike
