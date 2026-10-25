@@ -407,7 +407,17 @@ diverge on it.
   kept per PDF:** the reload is ~4.5 s (rebuild 2.6 s + Granite Vision 1.9 s), and a
   cold load after `purge` adds only ~1 s. That is ~2% of a 42-page PDF but about a
   third of a one-page form's ~9 s. A batch of one-page forms is the case that
-  would reopen this decision.
+  would reopen this decision. **Decided with the user (2026-10-25):** per PDF stays,
+  and PR 5 looks into removing the reload instead of reordering the phases.
+  - Docling already holds a Granite Vision instance for charts, and Phase A's 7.0 GB
+    peak includes it. S4's ~10.5 GB problem was a *second* copy.
+  - If `kvp` can run on Docling's loaded instance, or hand Docling one that `kvp`
+    loaded, through **public API**, the converter is not released before Phase B. The
+    reload disappears for every batch size, and the peak should stay near 7 GB. PR 5
+    measures that peak against §3.11's ceiling.
+  - If it can only be done through private Docling attributes, it is not done. In that
+    case all-A-then-all-B is adopted only if the private tier (§4.1) turns out to be
+    mostly short forms.
 - A failed PDF writes `run.json` with `"status": "error"` and the traceback, and the
   batch continues; exit status is non-zero if any PDF failed. A batch summary
   (done / skipped / failed, with paths) goes to stderr at the end.
@@ -522,8 +532,16 @@ Budgets turn S4/S8's measurements into regression checks that `eval/score.py` en
 - **Degeneration count:** pages that hit `max_tokens` (§3.10) — budget **0** on the
   public corpus. **Open conflict (S8):** both born-digital PDFs S8 timed have one
   capped page (GAO-07-631 p. 24, GAO-07-535 p. 38), and GAO-07-631 is the 30+ page
-  candidate. PR 2 or PR 7 either fixes those pages or lists them as named exceptions
-  against a fixed count; the budget is not quietly raised.
+  candidate. **Decided with the user (2026-10-25): named exceptions.**
+  - `eval/budgets.toml` lists each known capped page by PDF and page number.
+  - The budget becomes "no capped page outside the list". A new capped page fails the
+    run, and a listed page that stops capping is reported as a fix.
+  - GAO-07-631 stays in the corpus, because its capped page is exactly the failure the
+    eval exists to catch.
+  - Two cheap fixes are tried in S11 or PR 7. One retries a capped page once at a
+    different `images_scale`. The other stops generation when §3.10's loop detector
+    fires instead of at 8192 tokens, which saves most of a capped page's 36 s even
+    where the text cannot be recovered.
 - **Enforcement:** `score.py` reports each metric against its budget and fails the run
   if any is exceeded, exactly as a quality drop fails it. **Raising a time budget needs
   a committed `eval/results/` file showing why** (a new Docling version that is
@@ -738,8 +756,16 @@ fastest configuration" — and by quality per second through the eval (§8.1).
    Deferred until S8 shows a typical PDF takes **more than ~5 minutes**; the S8 write-up
    records whether the trigger fired. **It fired (S8, 2026-10-25):** a 69-page GAO
    report took 7.1 min of Phase A, and 8 of the 10 GAO candidates run 59–216 pages
-   (~6–22 min at ~6 s/page). Page-level resume moves into v1, in PR 6, **subject to the
-   user's approval of the spike report**.
+   (~6–22 min at ~6 s/page). **Decided with the user (2026-10-25): in v1, PR 6,
+   kept small.** The realistic case is not a crash. It is a Ctrl-C, a closed lid or a
+   reboot partway through a long PDF. Scope:
+   - Cache **only granite-docling's per-page DocTags**, roughly 70% of Phase A's time,
+     in `OUT_DIR/<pdf>.partial/pages/`. Chart and KVP outputs are not cached.
+   - Key each cached page on the input SHA-256, the model SHAs and the options hash.
+     A page whose key does not match is regenerated: every uncertainty runs (§3.8).
+   - **Feasibility gate (PR 4):** if Docling cannot assemble the document from cached
+     DocTags through public API, resume is deferred again and the reason recorded
+     here. It is never built on private Docling internals or a patch.
 8. **KVP prompt caching — later, not v1.** With `--pages all` every page re-encodes the
    same schema. MLX supports prompt caching, but if Granite Vision's prompt puts the
    image before the schema (check the chat template), little is reusable. Noted as a
@@ -1276,7 +1302,7 @@ One PR per step, each off a fresh branch from `main`, each green in CI before me
 | 3 | `feat/teardown` | §5: delete the text app, move the tooling suites, drop deps, extend `.gitignore` and add its `git check-ignore` guard (which also covers PR 2's `eval/` entries), pin CI actions to commit SHAs and move `TestCIWorkflow` with them (§3.13 rule 9) | `feat!:` | moved suites' test count unchanged; description names the orphaned 7.3 GB Granite 4.2 cache entry (§3.12 rule 4); **after merge**, with the user's confirmation: new topics + interim GitHub description (§9.2) and Dependabot alerts on (§3.13 rule 6) |
 | 4 | `feat/phase-a` | packaging (`[build-system]`, `[project.scripts]`, `pythonpath`, §3.6), deps under §2.2's constraints, `config`, `models` + minimal `cli` (`gdi convert-model` only), `api` stubs, `convert`, `export`, `memory` | `feat:` | a hand run on one corpus PDF, numbers in the PR description; gate ≤ 15 s (§3.14 rule 9) |
 | 5 | `feat/chunks-kvp` | `chunk`, `kvp` | `feat:` | hand run with a schema on the corpus form |
-| 6 | `feat/cli-batch` | `api` complete, `safety`, `runlock`, `batch`, `gdi convert`, page-level resume (§3.14 rule 7 — S8 fired the trigger; in scope once the spike report is approved) | `feat:` | hand run on the whole public corpus |
+| 6 | `feat/cli-batch` | `api` complete, `safety`, `runlock`, `batch`, `gdi convert`, page-level resume (§3.14 rule 7: DocTags only, if PR 4's feasibility check passed) | `feat:` | hand run on the whole public corpus |
 | 7 | `test/eval-harness` | `eval/score.py`, `eval/matching.py`, `tests/test_score.py`, `eval/budgets.toml` (budgets + tolerances) from **this PR's own** median-of-three baseline (§3.11), the first results file as **baseline**, and S6/S7/S11 re-run through `score.py` (§4) | `test:` | `test_score.py` green and each bad-prediction case mutation-checked; baseline committed; every budget met; spike verdicts confirmed or amended |
 | 8 | `docs/rewrite` | `CLAUDE.md` and `README.md` rewrites (§9), `SECURITY.md` (§3.13 rule 9) | `docs:` | README commands run as written |
 | 9 | `chore/release-1.0.0` | `version = "1.0.0"` + `uv lock`, **both files** | `chore:` | **every §16 item checked**; eval run on the release commit meets baseline and budgets; `pyproject.toml` `description` set to §9.2's final sentence in this PR; **after merge**, with the user's confirmation: final GitHub description (§9.2) |
@@ -1321,7 +1347,7 @@ GitHub details (§9.2); UI theme and layout for v1.x (§14, §15).
 | `--text-source` default | S5 — **settled 2026-10-25:** `vlm`; `pdf` is opt-in for trusted born-digital text layers (§3.2) |
 | 8-bit vs 6-bit/bf16 Granite Vision | S6 |
 | Granite Vision's chart role | S7 |
-| page-level resume (trigger: typical PDF > ~5 min) | S8 — **trigger fired 2026-10-25:** in v1, PR 6, pending approval of the spike report (§3.14 rule 7) |
+| page-level resume (trigger: typical PDF > ~5 min) | S8 — **trigger fired; decided 2026-10-25:** in v1, PR 6, DocTags only, gated on a public-API feasibility check in PR 4 (§3.14 rule 7) |
 | torch-free install, ONNX classifier | S9 |
 | page batch size, CPU–GPU overlap, `images_scale` | S11 |
 
