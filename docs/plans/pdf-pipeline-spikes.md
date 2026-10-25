@@ -13,7 +13,8 @@ Spike scripts live in the session scratchpad, never in the repo.
 | S5 | **Pass**, born-digital half (scanned half pending the scan) | yes — default `vlm`; the flag is `VlmConvertOptions`'s; detection reads DocTags; S4's capped page is 24 (§3.2, §3.10, §8, §12, §17) |
 | S8 | **Pass**, born-digital half (scanned half pending the scan; an image-only stand-in collapses) | yes — the page-level-resume trigger fired; S8's numbers recorded as the budgets' reference; output size per page; a new image-only risk (§3.8, §3.11, §3.12, §3.14, §12, §17) |
 | S9 | **Pass** — (a) no, (b) the ONNX engine matches but torch is imported anyway, (c) no | yes — torch stays, the classifier stays on transformers; torch's cost corrected; DocTags labels skip the classifier (§0, §2.1, §3.2, §9.2, §12, §17) |
-| S6, S7, S10, S11 | not run | — |
+| S10 | **Fail**: Granite Vision's repo `configuration.py` runs on every load of the 8-bit folder, through mlx-vlm's `trust_remote_code=True` default. Revisions reach every loader. Stopped for a decision | pending the decision. A tested fix (strip the repo's code from the converted folder) is recorded with the options |
+| S6, S7, S11 | not run | — |
 
 ## S1 — dependency resolution and the chunking tokenizer (2026-10-24)
 
@@ -287,9 +288,12 @@ uv run python -m mlx_vlm convert --hf-path ibm-granite/granite-vision-4.1-4b \
   **vision tower, which mlx-vlm leaves in bf16** (0.86 GB); the language model
   (3.62 GB), `lm_head` and the layerwise projectors are all quantized.
 - The output directory **carries the source repo's Python files**: `modeling.py`,
-  `processing.py`, `configuration.py`, `downsampling.py`. They are not imported here,
-  but S10's "no module from the HF cache in `sys.modules`" check must also cover the
-  models directory, where these files now live.
+  `processing.py`, `configuration.py`, `downsampling.py`. S10's "no module from the HF
+  cache in `sys.modules`" check must also cover the models directory, where these
+  files now live. **Corrected by S10:** this note originally said they were "not
+  imported here". They were. This run's Phase A imported `configuration.py` from the
+  8-bit folder, and the compiled module it left in `~/.cache/huggingface/modules/` is
+  what S10 found first.
 - `mlx_vlm convert` also fetched the repo's `README.md` at `main` (a README-only
   `37d591f…` snapshot appeared in the HF cache beside `dd48e97…`). The weights came
   from the pinned revision.
@@ -989,3 +993,164 @@ torch is imported anyway; (c) no.
 - Docling's `asr_model_specs` already probes for torch with `try: import torch`, at
   import of `pipeline_options`, which is why that import succeeds torch-free. The
   pattern for an upstream fix exists in the codebase.
+
+## S10 — model-repo code and revision overrides (2026-10-25)
+
+**Question.** Does any load path execute model-repo code, and do revision overrides
+reach every loader (§3.13 rules 1–2)? Pass: **no** module from the HF cache or the
+models directory is imported by `mlx_vlm.convert`, a Phase A conversion or the
+classifier. The three Docling models' SHAs match `models/manifest.json`, and the
+tokenizer's revision is observed at its loader. If any repo code is imported, stop and
+report.
+
+**Environment.** A fresh scratch project with S8's constraints, highest resolution,
+and versions identical to S8/S9: docling / docling-slim 2.142.1, docling-core 2.104.0,
+mlx-vlm 0.7.10, mlx 0.32.4, transformers 5.20.2, tokenizers 0.23.3, torch 2.14.1,
+huggingface-hub 1.33.0. Granite-docling MLX `e9939db…`, `DocumentFigureClassifier-v2.5`
+`f859dfb…` (both still each repo's `main`), Granite Vision source `dd48e97…`,
+`granite-embedding-english-r2` `47ea694…` (its `main`; the only snapshot cached).
+M2 Pro, 16 GB, macOS 27.0.1.
+
+**The detector.** A `sitecustomize` hook was loaded into every probe process, the
+`mlx_vlm` CLI included. It watched four roots: the HF home (hub and modules cache), a
+fresh scratch `HF_MODULES_CACHE` and both models directories. It recorded:
+
+- every code object **executed** from a root, via the audit `exec` event, which fires
+  for every module body an import runs, whether from source or from a cached `.pyc`
+- every file opened under a root, which shows which snapshot or folder each loader
+  read
+- every transformers `resolve_trust_remote_code` decision, with its arguments and
+  caller
+- every `get_class_from_dynamic_module` call
+
+At exit it also recorded any `transformers_modules*` entry, or any module under a root,
+left in `sys.modules`. **Positive control:** loading GV's `AutoConfig` and
+`AutoProcessor` with `trust_remote_code=True` was caught by all four signals. With
+`None` or `False` it was caught by none.
+
+**What was run.**
+
+1. **Models directory, built the way §3.13 rule 1 says.** Granite-docling and the
+   classifier were fetched at their SHAs with `snapshot_download(..., local_dir=…)`,
+   giving real files with no symlinks. `models/manifest.json` was written from the
+   fetch metadata.
+2. **Conversion**, in two forms:
+   - §4.2's CLI command, `HF_HUB_OFFLINE=1`, into the same directory
+   - the Python API `mlx_vlm.convert.convert(...)`, with its default and with
+     `trust_remote_code=False`
+3. **Phase A**: S8's §3.2 converter from the new directory, on S2's five Census
+   chart pages, offline and under the socket guard. This covers granite-docling, the
+   classifier and the GV chart stage.
+4. **Phase B's load** of GV, both as `mlx_vlm.load(path)` and as
+   `mlx_vlm.load(path, trust_remote_code=False)`.
+5. **The chunking tokenizer** via `HuggingFaceTokenizer.from_pretrained`, offline:
+   pinned, unpinned, and with a SHA that is not cached.
+
+**Results.**
+
+| Load path | trust passed to transformers | Repo code executed |
+|---|---|---|
+| `python -m mlx_vlm convert` (§4.2) | False (CLI flag defaults off) | none |
+| `convert()` Python API, default | **True** (`trust_remote_code: bool = True`) | **`configuration.py`**, from the `dd48e97` snapshot |
+| `convert()` Python API, `trust_remote_code=False` | False | none |
+| granite-docling, Docling MLX engine | no decision (repo has no `auto_map`) | none |
+| figure classifier, Docling transformers engine | None, no remote code | none |
+| **GV chart stage, Docling MLX engine (Phase A)** | **True** | **`configuration.py`**, from the models directory |
+| GV, `mlx_vlm.load(path)` (Phase B) | **True** | the same class (already loaded) |
+| GV, `mlx_vlm.load(path, trust_remote_code=False)` | False | none |
+| tokenizer, pinned / unpinned | no decision (no `auto_map`) | none |
+
+**Why Granite Vision runs its own code.** Nobody in the chain asks for it:
+
+1. Docling's `MlxVlmEngine` calls `load(path, strict=…)` and has no way to pass
+   `trust_remote_code`.
+2. `mlx_vlm.load` calls `AutoProcessor.from_pretrained(path)`, which mlx-vlm replaces
+   with its own patch (`mlx_vlm/models/base.py:671`). For every model type that
+   registers an mlx-vlm processor, `granite4_vision` among them, the patch does
+   `kwargs.setdefault("trust_remote_code", True)`.
+3. mlx-vlm's `Granite4VisionProcessor` then calls `AutoTokenizer.from_pretrained` with
+   True.
+4. GV's `config.json` carries an `auto_map`. With True, transformers prefers the
+   repo's class over its own native `Granite4VisionConfig`, copies `configuration.py`
+   into the modules cache and imports it.
+
+`processor_config.json` and `preprocessor_config.json` carry `auto_map` entries too,
+one of them nested under `image_processor`. Both defaults are unchanged on mlx-vlm
+`main` as of 2026-10-25.
+
+The code that runs is the pinned `configuration.py` (1,849 bytes, a `LlavaNextConfig`
+subclass that sets fields). It is benign at `dd48e97`. Rule 2 exists because it would
+run whatever that file says: after a pin bump, or if anything edits the models
+directory, which lives in the user's own cache.
+
+**Revisions — this half passes.**
+
+- **Docling models:** each folder's commit, from its `local_dir` fetch metadata,
+  equals the pin in `manifest.json`. Each folder is byte-identical to the HF snapshot
+  at that SHA, with no extra files (15 and 8 files).
+- **Conversion:** every config, tokenizer and code file was read from `dd48e97`'s
+  blobs. The weights are opened by native code the audit hook cannot see. The output
+  is byte-identical to S2's conversion, and `dd48e97` is the only cached snapshot with
+  safetensors. One leak: the model-card step reads `README.md` through `refs/main`
+  (`37d591f`), ignoring `--revision`. That is metadata only, and it is why S2 saw a
+  README-only `main` snapshot appear.
+- **Tokenizer:** the revision reaches its loader. Pinned, it reads
+  `trees/47ea694….json` and never `refs/main`. Unpinned, it reads `refs/main`. A SHA
+  that is not cached fails offline. Nothing executes.
+
+**Verdict: fail.** Every load of the converted Granite Vision folder that does not pass
+`trust_remote_code=False` explicitly imports the repo's `configuration.py`. That
+includes Docling's chart stage, which cannot pass it. Revision overrides do reach every
+loader.
+
+**A tested fix.** Strip the repo's code from the converted folder, which we write and
+own. Delete the four `.py` files, and remove every `auto_map` key, nested ones included,
+from `config.json`, `preprocessor_config.json` and `processor_config.json`. The
+stripped folder was tested on the same five pages:
+
+- No code executed in Phase A or in either Phase B load, and transformers was never
+  asked to decide trust for GV.
+- The modules cache stayed empty.
+- `doc.md` and every chart's CSV and summary were **byte-identical** to the unstripped
+  run.
+
+With no code in the folder, mlx-vlm's `True` default has nothing to import. That holds
+for any loader, without a monkeypatch.
+
+**Options (for the user to decide; nothing is amended yet).**
+
+1. **Strip at conversion (recommended).** `gdi convert-model`:
+   - converts with `trust_remote_code=False`, whether through the CLI or by passing it
+     explicitly to `convert()`, whose default is True
+   - deletes the repo's `*.py` files and every `auto_map` key from the output
+   - records both in `manifest.json`
+
+   `convert()` refuses a models directory that contains any `*.py` file or `auto_map`.
+   Our own Phase B code passes `trust_remote_code=False` as well. `test_convert.py`
+   covers the refusal.
+2. **Leave the files and block at runtime.** Docling exposes no way to pass the flag,
+   so this needs a monkeypatch of mlx-vlm or Docling, which the plan does not ship.
+3. **Accept pinned repo code.** Amend rule 2 to "only code from a pinned, reviewed
+   revision runs". This is the weakest option: it trusts a file in a user-writable
+   directory on every load.
+
+Separately, whether to report mlx-vlm's two `True` defaults upstream is the user's
+call.
+
+**Also learned.**
+
+- **The models directory S2–S9 used is not the plan's layout.**
+  `~/.cache/granite-document-intelligence/models/` holds **symlinks** into the HF
+  cache for granite-docling and the classifier, the arrangement §3.13 rule 1 rejects.
+  S10 built a fresh directory with real files. Results are unaffected: the folders
+  are byte-identical to the snapshots.
+- **The stale module is still in the HF modules cache.** The `configuration.py` that
+  S2 caused to be imported remains under
+  `~/.cache/huggingface/modules/transformers_modules/local_hyphen__hyphen_granite…/`.
+  It is not used unless a load passes True again, and it is safe to delete.
+- **A child process inherits an import hook.** Phase A starts a Python child process,
+  probably multiprocessing's resource tracker. It loaded the detector too and, on its
+  first run, overwrote the main report with an empty one, which made the run look
+  clean while the modules cache said otherwise. Any `sys.modules` check that PR 4 or
+  PR 7 automates should write per-process results, or should check the modules
+  cache's contents as well.
