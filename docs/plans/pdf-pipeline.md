@@ -229,10 +229,26 @@ Use the explicit `_mlx` preset, not `granite_vision_v4` (auto-inline): the auto 
 silently falls back to transformers on CPU/MPS when mlx-vlm is missing or broken, which
 on this machine means a second, bf16 copy of the model and a pipeline many times slower.
 
-**Hybrid text mode.** `VlmPipelineOptions(force_backend_text=True)` takes text from the
-PDF's own text layer and routes only images and tables through the VLM — the SDK docs
-say it reduces hallucination on text-heavy pages. On scanned pages there is no text
-layer. Spike S5 decides the default; expose it as `--text-source {vlm,pdf}` either way.
+**Hybrid text mode** (amended by S5, 2026-10-25). `--text-source pdf` sets
+**`VlmConvertOptions.force_backend_text=True`**, on the preset, not on the pipeline.
+`VlmPipelineOptions.force_backend_text` is read only on the deprecated legacy path, so
+on the preset path it is a silent no-op: its output is byte-identical to the default.
+The flag does not route anything around the VLM. Every page is still generated in
+full, and afterwards each text item's text (paragraphs, headings, captions, footnotes,
+list items) is replaced by the PDF text lines lying mostly inside the VLM's box for it.
+Tables are untouched, and no time is saved.
+
+**The default is `vlm`.** The two modes fail differently:
+
+- `vlm` makes the rarer errors, but they are the dangerous kind: S5 caught "73" for
+  "7.3", an inserted phrase, and two invented paragraphs on a chart page.
+- `pdf` fixes those, but silently drops whatever falls outside a too-small box
+  (footnotes, figure sources, whole paragraphs). It doubles text the PDF overprints,
+  leaves line-break hyphens ("per- cent"), and on a page with no text layer (a scan)
+  empties every text item.
+
+`pdf` is documented as an opt-in for born-digital PDFs whose text layer the user
+trusts.
 
 ### 3.3 Key-value extraction (our code)
 
@@ -440,7 +456,10 @@ reaches a model. Rules, each with a test (§8):
   looped 348 times, then *closed itself* with `</doctag>` under the cap. Flag a page when
   `num_tokens >= max_new_tokens` **or** its DocTags do not end in `</doctag>` (capped), **or**
   Docling's `DocTagsRepetitionStopper.should_stop` trips on any 640-character sliding
-  window of the final text (a loop that ended itself). An in-generation stopper does
+  window of the final text (a loop that ended itself). Run all three checks on each
+  page's **raw DocTags** (`vlm_response.text`), never on the exported document: under
+  `--text-source pdf` the loop's text items come back empty (S5), so a check on the
+  document would miss the loop. An in-generation stopper does
   not work on MLX, because mlx-vlm's BPE detokenizer streams no text until a token
   begins with a space, and DocTags loops have none. So a looping page runs to the
   cap (~37 s at S3's ~230 tokens/s) — a cost, not a hang.
@@ -944,7 +963,9 @@ Same philosophy as today: **mock at the model boundary**, never download in CI.
   `artifacts_path` set to the models directory and Granite Vision's MLX `repo_id` set to
   `local/granite-vision-4.1-4b-8bit` (S2). This is the silent-degradation guard: the
   auto preset or a dropped `repo_id` still produces output, just from the wrong model.
-  Also (§3.13): a manifest that disagrees with `config.py` is refused before any model
+  `--text-source pdf` sets `force_backend_text` on the `VlmConvertOptions`, and `vlm`
+  sets it on neither options object. Setting it on `VlmPipelineOptions` is a silent
+  no-op on the preset path (S5). Also (§3.13): a manifest that disagrees with `config.py` is refused before any model
   loads, the tokenizer reaches its loader at its pinned SHA, and no call from our code
   passes `trust_remote_code=True`.
 - `test_chunk.py` — chunks from a hand-built `DoclingDocument`: headings carried,
@@ -1279,7 +1300,7 @@ GitHub details (§9.2); UI theme and layout for v1.x (§14, §15).
 | local-path model loading | S2 — **settled 2026-10-25:** one `artifacts_path` models directory (§3.2) |
 | Phase B ordering in batches (per PDF vs all-A-then-all-B) | S4 — **settled 2026-10-25:** per PDF (§3.8) |
 | `mx.set_cache_limit` value | S4 — **settled 2026-10-25:** 1 GiB (§3.14 rule 5) |
-| `--text-source` default | S5 |
+| `--text-source` default | S5 — **settled 2026-10-25:** `vlm`; `pdf` is opt-in for trusted born-digital text layers (§3.2) |
 | 8-bit vs 6-bit/bf16 Granite Vision | S6 |
 | Granite Vision's chart role | S7 |
 | page-level resume (trigger: typical PDF > ~5 min) | S8 |
@@ -1477,7 +1498,8 @@ of the working text app; `git checkout v0.6.0` restores it intact if the rebuild
 | Too slow to be useful on 16 GB | S8, S11 | batch/scale tuning (S11); page-level resume (§3.14 rule 7); fewer charts by default |
 | A Docling or mlx-vlm release breaks the API mid-build | a lock move fails the eval | §2.2: caps + per-package deliberate upgrades; stay on the locked version |
 | `main` stays tooling-only for weeks after PR 3 | calendar | nothing ships until PR 9; `v0.6.0` remains installable; PR 3's README note says so |
-| A sideways-printed or very wide table loops silently in granite-docling | S3 (seen: Table A-2 of the Census P60-282 report) | post-hoc loop/cap detection puts the page in `run.json` warnings (§3.10); S5 measures whether `force_backend_text` recovers it; the corpus includes one such page (§4.1) |
+| A sideways-printed or very wide table loops silently in granite-docling | S3 (seen: Table A-2 of the Census P60-282 report) | post-hoc loop/cap detection puts the page in `run.json` warnings (§3.10); `force_backend_text` does **not** recover it (S5: it empties the looped items and leaves the table absent); the corpus includes one such page (§4.1) |
+| granite-docling silently mis-transcribes prose: a wrong number ("73" for "7.3"), an inserted phrase, invented paragraphs on a chart page, or a whole prose page lost to a loop (GAO-07-631 p. 24) | S5 | cap/loop detection flags the lost page (§3.10); `--text-source pdf` for trusted born-digital PDFs (§3.2); PR 7 decides whether the eval scores prose numbers against the text-layer reference (§8.2) |
 | The eval corpus can't be licensed cleanly | Task C | public-domain US federal sources + project-made PDFs only (§4.1) |
 
 ## Appendix A — kickoff prompt for the implementing session

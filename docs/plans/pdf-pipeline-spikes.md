@@ -10,7 +10,8 @@ Spike scripts live in the session scratchpad, never in the repo.
 | S2 | **Pass**, through `artifacts_path` | yes — every Docling model loads from one models directory; pins enforced at fetch; 4.92 GB; command form (§2, §3.2, §3.12, §3.13, §4, §4.2, §6, §8, §12, §17) |
 | S3 | **Pass**, with findings | yes — `VlmConvertOptions` preset, 8192-token cap, loop and cap detection are our code (§2, §2.1, §3.2, §3.10, §3.13, §3.14, §4, §8, §17) |
 | S4 | **Pass** | yes — `mx.set_cache_limit` 1 GiB; Phase B per PDF; working set 12.71 GB (§2, §3.1, §3.8, §3.11, §3.14, §12, §17) |
-| S5–S11 | not run | — |
+| S5 | **Pass**, born-digital half (scanned half pending the scan) | yes — default `vlm`; the flag is `VlmConvertOptions`'s; detection reads DocTags; S4's capped page is 24 (§3.2, §3.10, §8, §12, §17) |
+| S6–S11 | not run | — |
 
 ## S1 — dependency resolution and the chunking tokenizer (2026-10-24)
 
@@ -490,6 +491,9 @@ pages. The §3.1 fallback (chart extraction in our own code) is not needed.
   and given CSVs and summaries. The DocTags were not saved, so what looped is unknown;
   §3.10's cap detection would flag it. A second capped-page shape after S3's sideways
   table, and one more reason the corpus needs this PDF.
+  **Corrected by S5:** the capped page is **24**, a prose page whose 203 words are lost
+  entirely, not Figure 8. "Page 25" was the 25th granite-docling generation, and
+  generation order is not page order.
 - All nine figures were classified as charts (`line_chart` / `bar_chart`, eight at
   ≥ 0.99 and one at 0.83) and all nine kept their CSV, unlike S2's comma-labelled Census
   charts. Logos (5) and a signature (1) were not sent to Granite Vision.
@@ -499,3 +503,147 @@ pages. The §3.1 fallback (chart extraction in our own code) is not needed.
   Committees"}` (50 tokens, 5.3 s). That is a single smoke check, not S6.
 - Phase A took ~6 s per page including charts (247–278 s for 42 pages). That is a
   sanity point for S8, not its measurement.
+
+## S5 — `force_backend_text` on vs off: born-digital half (2026-10-25)
+
+**Question.** Should Docling take text from granite-docling's own output (`vlm`) or from
+the PDF's text layer (`pdf`)? Pass: pick the default from a read of the output, not
+from a metric alone, on one born-digital and one scanned PDF. **Only the born-digital
+half was run.** The scanned half waits for Task C's print-and-scan step (§4.1), which
+needs the user's hands.
+
+**Environment.** The S4 scratch project and models directory, unchanged: docling /
+docling-slim 2.142.1, docling-core 2.104.0, docling-parse 7.23.0, **mlx-vlm 0.7.10**,
+mlx 0.32.4, transformers 5.20.2, torch 2.14.1, pypdfium2 5.14.0; granite-docling
+`e9939db…`. Every run used `HF_HUB_OFFLINE=1` and the S2 socket guard: 0 network
+attempts.
+
+**Test PDFs.** Both are born-digital US federal works and so public domain:
+
+- **GAO-07-631**, all 42 pages (S4's file, SHA-256 `51f6dca9…360790471f`).
+- **S3's five Census P60-282 pages**: report pages 2, 4, 5, 15 and 16, cut from the
+  current `p60-282.pdf` (SHA-256 `e6cf145c…2eabba1cbf`). They include the prose pages,
+  Table A-1 and the sideways Table A-2.
+
+**Read the code first.** Docling 2.142.1 has **two** `force_backend_text` fields, and on
+the preset path only one of them does anything. `VlmPipeline._initialize_vlm_models`
+reads `VlmConvertOptions.force_backend_text`. `VlmPipelineOptions.force_backend_text`,
+the field §3.2 named, is read only on the deprecated legacy path. The flag does not
+change generation either: every page still goes through granite-docling in full. Then,
+in `_finalize_page_output`, the text of each `TextItem` is replaced by
+`get_text_in_rect(bbox)`, which joins (with a space) every docling-parse text **line**
+whose area lies more than half inside the box the VLM predicted. `TextItem` covers
+paragraphs, headings, captions, footnotes and list items. Tables are a different item
+type, so they are never touched.
+
+**What was run.** One probe script (§3.2's configuration, with chart extraction and
+picture classification off because the flag touches only text) in three modes:
+
+- `off` — neither flag set.
+- `convert` — `VlmConvertOptions.force_backend_text=True`.
+- `pipeline` — `VlmPipelineOptions.force_backend_text=True`.
+
+Each run saved the `DoclingDocument`, the Markdown and every page's raw DocTags. Greedy
+decoding makes the DocTags identical across modes, so text items pair one-to-one, and
+each pair was diffed and checked against the page's text layer (pypdfium2).
+
+**Results.**
+
+| | Census (5 pages) | GAO-07-631 (42 pages) |
+|---|---|---|
+| DocTags, off vs `convert` vs `pipeline` | byte-identical | byte-identical (off vs `convert`) |
+| `pipeline` mode Markdown vs off | **byte-identical**: the flag is ignored | — |
+| Text items | 396 | 301 |
+| unchanged by `convert` | 26 | 237 |
+| formatting only (hyphens, footnote markers, quotes, dashes, bullets) | 13 | 35 |
+| emptied | 350 (348 of them the loop's `Table` items) | 12 |
+| content differs | 7 | 17 |
+| Tables | identical | identical |
+| Wall time, off / `convert` | 69.8 s (cold) / 59.3 s | 172.2 s / 171.4 s |
+
+Every change was then read and checked against the text layer:
+
+- **The backend fixes real VLM transcription errors**, which are silent and include a
+  wrong number:
+  - Census: "a **73** percent increase" where the PDF says **7.3**; and "median income
+    of non-Hispanic households 55 to 64", an insertion where the PDF says
+    "householders 55 to 64".
+  - GAO: GWO → GWOT, uniform → uniformed, resolicting → resoliciting.
+  - GAO page 26 (Figure 9, a chart page): the VLM invented **two paragraphs** ("The
+    number of people who were outsource workers … is 1,000,000", repeated). The
+    backend leaves those boxes empty, because no text lies in them.
+  - Smaller wins: two URLs the VLM dropped ("available at ."); plain footnote numbers
+    where the VLM writes `$^{1}$` (18 footnotes).
+- **The backend loses content wherever the VLM's box is too small**, and it does so
+  silently. These are the "emptied" and most of the "content differs" rows:
+  - Census page 4: two footnotes emptied and three truncated to their last lines.
+    Table A-2's title cut to "Table A-2.".
+  - GAO: a sentence with two figures dropped (page 6: "an increase of $76.1 billion,
+    or 57 percent"). Figure source lines and notes emptied (pages 12, 13, 14, 18).
+    Half a sentence and a list heading gone (page 31). The **whole opening paragraph**
+    of Appendix I gone (page 40). The contact block gone (page 42).
+  - In every case checked, the VLM had the full text, and the text layer confirms it.
+    The VLM reads past its own box; the backend cannot.
+- **The backend duplicates text when the PDF overprints it.** GAO page 5 draws every
+  text line twice at the same coordinates (docling-parse returns two identical
+  cells), so each of the page's three paragraphs comes back **twice**. Two appendix
+  headings are doubled the same way, one with letters lost
+  ("A GAO Contact and Staff cknowledgments"). The VLM reads the page image and sees
+  each line once.
+- **Line-break hyphens survive**: "per- cent", "differ- ent", "popula- tion" (37 on
+  the five Census pages, 5 in GAO). docling-parse marks the break as `"- "`, which
+  also appears where the PDF breaks a genuine compound ("in- house", "sole- source"),
+  so naive de-hyphenation would turn those into "inhouse" and "solesource". Em dashes
+  and curly quotes become `-` and straight quotes.
+- **It does nothing for loops.** On the sideways Table A-2 (S3), the 348 `Table`
+  items become empty strings, which **hides** the loop in the Markdown without
+  recovering a single cell. The DocTags are unchanged, so §3.10's detection still sees
+  the loop, but only because §3.10 reads the DocTags.
+- **It costs nothing in time and saves nothing.** Generation is identical.
+
+**Correction to S4.** The page that hits the 8192-token cap in GAO-07-631 is **PDF page
+24** (report page 20, plain prose), not page 25. S4 took the 25th granite-docling
+generation to be page 25, but generation order is not page order. S5 read the page
+number off each page's own `vlm_response`. Page 24's DocTags open with the running
+header and then loop on it ("GAO-07-631 Defense Budget - 2020 - 2021 - 2022 - …", then
+", 20, 20, 20, …") until the cap. Page 25, Figure 8, converts sanely. **All 203 words
+of page 24 are missing from the output in both modes**, with `status=success`. The
+backend cannot recover them, because it only fills boxes the VLM predicted. So the
+second capped-page shape is not "two charts side by side" but a prose page lost
+whole, which makes §3.10's cap detection more important, not less.
+
+**Not run: the scanned half.** By the code above, a page with no text layer has no
+docling-parse cells, so under `pdf` **every text item on the page would come back
+empty**, leaving tables only. Docling has no per-page fallback. This is a prediction
+from the source; the scan will confirm or refute it.
+
+**Verdict: pass for the born-digital half. The default is `vlm`.**
+
+The two modes fail differently:
+
+- **`vlm`'s errors are fewer and smaller**, but they are the dangerous kind: a
+  plausible wrong number, an inserted phrase, an invented paragraph on a chart page.
+- **`pdf`'s errors are more numerous and larger**: whole paragraphs, figures and
+  footnotes dropped, text doubled, hyphen debris. It also wipes the text of any
+  scanned page.
+
+A default has to be safe on PDFs the user did not inspect first, and `pdf` is not.
+`--text-source pdf` stays as the opt-in for born-digital PDFs whose text layer the
+user trusts.
+
+**What it costs the design (amendments, applied to the plan).**
+
+- **§3.2:** the flag is `VlmConvertOptions.force_backend_text`, and the
+  `VlmPipelineOptions` field is a silent no-op. The paragraph also wrongly said the
+  flag "routes only images and tables through the VLM". It replaces text after a full
+  generation, saves no time and does not touch tables. The default is `vlm`, and
+  `pdf` is documented as born-digital only.
+- **§3.10:** loop and cap detection must read the raw DocTags, never the exported
+  document, because `pdf` mode empties the loop's text items.
+- **§8:** `test_convert.py` pins `--text-source pdf` onto `VlmConvertOptions` (and
+  `vlm` onto neither field). Setting the pipeline field is the mutation that still
+  produces output.
+- **§12:** `--text-source` default settled: `vlm`.
+- **§17:** S5 answers the sideways-table row (it does not recover it). A new row
+  covers silent VLM transcription errors in prose: a wrong number, invented text, a
+  whole page lost to a loop.
