@@ -1,0 +1,37 @@
+{
+  "pdf": "census-p60-282-excerpt.pdf",
+  "sha256": "6cd5aa58f8f889cd8e5143935a9307b60dc11a01eb642be10be9c3be2a967677",
+  "pages": 4,
+  "text_layer": true,
+  "charts": [],
+  "tables": [
+    {
+      "id": "p002-1",
+      "page": 2,
+      "caption": "Table A-2. Households by Total Money Income, Race, and Hispanic Origin of Householder: 1967 to 2023",
+      "csv": "tables/p002-1.csv",
+      "rotated": true,
+      "note": "Printed sideways on a portrait page with /Rotate 0; 16 columns. The page holds the ALL RACES rows for 2023 back to 1990; the table continues past this excerpt."
+    },
+    {
+      "id": "p003-1",
+      "page": 3,
+      "caption": "Table A-6. Earnings Summary Measures by Selected Characteristics: 2022 and 2023",
+      "csv": "tables/p003-1.csv",
+      "continues_on": 4
+    },
+    {
+      "id": "p004-1",
+      "page": 4,
+      "caption": "Table A-6. Earnings Summary Measures by Selected Characteristics: 2022 and 2023—Con.",
+      "csv": "tables/p004-1.csv",
+      "continued_from": 3
+    }
+  ],
+  "pictures": [],
+  "headings": "headings.txt",
+  "notes": [
+    "The text layer of pages 2 and 3 carries a '—Con.' after each table's title that is not drawn on the page; the captions here follow the rendered page.",
+    "Values keep the source's significance asterisk (*1.3), its en-dash minus (–0.7) and its X / Z codes."
+  ]
+}

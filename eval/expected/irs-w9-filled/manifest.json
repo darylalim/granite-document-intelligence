@@ -1,0 +1,20 @@
+{
+  "pdf": "irs-w9-filled.pdf",
+  "sha256": "184b02d2ee75eee1148fcce70cd99e4a777a647ecf159de0b41988796d9e9bc4",
+  "pages": 1,
+  "text_layer": true,
+  "charts": [],
+  "tables": [],
+  "pictures": [],
+  "kvp": {
+    "schema": "kvp/schema.json",
+    "expected": "kvp/expected.json",
+    "pages": [
+      1
+    ]
+  },
+  "headings": "headings.txt",
+  "notes": [
+    "Filled with fictitious data and flattened: the values are page content, not form fields. The SSN's 000 area number is one the SSA never issues."
+  ]
+}

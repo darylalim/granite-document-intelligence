@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GAO report cover",
+  "type": "object",
+  "properties": {
+    "report_number": {"type": "string", "description": "The GAO report number, e.g. GAO-00-000"},
+    "date": {"type": "string", "description": "The month and year printed on the cover"},
+    "addressee": {"type": "string", "description": "The line naming who the report is addressed to"},
+    "title": {"type": "string", "description": "The report's title, without the topic line printed in capitals above it"}
+  },
+  "required": ["report_number", "date", "addressee", "title"],
+  "additionalProperties": false
+}

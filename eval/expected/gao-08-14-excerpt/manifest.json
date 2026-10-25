@@ -1,0 +1,25 @@
+{
+  "pdf": "gao-08-14-excerpt.pdf",
+  "sha256": "9d49cfbeece41b9e0841c31ffb4517c2e652a33f604a5116b9ee81c29e342864",
+  "pages": 2,
+  "text_layer": true,
+  "charts": [
+    {
+      "id": "p002-1",
+      "page": 2,
+      "caption": "Figure 3: Transport Mode of Petroleum Products in the United States, 2004",
+      "kind": "pie",
+      "values_from": "labels",
+      "csv": "charts/p002-1.csv",
+      "note": "The text layer reads 'Maritime60%' and lists 30% beside Pipelines; the leader lines pair 60% with Pipelines and 30% with Maritime."
+    }
+  ],
+  "tables": [],
+  "pictures": [
+    {
+      "page": 1,
+      "kind": "logo"
+    }
+  ],
+  "headings": "headings.txt"
+}

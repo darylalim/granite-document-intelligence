@@ -1,0 +1,13 @@
+{
+  "name": "Alex Q. Sample",
+  "business_name": "Sample Bookbinding",
+  "tax_classification": "individual/sole proprietor",
+  "address": "1234 Example Avenue, Suite 5",
+  "city_state_zip": "Springfield, IL 62704",
+  "requester": "Placeholder Paper Supply Co.",
+  "account_numbers": "ACCT-000123",
+  "ssn": "000-12-3456",
+  "ein": null,
+  "exempt_payee_code": null,
+  "fatca_code": null
+}
