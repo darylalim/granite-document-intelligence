@@ -4,8 +4,9 @@ Drafted 2026-10-18. Written to be executed in a **fresh session** with no memory
 conversation that produced it — every decision below carries its reason and its evidence,
 so the implementer can tell a load-bearing choice from a default.
 
-**Status:** complete draft, reviewed cold on 2026-10-18 (18 findings fixed). Nothing here
-has been implemented. **To start implementing, paste Appendix A into a new session.**
+**Status:** complete draft, reviewed cold on 2026-10-18 (18 findings fixed). Phase 0 is
+under way — progress is in [`pdf-pipeline-spikes.md`](pdf-pipeline-spikes.md); no
+production code exists. **To start or resume, paste Appendix A into a new session.**
 
 ## 0. At a glance
 
@@ -1424,7 +1425,9 @@ of the working text app; `git checkout v0.6.0` restores it intact if the rebuild
 ## Appendix A — kickoff prompt for the implementing session
 
 Paste this as the first message of a new Claude Code session in this repository. It
-starts Phase 0 only; each later phase begins from the PR table in §10.
+covers Phase 0 only, and resumes it: the session reads the spike report to find what
+is already done, so the same prompt starts Phase 0 and continues it after any session
+that ended part-way. Each later phase begins from the PR table in §10.
 
 ```text
 You are implementing docs/plans/pdf-pipeline.md. Read §0, §16 and §17 first, then the
@@ -1438,9 +1441,23 @@ its app-specific rules (the smoke test, MODEL_NAME, language_directive, the them
 
 Do Phase 0 only (§4): spikes S1–S11 and Task C (§4.1). Nothing else.
 
+Phase 0 may already be under way. Before anything else:
+- Switch to branch docs/pdf-pipeline-spikes if it exists (local or on origin); create
+  it from main only if it does not.
+- Read docs/plans/pdf-pipeline-spikes.md if it exists. Its summary table says which
+  spikes are done; do not re-run a spike marked Pass, and treat the amendments it
+  records as already applied to the plan. Start with the first spike not yet run,
+  running S1 and S3 before any other if either is still open.
+- Check whether test/eval-corpus exists, to see how far Task C got.
+
 - Spikes are throwaway scripts in your scratchpad, never in the repo.
 - Re-check every version and API the plan cites against what is installed now; the
-  plan was researched on 2026-10-18 and says "unverified" where it is.
+  plan was researched on 2026-10-18 and says "unverified" where it is. Run each spike
+  on the latest versions inside §2.2's caps and record them — §2.2 explains why the
+  researched versions are not floors.
+- To test the lowest allowed versions, lock with `uv lock --resolution lowest-direct`
+  and install with `uv sync --frozen` / `uv run --frozen`: a plain `uv sync` silently
+  re-resolves to the latest (S1).
 - After each spike, add its section to docs/plans/pdf-pipeline-spikes.md: exact
   versions, what you ran, the numbers, the verdict, and any amendment it forces.
 - If ANY spike fails its pass criterion, STOP and report to me with the options before
@@ -1452,7 +1469,8 @@ Do Phase 0 only (§4): spikes S1–S11 and Task C (§4.1). Nothing else.
   step, which needs my hands.
 - Apply plan amendments to docs/plans/pdf-pipeline.md in the same branch.
 - Work on branch docs/pdf-pipeline-spikes (PR 1 in §10); the corpus goes on
-  test/eval-corpus (PR 2). Never commit to main. Conventional Commits.
+  test/eval-corpus (PR 2). Never commit to main. Conventional Commits. Commit after
+  each spike, so a session that ends part-way leaves its work on the branch.
 - Use the /astral skills for uv, ruff and ty.
 
 Finish by summarizing each spike's verdict and every plan amendment, and ask me to
