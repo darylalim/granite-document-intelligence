@@ -819,3 +819,16 @@ collapse to test against.
   drop a page's text or emit hundreds of false pictures, and those false charts multiply
   Granite Vision's time. Earliest signal: the S5 and S8 scanned halves. The "too slow"
   row now cites S8's numbers.
+
+**Decided with the user (2026-10-25)**, after the report was written. Each decision is
+applied to the plan:
+
+- **Page-level resume:** in v1, kept small. Only granite-docling's per-page DocTags are
+  cached, keyed on input, model SHAs and options. A feasibility check in PR 4 comes
+  first: public API only, otherwise deferred again (§3.14 rule 7).
+- **Capped pages:** named exceptions in `eval/budgets.toml`. GAO-07-631 stays in the
+  corpus, and a retry at a different `images_scale` and stopping at loop detection are
+  tried in S11 or PR 7 (§3.11).
+- **Phase B ordering:** per PDF stays. PR 5 tries to share Docling's Granite Vision
+  instance through public API to remove the reload. All-A-then-all-B is the fallback
+  only for a forms-heavy private tier (§3.8).
