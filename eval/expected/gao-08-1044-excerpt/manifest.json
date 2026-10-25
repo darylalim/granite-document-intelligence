@@ -1,0 +1,29 @@
+{
+  "pdf": "gao-08-1044-excerpt.pdf",
+  "sha256": "fdb8fa9c885e540c86d8af72bc7132dbcf92149da646a44a680eda76aec069bc",
+  "pages": 3,
+  "text_layer": true,
+  "charts": [],
+  "tables": [],
+  "pictures": [
+    {
+      "page": 1,
+      "kind": "logo"
+    },
+    {
+      "page": 2,
+      "kind": "map",
+      "caption": "Figure 2: Developing Countries Requesting CRTs on Two Internet E-commerce Web Sites, February 2008 to May 2008"
+    },
+    {
+      "page": 3,
+      "kind": "photo",
+      "caption": "Figure 5: Broken CRT Monitors from an Illegal Shipment of Used CRTs",
+      "note": "Four photographs in a 2 x 2 grid under one caption."
+    }
+  ],
+  "headings": "headings.txt",
+  "notes": [
+    "No page carries a chart: any chart CSV produced for this PDF is a false positive (plan §8.2 rule 5)."
+  ]
+}

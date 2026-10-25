@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Form W-9 (Rev. March 2024), page 1",
+  "type": "object",
+  "properties": {
+    "name": {"type": ["string", "null"], "description": "Line 1: name of entity/individual"},
+    "business_name": {"type": ["string", "null"], "description": "Line 2: business name/disregarded entity name"},
+    "tax_classification": {
+      "type": ["string", "null"],
+      "enum": ["individual/sole proprietor", "C corporation", "S corporation", "partnership", "trust/estate", "LLC", "other", null],
+      "description": "Line 3a: the checked federal tax classification box"
+    },
+    "address": {"type": ["string", "null"], "description": "Line 5: number, street, and apt. or suite no."},
+    "city_state_zip": {"type": ["string", "null"], "description": "Line 6: city, state, and ZIP code"},
+    "requester": {"type": ["string", "null"], "description": "Requester's name and address"},
+    "account_numbers": {"type": ["string", "null"], "description": "Line 7: account number(s)"},
+    "ssn": {"type": ["string", "null"], "description": "Part I social security number, formatted NNN-NN-NNNN"},
+    "ein": {"type": ["string", "null"], "description": "Part I employer identification number, formatted NN-NNNNNNN"},
+    "exempt_payee_code": {"type": ["string", "null"], "description": "Line 4: exempt payee code"},
+    "fatca_code": {"type": ["string", "null"], "description": "Line 4: exemption from FATCA reporting code"}
+  },
+  "required": ["name", "business_name", "tax_classification", "address", "city_state_zip", "requester", "account_numbers", "ssn", "ein", "exempt_payee_code", "fatca_code"],
+  "additionalProperties": false
+}

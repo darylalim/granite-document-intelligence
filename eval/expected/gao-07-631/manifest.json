@@ -1,0 +1,160 @@
+{
+  "pdf": "gao-07-631.pdf",
+  "sha256": "51f6dca94cf101b7f8dda482dffd3ba16119705083fbb06be289ee360790471f",
+  "pages": 42,
+  "text_layer": true,
+  "charts": [
+    {
+      "id": "p012-1",
+      "page": 12,
+      "caption": "Figure 1: O&M Costs for Fiscal Years 1995 through 2005",
+      "kind": "line",
+      "values_from": "geometry",
+      "csv": "charts/p012-1.csv"
+    },
+    {
+      "id": "p013-1",
+      "page": 13,
+      "caption": "Figure 2: Percent Change in DOD Costs by Major Budget Category from Fiscal Year 1995 to 2000",
+      "kind": "bar",
+      "values_from": "labels",
+      "csv": "charts/p013-1.csv"
+    },
+    {
+      "id": "p014-1",
+      "page": 14,
+      "caption": "Figure 3: Percent Change in DOD Costs by Major Budget Category from Fiscal Year 2000 to 2005",
+      "kind": "bar",
+      "values_from": "labels",
+      "csv": "charts/p014-1.csv"
+    },
+    {
+      "id": "p015-1",
+      "page": 15,
+      "caption": "Figure 4: Percent Change in the Services’ O&M Costs",
+      "kind": "bar",
+      "values_from": "labels",
+      "csv": "charts/p015-1.csv",
+      "note": "Grouped bars on a broken axis: the Army's 137 is drawn past a break between 40 and 130."
+    },
+    {
+      "id": "p017-1",
+      "page": 17,
+      "caption": "Figure 5: Supplemental O&M Appropriations for Fiscal Years 2000 through 2005",
+      "kind": "bar",
+      "values_from": "labels",
+      "csv": "charts/p017-1.csv"
+    },
+    {
+      "id": "p018-1",
+      "page": 18,
+      "caption": "Figure 6: Services’ O&M Costs with and without Supplemental Funding, Transfers, and Reprogrammings",
+      "kind": "line",
+      "values_from": "geometry",
+      "csv": "charts/p018-1.csv"
+    },
+    {
+      "id": "p024-1",
+      "page": 24,
+      "caption": "Figure 7: First Performance Period Results from Army A-76 Public/Private Competition Decisions to Outsource Work between Fiscal Years 1995 and 2005",
+      "kind": "bar",
+      "values_from": "labels",
+      "csv": "charts/p024-1.csv",
+      "panel": "40 Army contracts resulting from public/private competitions"
+    },
+    {
+      "id": "p024-2",
+      "page": 24,
+      "caption": "Figure 7: First Performance Period Results from Army A-76 Public/Private Competition Decisions to Outsource Work between Fiscal Years 1995 and 2005",
+      "kind": "bar",
+      "values_from": "labels",
+      "csv": "charts/p024-2.csv",
+      "panel": "56 Army contracts resulting from direct conversion decisions"
+    },
+    {
+      "id": "p025-1",
+      "page": 25,
+      "caption": "Figure 8: First Performance Period Results from Navy and Marine Corps A-76 Public/Private Competition Decisions to Outsource Work between Fiscal Years 1995 and 2005",
+      "kind": "bar",
+      "values_from": "labels",
+      "csv": "charts/p025-1.csv",
+      "panel": "82 Air Force contracts resulting from public/private competitions",
+      "note": "The source report's Figure 8 caption says Navy and Marine Corps but its panels show Air Force data (the letter's Air Force totals, $115 million from 354 contracts, match these panels). The CSV follows the chart."
+    },
+    {
+      "id": "p025-2",
+      "page": 25,
+      "caption": "Figure 8: First Performance Period Results from Navy and Marine Corps A-76 Public/Private Competition Decisions to Outsource Work between Fiscal Years 1995 and 2005",
+      "kind": "bar",
+      "values_from": "labels",
+      "csv": "charts/p025-2.csv",
+      "panel": "272 Air Force contracts resulting from direct conversion decisions"
+    },
+    {
+      "id": "p026-1",
+      "page": 26,
+      "caption": "Figure 9: First Performance Period Results from Air Force A-76 Public/Private Competition Decisions to Outsource Work between Fiscal Years 1995 and 2005",
+      "kind": "bar",
+      "values_from": "labels",
+      "csv": "charts/p026-1.csv",
+      "panel": "35 Navy and Marine contracts resulting from public/private competitions",
+      "note": "Captioned Air Force, shows Navy and Marine Corps data ($74 million from 88 contracts in the letter); see Figure 8."
+    },
+    {
+      "id": "p026-2",
+      "page": 26,
+      "caption": "Figure 9: First Performance Period Results from Air Force A-76 Public/Private Competition Decisions to Outsource Work between Fiscal Years 1995 and 2005",
+      "kind": "bar",
+      "values_from": "labels",
+      "csv": "charts/p026-2.csv",
+      "panel": "53 Navy and Marine contracts resulting from direct conversion decisions"
+    }
+  ],
+  "tables": [
+    {
+      "id": "p020-1",
+      "page": 20,
+      "caption": "Table 1: Changes in Service Contract Costs in Selected Categories",
+      "csv": "tables/p020-1.csv"
+    },
+    {
+      "id": "p023-1",
+      "page": 23,
+      "caption": "Table 2: A-76 Public/Private Competition Decisions for Fiscal Years 1995 through 2005",
+      "csv": "tables/p023-1.csv"
+    }
+  ],
+  "pictures": [
+    {
+      "page": 1,
+      "kind": "logo"
+    },
+    {
+      "page": 2,
+      "kind": "logo"
+    },
+    {
+      "page": 5,
+      "kind": "logo"
+    },
+    {
+      "page": 37,
+      "kind": "signature"
+    },
+    {
+      "page": 42,
+      "kind": "logo"
+    }
+  ],
+  "kvp": {
+    "schema": "kvp/schema.json",
+    "expected": "kvp/expected.json",
+    "pages": [
+      1
+    ]
+  },
+  "headings": "headings.txt",
+  "notes": [
+    "PDF page 24 (a prose page) hit the 8192-token cap in spikes S4, S5 and S8; that is a model behaviour, not ground truth, so it is recorded here and not as an expectation."
+  ]
+}
