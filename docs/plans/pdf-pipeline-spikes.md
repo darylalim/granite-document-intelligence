@@ -13,7 +13,7 @@ Spike scripts live in the session scratchpad, never in the repo.
 | S5 | **Pass**, born-digital half (scanned half pending the scan) | yes — default `vlm`; the flag is `VlmConvertOptions`'s; detection reads DocTags; S4's capped page is 24 (§3.2, §3.10, §8, §12, §17) |
 | S8 | **Pass**, born-digital half (scanned half pending the scan; an image-only stand-in collapses) | yes — the page-level-resume trigger fired; S8's numbers recorded as the budgets' reference; output size per page; a new image-only risk (§3.8, §3.11, §3.12, §3.14, §12, §17) |
 | S9 | **Pass** — (a) no, (b) the ONNX engine matches but torch is imported anyway, (c) no | yes — torch stays, the classifier stays on transformers; torch's cost corrected; DocTags labels skip the classifier (§0, §2.1, §3.2, §9.2, §12, §17) |
-| S10 | **Fail**: Granite Vision's repo `configuration.py` runs on every load of the 8-bit folder, through mlx-vlm's `trust_remote_code=True` default. Revisions reach every loader. Stopped for a decision | pending the decision. A tested fix (strip the repo's code from the converted folder) is recorded with the options |
+| S10 | **Fail, resolved by option 1**: Granite Vision's repo `configuration.py` ran on every load of the 8-bit folder, through mlx-vlm's `trust_remote_code=True` default; stripping the repo's code from the converted folder leaves none (tested). Revisions reach every loader | yes: the repo's code is stripped at conversion, `convert()` refuses a folder that has any, Phase B passes `trust_remote_code=False`, and the tokenizer is pinned to `47ea694…` (§3.6, §3.12, §3.13, §4.2, §6, §8, §12, §16, §17) |
 | S6, S7, S11 | not run | — |
 
 ## S1 — dependency resolution and the chunking tokenizer (2026-10-24)
@@ -1117,7 +1117,7 @@ stripped folder was tested on the same five pages:
 With no code in the folder, mlx-vlm's `True` default has nothing to import. That holds
 for any loader, without a monkeypatch.
 
-**Options (for the user to decide; nothing is amended yet).**
+**Options, as put to the user.**
 
 1. **Strip at conversion (recommended).** `gdi convert-model`:
    - converts with `trust_remote_code=False`, whether through the CLI or by passing it
@@ -1136,6 +1136,25 @@ for any loader, without a monkeypatch.
 
 Separately, whether to report mlx-vlm's two `True` defaults upstream is the user's
 call.
+
+**Decision (the user, 2026-10-25): option 1.** Amendments applied to the plan:
+
+- **§3.13 rule 2** now states the mechanism and the fix. The repo's code is stripped
+  from the converted folder, `convert()` refuses a folder that has any, Phase B passes
+  `trust_remote_code=False` explicitly, and S10's re-run watches executed code and the
+  modules cache in every process.
+- **§3.13 rule 1:** the manifest records what was stripped, and the tokenizer's pin is
+  named: `47ea694b257b703fee9253d75c2b1f2985180498`.
+- **§3.6, §3.12, §6:** `gdi convert-model` converts with `trust_remote_code=False` and
+  strips the output, and `gdi convert` refuses an unstripped folder.
+- **§4.2:** the CLI is safe and the function's default is not, the output must be
+  stripped, and the README is read from `main`.
+- **§8:** `test_cli.py` checks the stripping on a fixture folder, and `test_convert.py`
+  checks the refusal and the explicit False.
+- **§12, §16, §17:** S10 is settled, the release checklist re-runs the check, and the
+  risk row is marked as fired and mitigated.
+
+Upstream reporting is not decided.
 
 **Also learned.**
 

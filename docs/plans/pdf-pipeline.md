@@ -182,7 +182,8 @@ docling-core 21, mlx 4.
 (`uv lock --upgrade-package docling`), never folded into a blanket `uv lock --upgrade`
 alongside unrelated moves. Moving `docling`, `docling-core`, `mlx`, `mlx-vlm`,
 `transformers` or `huggingface-hub` requires, before merge: the eval (§8.1) at or above
-baseline, S10's no-repo-code check re-run, and the vulnerability audit (§3.13 rule 6).
+baseline, S10's no-repo-code check re-run (§3.13 rule 2 says what it watches), and the
+vulnerability audit (§3.13 rule 6).
 Moving a cap (`<0.8`, `<3`) is its own PR.
 
 **Floors are verified versions, not researched ones (amended 2026-10-24).** `<verified>`
@@ -354,8 +355,9 @@ src/granite_document_intelligence/
   config.py       # model ids + the four pinned SHAs (§3.13 rule 1), paths, env vars
                   # (GDI_CACHE_DIR, HF_TOKEN)
   api.py          # the public surface (§3.7); cli.py is a thin wrapper over it
-  models.py       # convert_model(): fetch the pinned models, convert GV to 8-bit, write the
-                  # manifest (§3.2, §4.2, §3.12 rule 3, §3.13 rule 1)
+  models.py       # convert_model(): fetch the pinned models, convert GV to 8-bit, strip
+                  # the repo's code, write the manifest (§3.2, §4.2, §3.12 rule 3,
+                  # §3.13 rules 1–2)
   convert.py      # Phase A: build + run the DocumentConverter, then release it
   kvp.py          # Phase B: prompt, generate, parse, validate
   chunk.py        # §3.9
@@ -587,7 +589,7 @@ Everything is files — no database, no server. Where each thing lives:
 | Embedding tokenizer | Hugging Face cache (`~/.cache/huggingface/hub`) | small | downloaded on first use; kept |
 | granite-docling, picture classifier | `$GDI_CACHE_DIR/models/<ns>--<name>/` (S2) | 0.63 GB + small | fetched at their pinned SHAs by `gdi convert-model`; kept |
 | Granite Vision **bf16 source** | Hugging Face cache | **8.0 GB** | needed only to convert (and for S6); **deletable after** |
-| Granite Vision **8-bit** | `$GDI_CACHE_DIR/models/local--granite-vision-4.1-4b-8bit/` | 4.92 GB | written by `gdi convert-model`; kept |
+| Granite Vision **8-bit** | `$GDI_CACHE_DIR/models/local--granite-vision-4.1-4b-8bit/` | 4.92 GB | written by `gdi convert-model`, repo code stripped (§3.13 rule 2); kept |
 | Results | `OUT_DIR/<pdf>/` (§3.5) | per PDF | user-owned; never deleted by the tool except its own staging folders |
 | Eval corpus / results | `eval/` (§4.1, §8.1) | < 20 MB committed | private tier gitignored |
 | Spikes | session scratchpad | — | never in the repo |
@@ -684,14 +686,17 @@ everything the program *executes or loads* is pinned and local.
    whatever those repos publish next. `config.py` pins all four (granite-docling MLX at `e9939db25d2f296c8678d0491c4609a8c596c50a`,
    the revision S3 ran,
    Granite Vision, `DocumentFigureClassifier-v2.5`, the `granite-embedding-english-r2`
-   tokenizer) and overrides Docling's presets with them; `run.json` records them;
+   tokenizer at `47ea694b257b703fee9253d75c2b1f2985180498`, its `main` when S10 ran)
+   and overrides Docling's presets with them; `run.json` records them;
    `test_convert.py` asserts each reaches its loader. **Amended by S2 (2026-10-25):**
    the three Docling models load from `artifacts_path` (§3.2), where Docling ignores
    `revision`, so for them the pin is enforced **at fetch**. `gdi convert-model`
    downloads each at its SHA into its folder (real files via `local_dir`, not symlinks
    into the HF cache, which `hf cache delete` would break) and writes
    `models/manifest.json` with every SHA, plus the conversion's source SHA, mlx-vlm
-   version and q-bits. `convert()` compares the manifest with `config.py` before
+   version, q-bits and the repo files and `auto_map` keys it stripped (rule 2, S10).
+   S10 verified the result: each fetched folder's commit equals its pin, and its
+   files are byte-identical to the HF snapshot at that SHA. `convert()` compares the manifest with `config.py` before
    loading and refuses a mismatch with the command that fixes it. `run.json` records
    the manifest, and `test_convert.py` asserts the check rather than a revision
    reaching Docling. The tokenizer keeps its revision at its loader. A pin moves only in a PR that runs
@@ -701,9 +706,36 @@ everything the program *executes or loads* is pinned and local.
    `processing.py`, `configuration.py` and `downsampling.py`, and Docling's preset sets
    `trust_remote_code=True` — a remnant of transformers < 5.8, which needed it. Under
    the locked transformers ≥ 5.16 the model loads natively. Our code never passes
-   `trust_remote_code=True`; spike **S10** proves that neither `mlx_vlm.convert`, the
-   MLX engine nor the classifier imports repo code (no module from the HF cache in
-   `sys.modules` afterwards). If one does, stop and decide before writing code.
+   `trust_remote_code=True`. **Amended by S10 (2026-10-25):** not passing it is not
+   enough. mlx-vlm's patched `AutoProcessor.from_pretrained` defaults
+   `trust_remote_code` to True for every model type it registers a processor for,
+   `granite4_vision` among them, and Docling's MLX engine cannot pass False. With
+   `auto_map` in the folder's configs, every load of the 8-bit folder imported the
+   repo's `configuration.py`, the Phase A chart stage included. mlx-vlm's
+   `convert()` function has the same default (`trust_remote_code: bool = True`); only
+   its CLI defaults off. So the code is removed from the artifact:
+   - `gdi convert-model` converts with `trust_remote_code=False`, passed explicitly.
+   - It then **deletes every `*.py` file from the converted folder and every
+     `auto_map` key from its JSON configs, nested ones included.** Today that is the
+     four files above, plus `auto_map` in `config.json`, `preprocessor_config.json`,
+     and `processor_config.json` under `image_processor`.
+   - It records the stripping in `manifest.json`.
+
+   With nothing to import, no loader can run repo code, whatever its default. S10
+   measured the stripped folder at zero code executed and byte-identical output.
+   The folder then holds only safetensors and JSON, so anything that can write to
+   the user's cache can at worst change the output, not run code. Three guards keep
+   it that way:
+   - `convert()` refuses a models directory where any folder holds a `*.py` file or
+     an `auto_map` key, naming `gdi convert-model` as the fix.
+   - Our own Phase B load passes `trust_remote_code=False` explicitly, as a second
+     guard, not the fix.
+   - S10's check, re-run whenever §2.2 says, watches executed code objects (the
+     audit `exec` event) and the modules cache, in every process — not just
+     `sys.modules` in the parent.
+
+   If a future transformers drops native `granite4_vision`, the load fails loudly
+   rather than falling back to repo code.
 3. **Weights are safetensors only.** `granite-embedding-english-r2` ships a pickle
    `pytorch_model.bin` beside its safetensors. Only its tokenizer loads today; any
    future weight load passes `use_safetensors=True` (or the library's equivalent), so a
@@ -900,6 +932,21 @@ uv run python -m mlx_vlm convert --hf-path ibm-granite/granite-vision-4.1-4b \
 It took 184 s including the 8.0 GB download, peaked at 3.8 GB RSS and wrote 4.92 GB.
 Never pass `--trust-remote-code` (§3.13 rule 2); none was needed.
 
+**Amended by S10 (2026-10-25):**
+
+- **The CLI is safe; the function is not by default.** Without the flag, the CLI
+  calls `convert(trust_remote_code=False)`, and S10 saw no repo code run. The Python
+  function's default is `True`, and with it the conversion imported the repo's
+  `configuration.py` from the pinned snapshot. `models.py` passes
+  `trust_remote_code=False` explicitly if it calls the function.
+- **The output must be stripped.** It still carries the repo's four `.py` files and
+  its `auto_map` keys, so `gdi convert-model` removes both before writing the
+  manifest (§3.13 rule 2).
+- **The README comes from `main`.** The conversion's model-card step reads
+  `README.md` through `refs/main`, not `--revision`. It is metadata only, never
+  loaded as code, and it is why a README-only `main` snapshot appears in the HF
+  cache.
+
 ## 5. Phase 1 — tear down the text app (one commit, gate green)
 
 Delete: `streamlit_app.py`, `.streamlit/`, `static/`, `tests/test_app_ui.py`,
@@ -989,11 +1036,12 @@ Docling objects. Notes:
   `~/.cache/granite-document-intelligence/models/`), the single `artifacts_path` every
   Docling stage loads from (§3.2, S2). It fetches granite-docling and the figure
   classifier at their pinned SHAs, runs the S2-validated conversion (§4.2) into
-  `local--granite-vision-4.1-4b-8bit/`, writes `manifest.json` (§3.13 rule 1),
-  load-tests the result, and offers the bf16-source cleanup in §3.12 rule 3. There is
+  `local--granite-vision-4.1-4b-8bit/` with `trust_remote_code=False`, strips the
+  repo's `*.py` files and `auto_map` keys (§3.13 rule 2, S10), writes
+  `manifest.json` (§3.13 rule 1), load-tests the result, and offers the bf16-source cleanup in §3.12 rule 3. There is
   no per-model path override, because Docling fixes the folder names. `gdi convert`
-  with a missing folder or a manifest that disagrees with `config.py` fails with the
-  exact command to run — never a silent fallback to bf16 or to the Hub.
+  with a missing folder, a manifest that disagrees with `config.py`, or a folder
+  holding a `*.py` file or an `auto_map` key fails with the exact command to run — never a silent fallback to bf16 or to the Hub.
 - **Lazy imports.** `docling` and `mlx_vlm` imported inside functions, so `gdi --help`
   and the test suite don't pay for torch/mlx at import.
 - **Greedy decoding everywhere** (`temperature=0.0`) — reproducible output, and the
@@ -1040,7 +1088,10 @@ Same philosophy as today: **mock at the model boundary**, never download in CI.
   sets it on neither options object. Setting it on `VlmPipelineOptions` is a silent
   no-op on the preset path (S5). Also (§3.13): a manifest that disagrees with `config.py` is refused before any model
   loads, the tokenizer reaches its loader at its pinned SHA, and no call from our code
-  passes `trust_remote_code=True`.
+  passes `trust_remote_code=True`. A models directory with a `*.py` file or an
+  `auto_map` key in any folder is refused before any model loads, naming
+  `gdi convert-model`, and our Phase B load passes `trust_remote_code=False`
+  explicitly (S10).
 - `test_chunk.py` — chunks from a hand-built `DoclingDocument`: headings carried,
   page numbers present, every line valid JSON with the §3.9 keys (tokenizer mocked or
   a tiny local one — no download).
@@ -1062,6 +1113,10 @@ Same philosophy as today: **mock at the model boundary**, never download in CI.
   it delegates to `convert_many()` rather than re-implementing resume. `gdi
   convert-model --delete-source` (conversion and HF cache mocked): the source is
   deleted only after the 8-bit output passes its load test, and never without the flag.
+  Also (§3.13 rule 2, S10): on a fixture folder shaped like mlx-vlm's output (the
+  four `.py` files, top-level and nested `auto_map`), `convert_model()` leaves no
+  `*.py` file and no `auto_map` key at any depth, records both in the manifest, and
+  passes `trust_remote_code=False` to the conversion.
 - `test_safety.py` — the §3.10 rules: a PDF over `--max-pages` / `--max-file-mb` is a
   recorded per-PDF error and the batch continues; a page whose result shows
   the cap (`num_tokens >= max_new_tokens`, or no closing `</doctag>`) or a self-closed
@@ -1378,6 +1433,7 @@ GitHub details (§9.2); UI theme and layout for v1.x (§14, §15).
 | Granite Vision's chart role | S7 |
 | page-level resume (trigger: typical PDF > ~5 min) | S8 — **trigger fired; decided 2026-10-25:** in v1, PR 6, DocTags only, gated on a public-API feasibility check in PR 4 (§3.14 rule 7) |
 | torch-free install, ONNX classifier | S9 — **settled 2026-10-25:** torch stays, classifier on transformers; reopen when Docling's two torch imports go lazy (§2.1) |
+| model-repo code at load | S10 — **failed, then decided 2026-10-25:** mlx-vlm defaults `trust_remote_code` to True, so `gdi convert-model` strips the repo's `*.py` files and `auto_map` keys from the converted folder and `convert()` refuses a folder that has either (§3.13 rule 2) |
 | page batch size, CPU–GPU overlap, `images_scale` | S11 |
 
 **Settled during implementation:** TEDS vs cell-exact for tables (§8.1, PR 7);
@@ -1541,8 +1597,10 @@ evidence (a link, a results file, a test name).
 - [ ] **Library:** `convert`, `convert_many`, `ConvertOptions` and the §3.7 result types
       are public, typed and documented; `convert()` writes nothing.
 - [ ] **Resume and storage:** every §3.8 and §3.12 behaviour has a passing test.
-- [ ] **Safety and security:** every §3.10 and §3.13 rule has a passing test; S10 found
-      no repo code; all four model SHAs pinned and recorded in `run.json`.
+- [ ] **Safety and security:** every §3.10 and §3.13 rule has a passing test; S10's
+      check, re-run on the release lock, finds no repo code executed and no `*.py` or
+      `auto_map` in the models directory; all four model SHAs pinned and recorded in
+      `run.json`.
 - [ ] **Eval:** baseline committed; the release commit's run (median of three) meets
       every score within tolerance and every budget; adversarial PDF passes.
 - [ ] **Memory:** peak ≤ 10 GB on every corpus PDF; flat across the 30+ page document.
@@ -1566,7 +1624,7 @@ of the working text app; `git checkout v0.6.0` restores it intact if the rebuild
 | Docling's MLX engine won't load a local conversion | S2 — **retired 2026-10-25**: it loads through `artifacts_path` (§3.2) | — |
 | Docling silently drops a chart's CSV when the model writes a label containing a comma unquoted (`status=success`, `errors=[]`, raw response not kept) | S2 (2 of 5 Census charts) | capture the raw chart2csv response in our code and parse it leniently; S7 and PR 4 decide how; S6 counts a drop as a failure |
 | Memory isn't released between phases, or creeps across pages | S4 — **retired 2026-10-25**: release returns active memory to 0, per-page peak flat over 42 pages, 7.00 GB run peak (§3.1) | — |
-| Model-repo code executes despite native transformers | S10 | stop; pin a transformers version that loads natively, or patch the loader — user decides |
+| Model-repo code executes despite native transformers | S10 — **fired 2026-10-25**: mlx-vlm's `trust_remote_code=True` default ran GV's `configuration.py` on every load of the 8-bit folder, Docling's chart stage included. **Mitigated:** the repo's code is stripped from the converted folder, and `convert()` refuses a folder that has any (§3.13 rule 2) | if a future transformers drops native `granite4_vision`, the load fails loudly. Then pin a transformers version that has it, or vendor and review the config class — user decides |
 | 8-bit Granite Vision degrades charts or KVP | S6 | 6-bit or bf16, re-measured against the 10 GB ceiling |
 | Too slow to be useful on 16 GB | S8 — born-digital measured: ~6 s/page, ~10 pages/min sustained, no throttling over ~10 min; S11 | batch/scale tuning (S11); page-level resume (§3.14 rule 7, now in v1); fewer charts by default |
 | On image-only pages granite-docling drops the page's text (`<logo></picture></doctag>`, 25 tokens, `status=success`) or emits hundreds of false pictures, and the false charts multiply Granite Vision's time (S8's stand-in: 441 pictures, 102 chart pairs, 3.4× slower). It reproduces from Docling's softer page render; pypdfium2's render of the same page converts in full | S8 (image-only stand-in) | confirm on the real scan (S5 and S8 scanned halves); then test a sharper render (`images_scale`, S11) or a different render path; a cap on pictures per page sent to Granite Vision — the classifier cannot filter them, because the stand-in's false charts were all typed by DocTags, which skips it (S9); §3.10's detection extended to near-empty pages |
