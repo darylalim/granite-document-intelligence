@@ -7,7 +7,9 @@ Spike scripts live in the session scratchpad, never in the repo.
 | Spike | Verdict | Amends the plan |
 |---|---|---|
 | S1 | **Pass** | yes — extra names (§2.1, §3.9, §4); floors are verified versions (§2.2) |
-| S2–S11 | not run | — |
+| S2 | not run | — |
+| S3 | **Pass**, with findings | yes — `VlmConvertOptions` preset, 8192-token cap, loop and cap detection are our code (§2, §2.1, §3.2, §3.10, §3.13, §3.14, §4, §8, §17) |
+| S4–S11 | not run | — |
 
 ## S1 — dependency resolution and the chunking tokenizer (2026-10-24)
 
@@ -93,3 +95,158 @@ with its own extra names — the latter is what S9(a) explores.
   resolution mode), so the first floor run here actually tested 2.142.1. Lock with
   `uv lock --resolution lowest-direct`, then `uv sync --frozen` / `uv run --frozen`,
   and read the versions from the environment, not the command line.
+
+## S3 — granite-docling MLX under the locked mlx-vlm; loops and capped pages (2026-10-24)
+
+**Question.** Does the 2025-09 granite-docling MLX conversion (made with mlx-vlm 0.3.3)
+load and convert pages under the latest mlx-vlm inside `<0.8`? Does Docling detect or
+stop repetition loops, and can a page that hits `max_tokens` be detected from the
+result?
+
+**Environment.** Same scratch-project constraints as S1, highest resolution:
+docling / docling-slim 2.142.1, docling-core 2.104.0, **mlx-vlm 0.7.10**, mlx 0.32.4,
+transformers 5.20.2, tokenizers 0.23.3, torch 2.14.1, huggingface-hub 1.33.0,
+pypdfium2 5.14.0. Model `ibm-granite/granite-docling-258M-mlx` at
+**`e9939db25d2f296c8678d0491c4609a8c596c50a`** (last modified 2025-09-17; README:
+"converted … using mlx-vlm version 0.3.3"; one 0.63 GB `model.safetensors`). Every run
+with `HF_HUB_OFFLINE=1`, macOS 27.0, Apple Silicon.
+
+**Test PDF.** Five pages cut from the US Census Bureau's *Income in the United States:
+2023* (P60-282, public domain, 17 U.S.C. § 105;
+`https://www2.census.gov/library/publications/2024/demo/p60-282.pdf`), born-digital,
+all 612 × 792 pt with `/Rotate 0`: report pages 2 (a figure), 4 and 5 (prose that
+*cites* tables), 15 (Table A-1, 8 numeric columns × 44 rows) and 16 (Table A-2, a
+16-column table **printed sideways** on a portrait page). GAO and CBO refused scripted
+downloads (HTTP 403); census.gov did not.
+
+**What was run.** `DocumentConverter` with `VlmPipeline` and `generate_page_images=True`,
+recording each page's `vlm_response` (`num_tokens`, `stop_reason`, generation time, the
+raw DocTags), `conv_res.status` and `conv_res.errors`, and the exported Markdown:
+
+1. **preset** — `VlmConvertOptions.from_preset("granite_docling", engine_options=MlxVlmEngineOptions())`
+2. **legacy** — `vlm_model_specs.GRANITEDOCLING_MLX`, which is what the plan named
+3. **cap** — the preset with `max_new_tokens=1024` on page 16 alone
+4. **stopper** — the preset with Docling's `DocTagsRepetitionStopper` passed through
+   the MLX override's `extra_config["custom_stopping_criteria"]`, at the default
+   `lookback_tokens=200` and at 640
+5. **upright** — page 16 with `/Rotate 90`, so that the table is the right way up
+6. spies on the stopper and the engine inputs, and a post-hoc loop check over every
+   saved DocTags file
+
+**Results.**
+
+| Page | Content | Tokens | Gen s | Ends `</doctag>` | Outcome |
+|---|---|---|---|---|---|
+| 1 | figure + notes | 307 | 3.1 | yes | picture + text, correct |
+| 2 | prose | 1374 | 6.2 | yes | correct text and headings |
+| 3 | prose | 1164 | 5.4 | yes | correct text and headings |
+| 4 | Table A-1 | 2029 | 8.7 | yes | **48 × 8 table**, see below |
+| 5 | Table A-2 (sideways) | 7371 | 31.7 | yes | **degenerate loop**, no table |
+
+All five pages: 66.1 s wall, 1.61 GB `mx.get_peak_memory()`, about 230 tokens/s.
+`status=success`, `errors=[]`. The legacy run produced **byte-identical** DocTags and
+Markdown (59.1 s) plus a `DeprecationWarning`: *"Using legacy VLM options
+(InlineVlmOptions/ApiVlmOptions) is deprecated. Please migrate to VlmConvertOptions
+with preset…"*.
+
+- **The conversion loads and works.** The 0.3.3-era weights run under mlx-vlm 0.7.10
+  with no error or warning about the model. The prose pages give clean text with the
+  report's headings as `##` sections.
+- **Table A-1 is mostly right and partly wrong — the eval has work to do.** Of the
+  rows matched against the PDF's text layer, every one has its first seven values
+  exact. But the table has eight numeric columns and the model emitted seven: the last
+  (the percent change's margin of error) is dropped everywhere. In one row (*Family
+  households*) the model also skipped the percent change `*3.6` and wrote the dropped
+  margin of error `1.41` in its place, a silently wrong value. The two header rows are
+  misaligned by one column. Docling normalized `–0.2` (en dash) to `-0.2`.
+- **Page 5 is a silent loop.** The DocTags are the table title followed by **348**
+  `<text><loc_43><loc_…><loc_49><loc_…>Table</text>` blocks, 338 of them with
+  duplicate boxes. The model then *closed* the document with `</doctag>` 821 tokens
+  short of the cap. Docling reports success, and the table's content is simply absent.
+  Docling's `VlmPipeline` has no orientation handling (only the Tesseract OCR stage
+  references orientation), and nothing in the PDF marks the page as turned.
+- **Turning the page upright does not rescue it.** With `/Rotate 90` the model starts
+  a real `<otsl>` table, then degenerates into thousands of `<ecel>` cells and finally
+  `1>d1>d1>d…`. It hits the cap at 8193 tokens (42,464 characters, no `</doctag>`) and
+  exports a **0 × 0 table**, still with `status=success`. A 16-column dense table is
+  beyond granite-docling-258M whichever way up it is. That is a quality limit for S5
+  (`force_backend_text`) and the eval to quantify, not something S3 can fix.
+
+**How a capped page shows up.** With `max_new_tokens=1024`: `num_tokens=1025` (the
+MLX engine counts one token past the cap), the text does **not** end in `</doctag>`,
+`stop_reason` is `unspecified`, `conv_res.status` is `success` and `conv_res.errors`
+is empty. **Docling reports nothing.** The reason is in the source:
+`VlmPipeline._determine_status` turns `VlmStopReason.LENGTH` into a page error, but no
+MLX path ever produces `LENGTH`. The legacy `mlx_model.py` hard-codes `UNSPECIFIED`,
+and the preset path's `mlx_engine.py` emits `"unspecified"`, `"stop_string"` or
+`"custom_criteria"`. `vlm_convert_model.py` maps only exact `VlmStopReason` values,
+so the last two become `UNSPECIFIED` too. **Detection is therefore our code:** a page is
+capped when `num_tokens >= max_new_tokens` (true at 1025 vs 1024) or when its text
+does not end with `</doctag>`. Either signal alone caught every capped page here, and
+the uncapped pages showed neither.
+
+**Does Docling detect or stop loops? No — and on MLX it cannot.** Docling ships a
+`DocTagsRepetitionStopper` but wires it into no page-conversion preset (only the code
+and formula stage uses `TailRepetitionStopper`). Passed in by hand, it reached the
+engine (the runtime `extra_generation_config` carried it) and its `should_stop` was
+called **7370 times** on page 5 without firing. Two independent causes, both verified:
+
+1. **The window is characters, not tokens.** The engine slices
+   `output_text[-lookback_tokens:]`, so the default 200 becomes 200 characters, which
+   holds fewer than three complete 53-character loop blocks. On the saved output a
+   200-character window never trips; 300 or more trips 290 characters into the page.
+2. **The streamed text stalls, so no window ever sees the loop.** mlx-vlm's
+   `BPEStreamingDetokenizer` emits text only when a token *begins with a space*.
+   DocTags loops contain no spaces, so `token.text` is empty from about the 40th token
+   on. The window stayed at the same **114 characters** (the title) for every later
+   call, and the remaining ~3,900 characters (on a 1,600-token run) arrived in the
+   final flush. The rule is identical in mlx-vlm 0.3.3 (`add_token` in that wheel's
+   `tokenizer_utils.py`), so it is not a regression. The same stall also blinds
+   Docling's **stop strings** (`</doctag>`) mid-generation; the model's own end token
+   is what actually ends a normal page.
+
+Even a fixed in-loop stopper would not have caught the upright page's loop: its
+`<ecel>` and `1>d` runs carry no location boxes, which `DocTagsRepetitionStopper`'s
+pattern requires. The **post-hoc** check (the same stopper slid over the final text
+in 640-character windows) flagged pages 5 and the cap-1024 run and passed pages 1–4;
+the upright page was caught by the cap signal instead. **Both signals are needed.**
+
+**Verdict: pass.** The pass criterion holds: the conversion loads under mlx-vlm 0.7.10,
+the five-page PDF converts to sane Markdown with one real table, and the capped-page
+signature is recorded. The other two answers are negative. Docling neither detects
+nor stops loops on MLX, and does not flag capped pages. Both become our code, which is
+an amendment, not a redesign.
+
+**Amendments (applied to the plan).**
+
+- **Use `VlmConvertOptions.from_preset("granite_docling", engine_options=MlxVlmEngineOptions())`,
+  not `vlm_model_specs.GRANITEDOCLING_MLX`** (§2, §3.2, §4 S9, §8 `test_convert.py`).
+  The legacy options are deprecated and slated for removal, and the two paths gave
+  byte-identical output. The MLX repo comes from the preset's `engine_overrides`, and
+  the revision pin (§3.13 rule 1) is set there too, via `EngineModelConfig.revision`.
+- **The cap is 8192 tokens, not 4096** (§2.1, §3.10, §3.14). In docling 2.142.1
+  both the legacy spec and the preset set `max_new_tokens=8192` (the plan's 4096 is
+  stale or was never right). At ~230 tokens/s, a page
+  that loops to the cap costs about **37 s**, which S8 should count.
+- **Capped-page and loop detection are our code, post hoc, on the final text** (§3.10,
+  §3.13, §8). A page is flagged in `run.json` `warnings` when `num_tokens >= max_new_tokens`
+  **or** its DocTags do not end with `</doctag>` (capped), **or** a 640-character
+  sliding `DocTagsRepetitionStopper` check trips (a loop that closed itself, like
+  page 5). Do not rely on Docling's `stop_reason`, `conv_res.errors` or `status` for
+  either. Do not count on an in-generation stopper while mlx-vlm's detokenizer
+  withholds space-free text, so a looping page costs up to the full cap.
+- **Pin granite-docling MLX at `e9939db25d2f296c8678d0491c4609a8c596c50a`** (§3.13
+  rule 1). It is the only revision that exists and the one S3 ran.
+- **Risk added (§17):** sideways-printed and very wide tables. Both loop silently on
+  granite-docling, and the corpus should include one such page (§4.1).
+
+**Also learned.**
+
+- **census.gov serves scripted downloads; gao.gov and cbo.gov answer 403.** That
+  matters for Task C. P60-282 itself is a strong corpus candidate: born-digital, with
+  dense multi-page tables (Table A-2 runs 14 pages), figures and a page that loops.
+- The exported Markdown lost no prose, but the *figure page's* chart arrives as
+  `<!-- image -->`. Charts are Granite Vision's job (S2/S7), as designed.
+- Docling prints `Exception ignored in: VlmConvertModel.__del__` at interpreter exit
+  (harmless, after the result is complete). The new CLAUDE.md should mention it so
+  nobody chases it.

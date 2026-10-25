@@ -71,7 +71,7 @@ Inputs: one or more PDFs, **or a directory** of them, with resume (§3.8).
 
 | Stage | Model | Runtime | Weights | Runs on |
 |---|---|---|---|---|
-| Page → structure | `ibm-granite/granite-docling-258M-mlx` | Docling `VlmPipeline`, `GRANITEDOCLING_MLX` | 0.63 GB, bf16 (unquantized) | every page |
+| Page → structure | `ibm-granite/granite-docling-258M-mlx` | Docling `VlmPipeline`, preset `granite_docling` on the MLX engine (§3.2) | 0.63 GB, bf16 (unquantized) | every page |
 | Charts → CSV + summary | `ibm-granite/granite-vision-4.1-4b`, **converted locally to 8-bit MLX** | Docling chart-extraction enrichment, preset `granite_vision_v4_mlx`, `repo_id` overridden | ~4.65 GB | pictures Docling classifies as charts |
 | Key-value extraction | the same 8-bit Granite Vision | **our code**, `mlx-vlm` directly | (same files) | pages the user selects |
 
@@ -105,7 +105,7 @@ The heavy compute is MLX; the stack is not. Read from Docling's source and
 
 | Component | Runtime | Load |
 |---|---|---|
-| granite-docling-258M (every page) | **MLX** via mlx-vlm | heavy — up to 4096 tokens/page |
+| granite-docling-258M (every page) | **MLX** via mlx-vlm | heavy — up to 8192 tokens/page (S3) |
 | Granite Vision 4.1 8-bit (charts, KVP) | **MLX** via mlx-vlm | heavy — 4B model |
 | Picture classifier `docling-project/DocumentFigureClassifier-v2.5` (EfficientNet) | **PyTorch** via transformers (MPS/CPU) by default; `ImageClassificationEngineType.ONNXRUNTIME` available | light |
 | PDF parse and page render | `docling-parse` (C++) / `pypdfium2`, CPU | not a model |
@@ -199,7 +199,12 @@ own code against the single Phase-B model instance (crop via `generate_picture_i
 
 Read from Docling `main` on 2026-10-18 (PyPI latest: **2.140.0**, 2026-10-16):
 
-- `VlmPipelineOptions(vlm_options=vlm_model_specs.GRANITEDOCLING_MLX, generate_page_images=True, …)`
+- `VlmPipelineOptions(vlm_options=VlmConvertOptions.from_preset("granite_docling", engine_options=MlxVlmEngineOptions()), generate_page_images=True, …)`
+  — **amended by S3 (2026-10-24):** the `vlm_model_specs.GRANITEDOCLING_MLX` form this
+  plan first named is the deprecated legacy path (`DeprecationWarning`, slated for
+  removal); the two gave byte-identical output. The preset takes the MLX repo from its
+  `engine_overrides[VlmEngineType.MLX]`, which is also where the revision pin goes
+  (`EngineModelConfig.revision`, §3.13 rule 1). `max_new_tokens` is **8192**.
 - `do_chart_extraction=True` (it auto-enables picture classification)
 - `chart_extraction_options=ChartExtractionVlmEngineOptions.from_preset("granite_vision_v4_mlx", …)`
   with **chart2csv and chart2summary on** — summary defaults to **off**; chart2code stays off
@@ -410,11 +415,20 @@ reaches a model. Rules, each with a test (§8):
   it into a multi-gigapixel image. If Docling trips that check, it is a per-PDF error,
   not something to work around.
 - **Bounded generation.** Every model call has a `max_tokens` cap (granite-docling's
-  preset uses 4096 per page). A page that **hits the cap** almost always means a
+  preset uses **8192** per page — S3). A page that **hits the cap** almost always means a
   degenerate repetition loop, not a long page — IBM's own Space ships a `repetition.py`
   for exactly this. Record such pages in `run.json` `warnings` with their page number;
-  the eval harness counts them. Docling's own repetition handling, if any, is checked in
-  S3.
+  the eval harness counts them.
+  **Detection is our code, post hoc (S3, 2026-10-24).** Docling flags neither case on
+  MLX: no MLX path ever emits `VlmStopReason.LENGTH`, so a capped page comes back with
+  `stop_reason=unspecified`, `status=success` and no `errors`. And S3's sideways table
+  looped 348 times, then *closed itself* with `</doctag>` under the cap. Flag a page when
+  `num_tokens >= max_new_tokens` **or** its DocTags do not end in `</doctag>` (capped), **or**
+  Docling's `DocTagsRepetitionStopper.should_stop` trips on any 640-character sliding
+  window of the final text (a loop that ended itself). An in-generation stopper does
+  not work on MLX, because mlx-vlm's BPE detokenizer streams no text until a token
+  begins with a space, and DocTags loops have none. So a looping page runs to the
+  cap (~37 s at S3's ~230 tokens/s) — a cost, not a hang.
 - **No per-PDF timeout or process isolation in v1.** A hang inside a C-extension parser
   can't be interrupted in-process, and a subprocess per PDF would reload the models for
   every file. Stated as a known limitation in the README; revisit if the corpus or a
@@ -569,7 +583,8 @@ everything the program *executes or loads* is pinned and local.
 1. **Every model is pinned to a commit SHA.** Docling pins only Granite Vision
    (`dd48e97503de471803850df70843cf9eb5da8712`); its granite-docling MLX preset carries
    **no revision** and the figure classifier uses **`revision="main"`** — both load
-   whatever those repos publish next. `config.py` pins all four (granite-docling MLX,
+   whatever those repos publish next. `config.py` pins all four (granite-docling MLX at `e9939db25d2f296c8678d0491c4609a8c596c50a`,
+   the revision S3 ran,
    Granite Vision, `DocumentFigureClassifier-v2.5`, the `granite-embedding-english-r2`
    tokenizer) and overrides Docling's presets with them; `run.json` records them;
    `test_convert.py` asserts each reaches its loader. A pin moves only in a PR that runs
@@ -622,7 +637,7 @@ everything the program *executes or loads* is pinned and local.
 ### 3.14 Performance (decided 2026-10-18)
 
 Memory is the hard constraint and is already designed (§3.1 phases, §2 8-bit weights,
-§3.11 ceiling). Speed is where the cost is: granite-docling generates up to 4096 tokens
+§3.11 ceiling). Speed is where the cost is: granite-docling generates up to 8192 tokens
 **per page, one page after another**. Every speed lever below is judged **under** the
 10 GB ceiling — the question is "the fastest configuration that fits", never "the
 fastest configuration" — and by quality per second through the eval (§8.1).
@@ -640,7 +655,7 @@ fastest configuration" — and by quality per second through the eval (§8.1).
 3. **Per-stage, per-page timings.** `run.json` records, per page: render ms,
    generation ms, **tokens generated**, and whether it hit `max_tokens`; per chart:
    extraction ms; per PDF: parse, classification, export and chunking ms, and per-phase
-   peak memory. This is what turns "slow" into "page 17: 4096 tokens, 40 s". Timings
+   peak memory. This is what turns "slow" into "page 17: 8192 tokens, 37 s". Timings
    are wall-clock (`time.perf_counter`), collected by our code around Docling calls or
    from Docling's own timing hooks if it exposes them (check in S11).
 4. **One run at a time per Mac.** Two `gdi` processes (two terminals, or a v1.x UI
@@ -695,7 +710,7 @@ amendment in that PR.
 | S6 | 8-bit vs bf16 Granite Vision quality on ~10 charts and one KVP form | CSVs match on values; KVP fields match; if 8-bit degrades, try `--q-bits 6`/bf16 and re-measure S4 |
 | S7 | granite-docling's own `<chart>` → table vs Granite Vision `<chart2csv>` on the same charts | if granite-docling is as good, Granite Vision's chart role shrinks to summaries — record either way |
 | S8 | Throughput | seconds/page for Phase A (born-digital and scanned separately), seconds/chart, seconds/KVP page and cold-start load time; **sustained** pages/min across the 30+ page document, first page to last (§3.14 rule 6); whether a typical PDF exceeds ~5 min (the page-level-resume trigger, rule 7); a sanity reference for PR 7's budgets (§3.11) and the README's first numbers |
-| S9 | How far toward torch-free can the stack go (§2.1)? (a) Does `docling-slim` with only `format-pdf`, `feat-chunking` and `mlx-vlm` added directly — no `models-vlm-inline` — import and run `VlmPipeline` with `GRANITEDOCLING_MLX` and the MLX chart preset? (b) Does the classifier run on `ONNXRUNTIME` without importing torch (`"torch" not in sys.modules` after a run)? (c) Does granite-docling's DocTags already label picture types, making the classifier redundant? | each answered yes/no with evidence; (a) yes → drop torch from the lock; (b) yes and same chart picks on the corpus → ONNX classifier; (c) yes → note it, but keep Docling's classifier unless S7 says otherwise |
+| S9 | How far toward torch-free can the stack go (§2.1)? (a) Does `docling-slim` with only `format-pdf`, `feat-chunking` and `mlx-vlm` added directly — no `models-vlm-inline` — import and run `VlmPipeline` with the `granite_docling` preset on the MLX engine (§3.2) and the MLX chart preset? (b) Does the classifier run on `ONNXRUNTIME` without importing torch (`"torch" not in sys.modules` after a run)? (c) Does granite-docling's DocTags already label picture types, making the classifier redundant? | each answered yes/no with evidence; (a) yes → drop torch from the lock; (b) yes and same chart picks on the corpus → ONNX classifier; (c) yes → note it, but keep Docling's classifier unless S7 says otherwise |
 | S10 | Does any load path execute model-repo code, and do revision overrides reach every loader (§3.13 rules 1–2)? Run `mlx_vlm.convert`, a Phase A conversion and the classifier with every model pinned, then list `sys.modules` entries whose file lives under the HF cache. | **none** from the cache; each of the four pinned SHAs observed at its loader (e.g. via `HF_HUB_OFFLINE=1` with only those revisions cached). Any repo code imported → **stop and report** |
 | S11 | Speed levers under the 10 GB ceiling (§3.14 rules 1–3): page batch size 1/2/4 and CPU–GPU overlap, if Docling or mlx-vlm exposes them; `images_scale` 1.5/2.0/2.5; whether Docling exposes per-stage timing hooks | pages/min, peak memory and eval scores per setting; the shipped setting is the fastest that fits **and** does not regress the eval; batch 1 / scale 2.0 recorded as fallbacks |
 
@@ -716,7 +731,8 @@ below are the decision.
   them: bar, line and pie charts; tables (at least one spanning a page break if one can
   be found); a **scanned** multi-page document; a **form** for KVP; one **30+ page**
   document for memory and throughput; at least one **non-chart picture** (a photo or
-  diagram, for false-positive chart detection, §8.2); and one **adversarial** PDF
+  diagram, for false-positive chart detection, §8.2); a **sideways-printed or very wide
+  table** (S3 found these loop silently); and one **adversarial** PDF
   made by the project (§8.2) — so 5–7 PDFs in all.
 - **Private** — `eval/private/corpus/` + `eval/private/expected/`, **gitignored** (add
   `/eval/private/` and `/eval/runs/` to `.gitignore` in the same commit — the latter is
@@ -887,7 +903,8 @@ Same philosophy as today: **mock at the model boundary**, never download in CI.
   `tabular_chart` produces no CSV rather than an empty one.
 - `test_kvp.py` — prompt construction, the ported `parse_json_output` cases, schema
   validation pass/fail, `--pages` parsing, with `mlx_vlm.generate` mocked.
-- `test_convert.py` — the `VlmPipelineOptions` actually built: `GRANITEDOCLING_MLX`,
+- `test_convert.py` — the `VlmPipelineOptions` actually built: the `granite_docling` `VlmConvertOptions`
+  preset on `MlxVlmEngineOptions` (not the deprecated `GRANITEDOCLING_MLX`),
   chart extraction on with the **`_mlx` preset**, summary on, code off, `repo_id` pointed
   at the local path. This is the silent-degradation guard: the auto preset or a dropped
   `repo_id` still produces output, just from the wrong model. Also (§3.13): each of
@@ -915,8 +932,10 @@ Same philosophy as today: **mock at the model boundary**, never download in CI.
   convert-model --delete-source` (conversion and HF cache mocked): the source is
   deleted only after the 8-bit output passes its load test, and never without the flag.
 - `test_safety.py` — the §3.10 rules: a PDF over `--max-pages` / `--max-file-mb` is a
-  recorded per-PDF error and the batch continues; a page reported as hitting
-  `max_tokens` lands in `run.json` warnings; `chart-NNN.py` carries the untrusted
+  recorded per-PDF error and the batch continues; a page whose result shows
+  the cap (`num_tokens >= max_new_tokens`, or no closing `</doctag>`) or a self-closed
+  DocTags loop lands in `run.json` warnings — tested on hand-made DocTags, since Docling
+  reports neither (§3.10); `chart-NNN.py` carries the untrusted
   header and nothing imports it; an output path that would resolve outside the output
   directory is refused; a symlink out of the input directory is skipped with a warning;
   `Image.MAX_IMAGE_PIXELS` is unchanged after a run. And the §3.13 rules: a `.pdf`
@@ -1420,6 +1439,7 @@ of the working text app; `git checkout v0.6.0` restores it intact if the rebuild
 | Too slow to be useful on 16 GB | S8, S11 | batch/scale tuning (S11); page-level resume (§3.14 rule 7); fewer charts by default |
 | A Docling or mlx-vlm release breaks the API mid-build | a lock move fails the eval | §2.2: caps + per-package deliberate upgrades; stay on the locked version |
 | `main` stays tooling-only for weeks after PR 3 | calendar | nothing ships until PR 9; `v0.6.0` remains installable; PR 3's README note says so |
+| A sideways-printed or very wide table loops silently in granite-docling | S3 (seen: Table A-2 of the Census P60-282 report) | post-hoc loop/cap detection puts the page in `run.json` warnings (§3.10); S5 measures whether `force_backend_text` recovers it; the corpus includes one such page (§4.1) |
 | The eval corpus can't be licensed cleanly | Task C | public-domain US federal sources + project-made PDFs only (§4.1) |
 
 ## Appendix A — kickoff prompt for the implementing session
