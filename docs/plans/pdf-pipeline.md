@@ -19,7 +19,7 @@ chart CSV + summaries, tables, schema-driven key-values and RAG chunks — local
 | Decision | Section |
 |---|---|
 | granite-docling-258M-mlx on every page + Granite Vision 4.1 (8-bit, converted locally) on charts and KVP; Docling orchestrates | §2, §3.1–3.2 |
-| MLX for inference, not MLX-only — the picture classifier runs on torch | §2.1 |
+| MLX for inference, not MLX-only — Docling imports torch and the picture classifier runs on it | §2.1 |
 | Floors and caps for `docling` and `mlx-vlm`; any move re-runs the eval | §2.2 |
 | Phase A → release → Phase B, never both models loaded; 10 GB peak ceiling | §3.1, §3.11 |
 | Library first (`convert` returns, `save` writes); CLI is a thin wrapper | §3.7 |
@@ -124,18 +124,38 @@ The heavy compute is MLX; the stack is not. Read from Docling's source and
   plain `docling` installs) requires `torch` and `torchvision` outright, and the
   `models-vlm-inline` extra — the one that brings `mlx-vlm` — adds `open-clip-torch`,
   `timm`, `accelerate` and `peft`. That costs disk and CI install time (the S1 venv is
-  1.5 GB), not runtime memory: torch loads only when the classifier runs on it.
+  1.5 GB). **It costs runtime memory too (amended by S9, 2026-10-25):** Docling imports
+  torch as soon as `VlmPipeline` is imported, whichever engine the classifier uses.
+  `vlm_pipeline.py` imports the transformers VLM backend at module level, and its
+  stopping-criteria helper runs `import torch`. Measured: ~0.17 GB RSS at import and
+  ~0.3 GB at peak, which is small against the 10 GB ceiling but not "tens of MB".
 - **transformers ≥ 5.16 is the effective floor on this Mac**, and no single package
   states it: `docling-slim`'s `models-vlm-inline` excludes 5.9–5.15 on darwin (MPS crashes on
   float64 position embeddings, fixed in 5.16.0), while mlx-vlm needs ≥ 5.14. A later
   `uv lock --upgrade` must keep it; the new CLAUDE.md records it under Dependencies.
 
-**Decision for v1:** accept torch for the classifier — it is tens of MB against a
-10 GB budget. Run the classifier on ONNX Runtime **only if S9 shows it works cleanly**
-(no import of torch at runtime, identical chart picks on the corpus). A torch-free
-*install* is a goal worth one spike (S9), not a requirement. The new CLAUDE.md must
-say plainly that the project is MLX for inference but not MLX-only, since the old app
-was MLX-only in both senses.
+**Decision for v1 (settled by S9, 2026-10-25):** torch stays in the lock, and the
+classifier stays on its transformers default. The rule was to switch to ONNX Runtime
+only with no import of torch at runtime and identical chart picks. S9 met the second
+condition: 0 label changes on 527 crops and on three PDFs end to end. The first
+condition cannot be met in any installable stack, because Docling imports torch itself
+(above). The one other blocker is that Docling's default ONNX `providers` call
+`decide_device()`, which also imports torch. With both imports bypassed, the whole
+Phase A path ran torch-free. That took a stub around a Docling-internal import, which
+is not shipped. In a torch environment, ONNX saves no memory and only fractions of a
+second per PDF, so switching buys nothing in v1.
+
+**Reopen** when Docling makes both imports lazy. Unchanged on `main` as of 2026-10-25:
+`models/utils/hf_stopping_criteria.py` and `utils/accelerator_utils.py::decide_device`.
+Depend on `docling-slim[format-pdf,feat-chunking,models-onnxruntime]` (108 packages,
+989 MB instead of 1.7 GB), and run the classifier with
+`OnnxRuntimeImageClassificationEngineOptions` and a `providers` list other than the
+default `["CPUExecutionProvider"]`. Two consequences come with it. Without torch,
+transformers preprocesses with `ViTImageProcessorPil`, which moves confidences by up to
+0.031 but no label. And `huggingface-hub` moves to 2.x, because its `<2` cap lives only
+in the extras that bring torch; that is an eval-gated move under §2.2. The new
+CLAUDE.md must say plainly that the project is MLX for inference but not MLX-only, since
+the old app was MLX-only in both senses.
 
 ### 2.2 Dependency policy (decided 2026-10-18)
 
@@ -210,7 +230,11 @@ Read from Docling `main` on 2026-10-18 (PyPI latest: **2.140.0**, 2026-10-16):
   removal); the two gave byte-identical output. The preset takes the MLX repo from its
   `engine_overrides[VlmEngineType.MLX]`, which is also where the revision pin goes
   (`EngineModelConfig.revision`, §3.13 rule 1). `max_new_tokens` is **8192**.
-- `do_chart_extraction=True` (it auto-enables picture classification)
+- `do_chart_extraction=True` (it auto-enables picture classification). Pictures that
+  granite-docling already typed in DocTags **skip the classifier** and keep that label,
+  at confidence 1.0 (`created_by: load_from_doctags`). That covered 6 of 9 charts on
+  GAO-07-631 and none on GAO-07-535 or the Census pages (S9), so the classifier is
+  still what finds most charts.
 - `chart_extraction_options=ChartExtractionVlmEngineOptions.from_preset("granite_vision_v4_mlx", …)`
   with **chart2csv and chart2summary on** — summary defaults to **off**; chart2code stays off
 - **models come from one local directory** (amended by S2, 2026-10-25):
@@ -1255,7 +1279,7 @@ sentiment analysis using IBM Granite on Apple Silicon with MLX."*, topics
 > Granite Docling and Granite Vision on MLX.
 
 It deliberately claims neither "fully offline" (the first run downloads from the Hub)
-nor "MLX-only" (the picture classifier runs on torch, §2.1).
+nor "MLX-only" (Docling imports torch and the picture classifier runs on it, §2.1).
 
 **Topics** (18 of GitHub's 20):
 
@@ -1348,7 +1372,7 @@ GitHub details (§9.2); UI theme and layout for v1.x (§14, §15).
 | 8-bit vs 6-bit/bf16 Granite Vision | S6 |
 | Granite Vision's chart role | S7 |
 | page-level resume (trigger: typical PDF > ~5 min) | S8 — **trigger fired; decided 2026-10-25:** in v1, PR 6, DocTags only, gated on a public-API feasibility check in PR 4 (§3.14 rule 7) |
-| torch-free install, ONNX classifier | S9 |
+| torch-free install, ONNX classifier | S9 — **settled 2026-10-25:** torch stays, classifier on transformers; reopen when Docling's two torch imports go lazy (§2.1) |
 | page batch size, CPU–GPU overlap, `images_scale` | S11 |
 
 **Settled during implementation:** TEDS vs cell-exact for tables (§8.1, PR 7);
@@ -1540,7 +1564,7 @@ of the working text app; `git checkout v0.6.0` restores it intact if the rebuild
 | Model-repo code executes despite native transformers | S10 | stop; pin a transformers version that loads natively, or patch the loader — user decides |
 | 8-bit Granite Vision degrades charts or KVP | S6 | 6-bit or bf16, re-measured against the 10 GB ceiling |
 | Too slow to be useful on 16 GB | S8 — born-digital measured: ~6 s/page, ~10 pages/min sustained, no throttling over ~10 min; S11 | batch/scale tuning (S11); page-level resume (§3.14 rule 7, now in v1); fewer charts by default |
-| On image-only pages granite-docling drops the page's text (`<logo></picture></doctag>`, 25 tokens, `status=success`) or emits hundreds of false pictures, and the false charts multiply Granite Vision's time (S8's stand-in: 441 pictures, 102 chart pairs, 3.4× slower). It reproduces from Docling's softer page render; pypdfium2's render of the same page converts in full | S8 (image-only stand-in) | confirm on the real scan (S5 and S8 scanned halves); then test a sharper render (`images_scale`, S11) or a different render path; a cap on pictures per page sent to Granite Vision; §3.10's detection extended to near-empty pages |
+| On image-only pages granite-docling drops the page's text (`<logo></picture></doctag>`, 25 tokens, `status=success`) or emits hundreds of false pictures, and the false charts multiply Granite Vision's time (S8's stand-in: 441 pictures, 102 chart pairs, 3.4× slower). It reproduces from Docling's softer page render; pypdfium2's render of the same page converts in full | S8 (image-only stand-in) | confirm on the real scan (S5 and S8 scanned halves); then test a sharper render (`images_scale`, S11) or a different render path; a cap on pictures per page sent to Granite Vision — the classifier cannot filter them, because the stand-in's false charts were all typed by DocTags, which skips it (S9); §3.10's detection extended to near-empty pages |
 | A Docling or mlx-vlm release breaks the API mid-build | a lock move fails the eval | §2.2: caps + per-package deliberate upgrades; stay on the locked version |
 | `main` stays tooling-only for weeks after PR 3 | calendar | nothing ships until PR 9; `v0.6.0` remains installable; PR 3's README note says so |
 | A sideways-printed or very wide table loops silently in granite-docling | S3 (seen: Table A-2 of the Census P60-282 report) | post-hoc loop/cap detection puts the page in `run.json` warnings (§3.10); `force_backend_text` does **not** recover it (S5: it empties the looped items and leaves the table absent); the corpus includes one such page (§4.1) |

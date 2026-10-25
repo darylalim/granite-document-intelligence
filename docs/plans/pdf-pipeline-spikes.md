@@ -12,7 +12,8 @@ Spike scripts live in the session scratchpad, never in the repo.
 | S4 | **Pass** | yes — `mx.set_cache_limit` 1 GiB; Phase B per PDF; working set 12.71 GB (§2, §3.1, §3.8, §3.11, §3.14, §12, §17) |
 | S5 | **Pass**, born-digital half (scanned half pending the scan) | yes — default `vlm`; the flag is `VlmConvertOptions`'s; detection reads DocTags; S4's capped page is 24 (§3.2, §3.10, §8, §12, §17) |
 | S8 | **Pass**, born-digital half (scanned half pending the scan; an image-only stand-in collapses) | yes — the page-level-resume trigger fired; S8's numbers recorded as the budgets' reference; output size per page; a new image-only risk (§3.8, §3.11, §3.12, §3.14, §12, §17) |
-| S6, S7, S9–S11 | not run | — |
+| S9 | **Pass** — (a) no, (b) the ONNX engine matches but torch is imported anyway, (c) no | yes — torch stays, the classifier stays on transformers; torch's cost corrected; DocTags labels skip the classifier (§0, §2.1, §3.2, §9.2, §12, §17) |
+| S6, S7, S10, S11 | not run | — |
 
 ## S1 — dependency resolution and the chunking tokenizer (2026-10-24)
 
@@ -832,3 +833,159 @@ applied to the plan:
 - **Phase B ordering:** per PDF stays. PR 5 tries to share Docling's Granite Vision
   instance through public API to remove the reload. All-A-then-all-B is the fallback
   only for a forms-heavy private tier (§3.8).
+
+## S9 — how far toward torch-free the stack can go (2026-10-25)
+
+**Question.** (a) Does `docling-slim` with only `format-pdf`, `feat-chunking` and
+`mlx-vlm` added directly, without `models-vlm-inline`, import and run `VlmPipeline`
+with the `granite_docling` preset on the MLX engine and the MLX chart preset? (b) Does
+the picture classifier run on `ONNXRUNTIME` without importing torch, and does it pick
+the same charts? (c) Does granite-docling's DocTags already label picture types,
+making the classifier redundant?
+
+**Environment.** Two scratch projects, highest resolution, both on docling /
+docling-slim **2.142.1**, docling-core 2.104.0, mlx-vlm 0.7.10, mlx 0.32.4,
+transformers 5.20.2, tokenizers 0.23.3, onnxruntime **1.31.0**:
+
+- **torch-free**: `docling-slim[format-pdf,feat-chunking,models-onnxruntime]>=2.140,<3`
+  plus §2.2's `mlx-vlm`, `transformers` and `jsonschema` lines. 108 packages, a
+  **989 MB** venv, no torch. `huggingface-hub` resolves to **2.3.0**, because only
+  `docling-slim`'s `standard` and `models-local` extras cap it at `<2`. Every other
+  spike ran on 1.33.0.
+- **torch**: S8's constraints (`docling[vlm]`) plus `onnxruntime>=1.24.1,<2`. 163
+  packages, **1.7 GB**, torch 2.14.1 / torchvision 0.29.1.
+
+Models: the S2 models directory, unchanged. Classifier `DocumentFigureClassifier-v2.5`
+at `f859dfb…`, whose snapshot already ships `model.onnx` beside `model.safetensors`, so
+the ONNX engine needs no conversion and no new download. Every run used
+`HF_HUB_OFFLINE=1` and the S2 socket guard, and made 0 network attempts. M2 Pro,
+16 GB, macOS 27.0.1.
+
+**What was run.**
+
+1. The torch-free import of `VlmPipeline`.
+2. The full §3.2 Phase A configuration in the torch-free project, with the classifier
+   on ONNX, on the smoke PDF, GAO-07-631 (42 pages), GAO-07-535 (69 pages) and S2's
+   five Census chart pages. Each was compared, picture by picture, with the torch run
+   of the same PDF from S8 or S2. The result was then chunked with `HybridChunker`.
+   It needed the import workaround described below.
+3. The classifier alone, on the same **527 saved crops** under four engine
+   configurations: torch on MPS (Docling's default), torch on CPU, ONNX CPU and ONNX
+   CoreML + CPU. The crops are every embedded picture image from the S2, S4 and S8
+   born-digital runs (86) and from S8's image-only stand-in (441). These are the
+   crops the classifier itself reads: it calls `element.get_image()`, at
+   `images_scale = 2` with no expansion.
+4. The classifier's peak RSS, per engine, in a fresh process each.
+
+**(a) — no.** The pipeline cannot be imported without torch:
+
+```text
+docling/pipeline/vlm_pipeline.py:65    from …hf_transformers_model import …   (module level)
+docling/models/vlm_pipeline_models/hf_transformers_model.py:36
+                                       from …hf_stopping_criteria import …
+docling/models/utils/hf_stopping_criteria.py:6
+                                       import torch                          → ModuleNotFoundError
+```
+
+`vlm_pipeline.py` imports the transformers VLM backend at module level whatever the
+engine, and that backend's stopping-criteria helper imports torch unconditionally. That
+one line is the **only** blocker on this path. The probe served a stub `torch` to that
+single importer, keyed on the importing module's name, so every other `import torch`
+still saw torch absent. With it, the whole path ran torch-free on all four PDFs:
+granite-docling and Granite Vision on MLX, the classifier on ONNX, `HybridChunker`
+chunking. After each run `torch` was not in `sys.modules`, no `torch.*` submodule was
+loaded, and the stub's attribute log was empty. A broader stub (a `torch` module in
+`sys.modules`) does not work: transformers' `find_spec` probe and Docling's
+`asr_model_specs` take it for a real install and fail on it. Both imports are
+unchanged on Docling `main` as of 2026-10-25. A stub around an import is a monkeypatch
+on Docling internals, which the plan does not ship, so torch stays in the lock.
+
+**(b) — the engine works; "no torch at runtime" fails, for the reason in (a).** On ONNX
+the classifier matches torch:
+
+| Config, vs torch on MPS | Crops | Label differs | Chart pick differs | Max \|Δ confidence\| (same label) |
+|---|---|---|---|---|
+| torch on CPU | 527 | 0 | 0 | 0.00001 |
+| ONNX CPU, torch env | 527 | 0 | 0 | 0.00001 |
+| ONNX CoreML + CPU, torch env | 527 | 0 | 0 | 0.010 |
+| ONNX CPU, **torch-free env** | 527 | 0 | 0 | **0.031** |
+
+End to end, the torch-free runs matched the torch runs on every picture: the same boxes
+(15, 61 and 6), the same labels, the same 9 / 6 / 5 chart picks and the same CSVs. The
+Markdown of GAO-07-631 and GAO-07-535 was **byte-identical**.
+
+Two things qualify that:
+
+- **Docling's default ONNX configuration imports torch.** With `providers` left at
+  `["CPUExecutionProvider"]`, `OnnxRuntimeImageClassificationEngine._resolve_providers`
+  (`onnxruntime_engine.py:142`) calls `decide_device()`, and
+  `utils/accelerator_utils.py:23` runs `import torch` unconditionally at the top of it
+  (unchanged on `main`). Any other list skips the call. The probe passed the default
+  twice, which ONNX Runtime deduplicates to plain CPU with a `Duplicate provider`
+  warning. CoreML + CPU also builds, and shifts confidence by up to 0.010.
+- **Without torch the preprocessing changes, slightly.** transformers 5 loads the
+  torchvision-backed `ViTImageProcessor` when torch is installed and
+  `ViTImageProcessorPil` when it is not. The resize differs, which accounts for the
+  0.031. It was confirmed on identical crops, and in the pipeline it moved two uncertain
+  logos on GAO-07-535 p. 29 (0.579 → 0.609). No label moved.
+
+Speed and memory: the classifier is never the bottleneck. 441 crops took 3.15 s on
+ONNX CPU, 3.9 s on CoreML, 5.4 s on torch MPS and 25.5 s on torch CPU, against ~6 s per
+page for Phase A (S8). Peak RSS for the classifier process on GAO-07-535's 61 crops was
+**837 MB** with torch on MPS and **829 MB** with ONNX in the torch env. That is no
+saving, because Docling had already imported torch. It was **543 MB** with ONNX
+torch-free. Importing Docling costs 339 MB with torch and 171 MB without. So torch
+costs about **0.17 GB at import and 0.3 GB at peak**, which §2.1 had put at "tens of
+MB". That is still small against the 10 GB ceiling, but the cost is paid whether or not
+the classifier runs on torch.
+
+**(c) — no.** granite-docling types *some* pictures in DocTags, and those skip the
+classifier: `DocumentPictureClassifier.is_processable` only runs on pictures whose
+`meta.classification` is still empty, and a DocTags label is stored as `created_by:
+load_from_doctags`, confidence 1.0. On the earlier spikes' born-digital runs it typed a
+minority of the charts:
+
+| PDF | Charts picked | Typed by DocTags | Typed by the classifier |
+|---|---|---|---|
+| GAO-07-631 | 9 | 6 | 3 |
+| GAO-07-535 | 6 | 0 | 6 |
+| Census P60-282, S2's five chart pages | 5 | 0 | 5 |
+
+With classification off (S5's run of GAO-07-631), only the six DocTags charts reach
+Granite Vision, and three are lost. The classifier stays. One consequence is new: the
+classifier **cannot veto** a DocTags label. In S8's image-only stand-in, 426 of 441
+pictures, including all 94 false "line charts" that cost 548 s of Granite Vision, were
+typed by DocTags, so the classifier never saw them. A cap on pictures per page, as S8's
+§17 row proposes, is a fallback the classifier cannot provide.
+
+**Verdict: pass.** Each question has a yes/no answer with evidence, and nothing in the
+design breaks. (a) no; (b) the ONNX engine is equivalent, but in an installable stack
+torch is imported anyway; (c) no.
+
+**What it costs the design (amendments, applied to the plan).**
+
+- **§2.1 decision:** torch stays in the lock, and the classifier stays on its
+  transformers default in v1. The plan's rule (ONNX "only if no import of torch at
+  runtime") cannot be met while `vlm_pipeline` imports torch. Switching engines in a
+  torch env buys no memory, and only fractions of a second per PDF. The ONNX
+  configuration is recorded as ready: a non-default `providers` list, and the PIL
+  preprocessing's ≤ 0.031 confidence shift. Torch-free is reopened when Docling makes
+  both imports lazy. §2.1's torch cost is corrected to ~0.17 GB at import and ~0.3 GB
+  peak, and its "torch loads only when the classifier runs on it" is corrected to
+  "Docling imports torch when `VlmPipeline` is imported".
+- **§0, §9.2:** the reason the project is "not MLX-only" becomes "Docling imports torch;
+  the picture classifier runs on it".
+- **§3.2:** pictures that DocTags already typed skip the classifier, at confidence 1.0.
+- **§12:** S9 settled.
+- **§17:** the image-only row notes that the false charts are DocTags-labelled, so the
+  classifier cannot filter them.
+
+**Also learned.**
+
+- **A `docling-slim` dependency changes `huggingface-hub`'s major**, from 1.33.0 to
+  2.3.0, because the `<2` cap lives only in the extras that bring torch. If torch-free
+  is ever reopened, that move is one of §2.2's "moving `huggingface-hub` requires the
+  eval" cases, separate from the torch question.
+- Docling's `asr_model_specs` already probes for torch with `try: import torch`, at
+  import of `pipeline_options`, which is why that import succeeds torch-free. The
+  pattern for an upstream fix exists in the codebase.
