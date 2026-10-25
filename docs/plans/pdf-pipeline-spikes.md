@@ -11,7 +11,8 @@ Spike scripts live in the session scratchpad, never in the repo.
 | S3 | **Pass**, with findings | yes — `VlmConvertOptions` preset, 8192-token cap, loop and cap detection are our code (§2, §2.1, §3.2, §3.10, §3.13, §3.14, §4, §8, §17) |
 | S4 | **Pass** | yes — `mx.set_cache_limit` 1 GiB; Phase B per PDF; working set 12.71 GB (§2, §3.1, §3.8, §3.11, §3.14, §12, §17) |
 | S5 | **Pass**, born-digital half (scanned half pending the scan) | yes — default `vlm`; the flag is `VlmConvertOptions`'s; detection reads DocTags; S4's capped page is 24 (§3.2, §3.10, §8, §12, §17) |
-| S6–S11 | not run | — |
+| S8 | **Pass**, born-digital half (scanned half pending the scan; an image-only stand-in collapses) | yes — the page-level-resume trigger fired; S8's numbers recorded as the budgets' reference; output size per page; a new image-only risk (§3.8, §3.11, §3.12, §3.14, §12, §17) |
+| S6, S7, S9–S11 | not run | — |
 
 ## S1 — dependency resolution and the chunking tokenizer (2026-10-24)
 
@@ -647,3 +648,174 @@ user trusts.
 - **§17:** S5 answers the sideways-table row (it does not recover it). A new row
   covers silent VLM transcription errors in prose: a wrong number, invented text, a
   whole page lost to a loop.
+
+## S8 — throughput: born-digital half (2026-10-25)
+
+**Question.** Seconds per page for Phase A (born-digital and scanned separately),
+seconds per chart, seconds per KVP page and cold-start load time; sustained pages/min
+across the 30+ page document, first page to last (§3.14 rule 6); whether a typical PDF
+takes more than ~5 minutes (the page-level-resume trigger, rule 7); a sanity reference
+for PR 7's budgets (§3.11) and the README's first numbers. **Only the born-digital half
+was measured.** The scanned half waits for Task C's print-and-scan step. An image-only
+stand-in was run, and it found a failure rather than a rate (below).
+
+**Environment.** A fresh S8 scratch project with the S4 constraints. `uv lock
+--upgrade` on the day moved nothing: docling / docling-slim 2.142.1, docling-core
+2.104.0, **mlx-vlm 0.7.10**, mlx 0.32.4, transformers 5.20.2, torch 2.14.1, pypdfium2
+5.14.0. Models are the S2 models directory, unchanged. M2 Pro, 16 GB, macOS 27.0.1, on
+AC power with the battery full. Every run used `HF_HUB_OFFLINE=1`, the S2 socket guard
+and `mx.set_cache_limit(1 << 30)`, and made 0 network attempts. `pmset -g therm`
+recorded no thermal or performance warning before or after any run.
+
+**What was run.** One probe script, the §3.2 configuration (S4's, unchanged). It timed:
+
+- the imports;
+- `DocumentConverter.initialize_pipeline`, which does every Phase A model load;
+- `convert()`, with each page's tokens, generation time and stop reason read from its
+  own `vlm_response` (never from generation order — S5);
+- every `mlx_vlm.stream_generate` call, timestamped, which gives charts and the
+  sustained rate;
+- Docling's own stage timings (`settings.debug.profile_pipeline_timings`);
+- the release, a Phase B Granite Vision load and one KVP generation (S4's four-field
+  prompt) on each of the first five pages;
+- a full rebuild of the Phase A converter, which is the per-PDF reload §3.8 pays with
+  `--schema`.
+
+Runs: GAO-07-631 (42 pages, 9 charts) **twice back to back**, then GAO-07-535 (69
+pages, born-digital, a US federal work), then the image-only stand-in. Cold start was
+measured on the 3-page smoke PDF straight after `sudo purge`, with a warm run of the
+same file for comparison.
+
+**Results — born-digital.**
+
+| | GAO-07-631 run 1 | run 2 | GAO-07-535 |
+|---|---|---|---|
+| Pages / charts | 42 / 9 | 42 / 9 | 69 / 6 |
+| **Phase A wall** | **247.9 s** | **246.7 s** | **426.8 s (7.1 min)** |
+| All-in s/page (pages/min) | 5.90 (10.2) | 5.87 (10.2) | 6.18 (9.7) |
+| Page generation: sum / median / p90 | 170.2 / 3.49 / 4.01 s | 169.0 / 3.43 / 3.96 s | 319.8 / 2.77 / 4.70 s |
+| Page generation per page, excluding the capped page | 3.27 s | 3.25 s | 4.18 s |
+| Capped pages (8193 tokens) | p. 24, 36.2 s | p. 24, 36.3 s | p. 38, 36.4 s |
+| Charts: total / per chart | 74.6 / 8.28 s | 74.4 / 8.27 s | 105.1 / 15.0 s |
+| Chart CSV / summary, median | 2.1 / 5.4 s | 2.1 / 5.4 s | 6.8 / 9.0 s |
+| Outside generation (render, classify, assemble) | 3.1 s | 3.3 s | 1.8 s |
+| Pages/min, first half / second half of generation order | 10.2 / 10.1 | 10.2 / 10.2 | 9.2 / 10.3 |
+| KVP per page, 5 pages (median) | 4.6–5.3 s (4.82) | 4.6–5.3 s (4.86) | 4.7–7.4 s (5.09) |
+
+| Loads and start-up | warm page cache | after `sudo purge` |
+|---|---|---|
+| Import docling + mlx_vlm | 4.6–5.3 s | 5.2 s |
+| Phase A build (Granite Vision + granite-docling + classifier) | 2.2–2.4 s | 2.8 s |
+| Phase B Granite Vision load | 1.8–1.9 s | 1.9 s |
+| Phase A rebuild after release | 2.5–2.6 s | — |
+| **First run after `uv sync` into a fresh venv** | **61.7 s import** | — |
+
+- **Sustained equals best case on this machine.** Pages/min is the same in both halves
+  of both GAO-07-631 runs, and the two runs, about 9.5 minutes of continuous load,
+  agree to within 0.5%. The cleanest throttling probe is the capped page: it generates
+  the same 8193 tokens in every run, at 226.5, 225.9 and 225.3 tok/s. On the
+  stand-in's 14-minute run, four capped pages went from 226.2 tok/s at minute 1 to
+  215.2 at minute 13. That is a 5% slowdown, the only drift seen. Tokens per second on
+  ordinary pages is a poor throttle signal: short pages pay a fixed image-encoding cost,
+  so GAO-07-535's falling tok/s tracks its content, and its pages/min actually rose.
+- **One capped page costs 36 s every time**, for output that is lost anyway (S5). That
+  is 21% of GAO-07-631's page-generation time and 11% of GAO-07-535's. Both test PDFs
+  have exactly one.
+- **Charts vary 2× with the chart.** GAO-07-631's charts cost 8.3 s each and
+  GAO-07-535's cost 15.0 s: longer CSVs (208–407 tokens against 35–78) and longer
+  summaries. Budgets should be set per chart from a corpus median, not from one PDF.
+- **Docling's own stage timings work** (`vlm_convert` and `doc_enrich`, counted in
+  Docling's page batches: 11 for 42 pages, so 4 pages per batch). That answers part of
+  S11's timing-hook question early. Batch size itself stays S11's.
+- **Cold start is the install, not the disk.** After `sudo purge`, the import and the
+  Phase A load were only ~1.2 s slower than warm, so re-reading ~5.5 GB of weights
+  from the SSD costs about a second. The 62 s cost belongs to the first import after `uv sync`, which
+  writes bytecode and has macOS scan every new native library. It is paid once per
+  install, not per run. A true after-reboot cold start was not measured: `purge` empties
+  the file cache but not everything a reboot does.
+- **Output size per page** (§3.12 rule 5), re-saved in the §3.5 layout (`document.json`
+  with referenced images, `document.md`, picture crops): **23 KB/page** for GAO-07-631
+  and **61 KB/page** for GAO-07-535, whose JSON is larger. With `--save-page-images`
+  (stored at scale 1.0) it is 160–187 KB/page. Tables, chunks and `run.json` were not
+  measured, so treat these figures as a floor.
+
+**Typical-PDF trigger (§3.14 rule 7): fired.** GAO-07-631 took 4.1 minutes, but
+GAO-07-535 took **7.1 minutes**, and 8 of the 10 GAO candidates S4 collected run 59–216
+pages. At ~6 s/page that is 6–22 minutes each. For the report-length documents this
+corpus holds, a typical PDF exceeds 5 minutes.
+
+**Phase B ordering (§3.8): per PDF stays.** A `--schema` batch pays a rebuild of 2.6 s
+plus a Granite Vision load of 1.9 s, about 4.5 s per PDF. On a 42-page PDF that is 2%
+of runtime. On a one-page form (~4 s of Phase A plus ~5 s of KVP) it is about a third.
+All-A-then-all-B would save most of that, at the cost of holding every PDF's Phase A
+result until the batch's Phase B. The cost does not dominate, so the S4 decision
+stands. A batch of one-page forms is the case that would reopen it.
+
+**Results — image-only stand-in (not the scanned measurement).** GAO-07-631 was
+rasterized to an image-only PDF: every page at 200 DPI, no text layer (0 text-layer
+characters). It is clean, square and noise-free. Phase A took **836.6 s (19.9 s/page)**,
+3.4× the born-digital run, but that time measures a failure:
+
+- granite-docling found **441 pictures** where the born-digital run found 15. Of these,
+  337 were "logos" and 94 "line charts". Page 2 alone became 334 picture boxes (7,504
+  tokens). The 94 false charts sent Granite Vision **102 chart pairs: 548 s**, two
+  thirds of the run.
+- **Pages lost their text.** Pages 4, 5 and 10 kept one item each. Their generation
+  was `<doctag><picture>…<logo></picture></doctag>`, 24–25 tokens, `status=success`.
+  Four pages hit the cap, against one born-digital.
+
+Narrowed on four pages (PDF pages 2, 4, 5 and 10), granite-docling only:
+
+- **It is not the raster format.** Grayscale JPEG, RGB JPEG, near-lossless RGB and
+  300 DPI grayscale all collapsed the same way.
+- **It is not the prompt.** Docling's prompt and image size are identical for both
+  PDFs. Docling's own rendered page images, captured at `stream_generate` and fed
+  straight to `mlx_vlm`, reproduce the collapse: 25 tokens against 690 for the
+  born-digital render of the same page.
+- **It is how the page is rendered.** The same raster page rendered by `pypdfium2` at
+  scale 2.0 and fed directly converts in full: 2,669 characters with the GAO logo
+  tagged and every paragraph present. Docling's render of that page is visibly softer:
+  11.4% mid-gray pixels against 7.5% for pypdfium2's, and 4.6% for the born-digital
+  page. The likeliest cause, not yet traced in the source, is that it resamples the
+  embedded raster a second time. granite-docling is fragile to
+  that difference. It tags the logo, then either ends the page or repeats picture
+  boxes.
+
+A real scan is noisier than this stand-in, so the risk applies to it, not only to
+synthetic rasters. Not yet known: which Docling backend call does the softening, and
+whether a sharper page image (a higher `images_scale`, or a different render path)
+avoids it. That belongs with the scanned halves of S5 and S8, and with S11's
+`images_scale` sweep. **Scanned throughput is not reported.** Until the collapse is
+understood, any scanned rate would mostly measure the failure.
+
+**Verdict: pass for the born-digital half.**
+
+| Measure (born-digital, M2 Pro 16 GB, 2026-10-25) | Value |
+|---|---|
+| Phase A, all-in | **~6 s/page, ~10 pages/min sustained** (5.9–6.2 s) |
+| Page generation, uncapped page | ~3.3–4.2 s/page |
+| Capped page | 36 s |
+| Chart (CSV + summary) | 8–15 s |
+| KVP page | ~5 s |
+| Model loads, warm or after `purge` | Phase A 2.2–2.8 s, Phase B 1.9 s |
+| First run after install | +62 s, once |
+
+The scanned half is open: blocked on the print-and-scan step, and now carrying a known
+collapse to test against.
+
+**What it costs the design (amendments, applied to the plan).**
+
+- **§3.14 rule 7 and §12:** the page-level-resume trigger fired. It moves into v1 scope,
+  in PR 6 (batch and resume), **subject to the user's approval of this report**.
+- **§3.8:** S8's reload numbers are recorded. Per PDF stays, and a batch of one-page
+  forms is named as the case that would reopen it.
+- **§3.11:** S8's sanity reference is recorded beside the budgets. Charts vary 2× per
+  PDF, so their budget is a corpus median. The capped page is a known 36 s, and a
+  degeneration budget of 0 on the public corpus means GAO-07-631 p. 24 and GAO-07-535
+  p. 38 must either be fixed or be named exceptions.
+- **§3.12 rule 5:** output size per page measured: 23–61 KB/page by default and
+  160–187 KB/page with page images, before tables and chunks.
+- **§17:** a new row. On image-only pages, Docling's page render makes granite-docling
+  drop a page's text or emit hundreds of false pictures, and those false charts multiply
+  Granite Vision's time. Earliest signal: the S5 and S8 scanned halves. The "too slow"
+  row now cites S8's numbers.
