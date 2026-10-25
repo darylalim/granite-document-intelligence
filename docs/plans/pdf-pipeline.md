@@ -147,6 +147,11 @@ second per PDF, so switching buys nothing in v1.
 
 **Reopen** when Docling makes both imports lazy. Unchanged on `main` as of 2026-10-25:
 `models/utils/hf_stopping_criteria.py` and `utils/accelerator_utils.py::decide_device`.
+**We do not report this upstream (decided with the user, 2026-10-25).** The payoff is
+~0.3 GB of memory and ~0.7 GB of install size, and v1 waits on neither. The first import
+is already reported as docling-project/docling#4966, from the remote-API side; the
+`decide_device` one is not reported anywhere. Watch #4966 rather than commenting on it
+or opening a PR, and do not re-offer an issue.
 Depend on `docling-slim[format-pdf,feat-chunking,models-onnxruntime]` (108 packages,
 989 MB instead of 1.7 GB), and run the classifier with
 `OnnxRuntimeImageClassificationEngineOptions` and a `providers` list other than the
