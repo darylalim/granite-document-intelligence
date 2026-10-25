@@ -7,7 +7,7 @@ Spike scripts live in the session scratchpad, never in the repo.
 | Spike | Verdict | Amends the plan |
 |---|---|---|
 | S1 | **Pass** | yes — extra names (§2.1, §3.9, §4); floors are verified versions (§2.2) |
-| S2 | not run | — |
+| S2 | **Pass**, through `artifacts_path` | yes — every Docling model loads from one models directory; pins enforced at fetch; 4.92 GB; command form (§2, §3.2, §3.12, §3.13, §4, §4.2, §6, §8, §12, §17) |
 | S3 | **Pass**, with findings | yes — `VlmConvertOptions` preset, 8192-token cap, loop and cap detection are our code (§2, §2.1, §3.2, §3.10, §3.13, §3.14, §4, §8, §17) |
 | S4–S11 | not run | — |
 
@@ -250,3 +250,126 @@ an amendment, not a redesign.
 - Docling prints `Exception ignored in: VlmConvertModel.__del__` at interpreter exit
   (harmless, after the result is complete). The new CLAUDE.md should mention it so
   nobody chases it.
+
+## S2 — loading a local 8-bit Granite Vision through Docling's MLX engine (2026-10-25)
+
+**Question.** Does Docling's MLX engine load a **local** 8-bit conversion of
+`granite-vision-4.1-4b`? Pass: chart extraction runs from the local path with
+`HF_HUB_OFFLINE=1`. If only Hub ids work, choose between a private Hub repo and a
+monkeypatch.
+
+**Environment.** Same scratch-project constraints and resolved versions as S1/S3:
+docling / docling-slim 2.142.1, docling-core 2.104.0, **mlx-vlm 0.7.10**, mlx 0.32.4,
+transformers 5.20.2, torch 2.14.1, huggingface-hub 1.33.0. Models: granite-docling MLX
+at `e9939db…` (S3), `DocumentFigureClassifier-v2.5` at
+**`f859dfbff5c9916cd996942d4b0db7fa25808220`** (its `main` on 2026-10-25, last modified
+2026-04-01), Granite Vision source at Docling's pin `dd48e97…` (its `main` is
+`37d591f…`, last modified 2026-07-13). macOS 27.0, 16 GB Apple Silicon.
+
+**The conversion.**
+
+```bash
+uv run python -m mlx_vlm convert --hf-path ibm-granite/granite-vision-4.1-4b \
+  --revision dd48e97503de471803850df70843cf9eb5da8712 \
+  -q --q-bits 8 --mlx-path <dir>
+```
+
+- Every flag §4.2 named exists, but `python -m mlx_vlm.convert` is **deprecated**
+  ("Use `mlx_vlm.convert …` or `python -m mlx_vlm convert …`"). No
+  `--trust-remote-code` was passed and none was needed.
+- 184 s wall including the 8.0 GB download, **3.8 GB peak RSS**. The output is
+  **4.92 GB** in one `model.safetensors`, reported as **9.259 bits per weight**
+  (q-bits 8, group 64), not the ~4.65 GB the plan estimated. The difference is the
+  **vision tower, which mlx-vlm leaves in bf16** (0.86 GB); the language model
+  (3.62 GB), `lm_head` and the layerwise projectors are all quantized.
+- The output directory **carries the source repo's Python files**: `modeling.py`,
+  `processing.py`, `configuration.py`, `downsampling.py`. They are not imported here,
+  but S10's "no module from the HF cache in `sys.modules`" check must also cover the
+  models directory, where these files now live.
+- `mlx_vlm convert` also fetched the repo's `README.md` at `main` (a README-only
+  `37d591f…` snapshot appeared in the HF cache beside `dd48e97…`). The weights came
+  from the pinned revision.
+
+**How Docling finds a model.** Read from the 2.142.1 source, and the same for every
+engine (`mlx_engine.py`, and the image-classification engines through
+`vlm/_utils.py::resolve_model_artifacts_path`):
+
+- `artifacts_path` **unset** → `snapshot_download(repo_id, revision)`.
+- `artifacts_path` **set** → load `<artifacts_path>/<repo_id with "/" → "--">`, and
+  **ignore the revision**; a missing folder is a `FileNotFoundError` naming the
+  expected path (verified).
+- `artifacts_path` is a **pipeline** option (`VlmPipelineOptions.artifacts_path`), passed
+  to every stage. Setting it for Granite Vision means granite-docling and the figure
+  classifier must be in the same directory.
+
+**What was run.** One probe script, three routes, on a 5-page PDF cut from Census
+P60-282 (report pages 8, 9, 12, 15, 16: Figures 1–6 — two bar charts, three line
+charts, and a table-and-bar hybrid). Every run used `HF_HUB_OFFLINE=1` **and** an
+in-process socket guard that refuses and records every non-loopback `connect`. The
+pipeline was the §3.2 configuration: the `granite_docling` preset and the
+`granite_vision_v4_mlx` chart preset on `MlxVlmEngineOptions`, chart2csv and
+chart2summary on, `generate_picture_images=True`, and every model's repo and revision
+overridden. `mlx_vlm.load` was spied to record the path each model loaded from.
+
+| Route | How Granite Vision is named | Result |
+|---|---|---|
+| **path** | `repo_id` = the absolute local path, no `artifacts_path` | **fails** before any I/O: `HFValidationError: Repo id must be in the form 'repo_name' or 'namespace/repo_name'` |
+| **artifacts** | `artifacts_path=models/`, `repo_id="local/granite-vision-4.1-4b-8bit"`; `models/` holds `ibm-granite--granite-docling-258M-mlx`, `docling-project--DocumentFigureClassifier-v2.5` and `local--granite-vision-4.1-4b-8bit` | **works**: `status=success`, 0 network attempts, `mlx_vlm.load` called only with paths under `models/` |
+| **patch** | `MlxVlmEngine.download_models` patched for one repo id | not run, because the public route works |
+
+**Artifacts-route numbers (5 pages).** 189.4 s wall and **7.32 GB
+`mx.get_peak_memory()`**, with granite-docling and Granite Vision both resident during
+Phase A, as §3.1 expects. That number belongs to S4, which measures memory properly.
+
+| Page | Figure | Classified | chart2csv | chart2summary |
+|---|---|---|---|---|
+| 1 | Fig. 1, bar chart, labels with commas | `bar_chart` 0.58 | **dropped**: CSV parse error | yes |
+| 2 | Fig. 2, line chart, 5 series 1967–2023 | `line_chart` 0.99 | 58 × 6 | yes |
+| 3 | Fig. 3, table and bar hybrid | `table` 0.53 | not a chart; not sent | — |
+| 4 | Fig. 4, dot plot and bar chart, labels with commas | `bar_chart` 0.58 | **dropped**: CSV parse error | yes |
+| 4 | Fig. 5, line chart, 4 series 1967–2023 | `line_chart` 0.99 | 58 × 5 | yes |
+| 5 | Fig. 6, ratio and earnings, 1960–2023 | `line_chart` 0.95 | 66 × 4 | yes |
+
+**Verdict: pass.** Docling's MLX engine loads the local 8-bit conversion through its
+own public `artifacts_path` option, with no Hub repo and no patch. The local path
+cannot be passed as `repo_id`. Neither fallback in the §17 risk row is needed.
+
+**What it costs the design (amendments, applied to the plan).**
+
+- **One models directory for every Docling model** (§2, §3.2, §3.12, §6). Because
+  `artifacts_path` is pipeline-wide, `$GDI_CACHE_DIR/models/` holds granite-docling, the
+  classifier and the 8-bit Granite Vision under Docling's `<ns>--<name>` folder names.
+  `gdi convert-model` fetches and converts all three; nothing downloads on first use.
+  `GRANITE_VISION_MLX_PATH` goes, since Docling fixes the folder name. The embedding
+  tokenizer is not a Docling model and stays in the HF cache.
+- **Pins are enforced at fetch, not at load** (§3.13 rule 1, §8 `test_convert.py`, S10).
+  Under `artifacts_path` Docling ignores `revision`, so a pin in the preset proves
+  nothing. The setup step downloads each model at its pinned SHA into its folder (real
+  files via `snapshot_download(..., local_dir=…)`, not symlinks into the HF cache,
+  which `hf cache delete` would break) and writes `models/manifest.json`: each repo's
+  SHA, plus the conversion's source SHA, mlx-vlm version and q-bits. `convert()`
+  checks the manifest against `config.py` before loading and refuses a mismatch with
+  the command to fix it; `run.json` records the manifest.
+- **Size is 4.92 GB, not ~4.65** (§2, §3.12, §5 `.gitignore` comment).
+- **Command form** (§4.2): `python -m mlx_vlm convert`, flags verified.
+
+**Found on the way: work for S6, S7 and the PRs, not S2 failures.**
+
+- **Docling silently drops a chart's CSV when a label contains a comma.** The model
+  wrote `Full-Time, Year-Round Workers,Male,61440,-1.6` unquoted. Docling's pandas
+  parse failed ("Expected 4 fields in line 4, saw 5"), logged it, and left
+  `tabular_chart` empty: `status=success`, `errors=[]`, and the raw response is **not
+  kept** on the document. Two of the five charts lost their CSV this way. The summary
+  survives. Added to §17. The fallback is to capture the raw chart2csv text ourselves
+  and parse it leniently. S7 and PR 4 decide how; S6 must count these as failures,
+  not as missing charts.
+- **The line-chart values look poor.** Figure 5's 2023 values are 91.3 / 81.8 / 68.5 /
+  52.9 million on the page; the CSV says 109 / 91 / 71 / 66. Figure 6 repeats one row
+  (`60,45,25`) for most of its 66 years. Figure 4's dropped CSV had the wrong sex
+  labels and `42210` for `$42,110`. Whether that is 8-bit quantization or Granite
+  Vision's limit on dense, long time series is exactly what S6 (8-bit vs bf16) and S7
+  measure. The bf16 source is in the HF cache for S6.
+- The classifier's confidence on both bar charts is only 0.58, and a table with bars
+  goes to `table`. That is S9(c) and eval territory.
+- Docling prints `Exception ignored in: …__del__` at exit for both VLM stages
+  (`VlmConvertModel` and `ChartExtractionVlmEngineModel`); harmless, as S3 found.
