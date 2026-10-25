@@ -14,7 +14,8 @@ Spike scripts live in the session scratchpad, never in the repo.
 | S8 | **Pass**, born-digital half (scanned half pending the scan; an image-only stand-in collapses) | yes — the page-level-resume trigger fired; S8's numbers recorded as the budgets' reference; output size per page; a new image-only risk (§3.8, §3.11, §3.12, §3.14, §12, §17) |
 | S9 | **Pass** — (a) no, (b) the ONNX engine matches but torch is imported anyway, (c) no | yes — torch stays, the classifier stays on transformers; torch's cost corrected; DocTags labels skip the classifier (§0, §2.1, §3.2, §9.2, §12, §17) |
 | S10 | **Fail, resolved by option 1**: Granite Vision's repo `configuration.py` ran on every load of the 8-bit folder, through mlx-vlm's `trust_remote_code=True` default; stripping the repo's code from the converted folder leaves none (tested). Revisions reach every loader | yes: the repo's code is stripped at conversion, `convert()` refuses a folder that has any, Phase B passes `trust_remote_code=False`, and the tokenizer is pinned to `47ea694…` (§3.6, §3.12, §3.13, §4.2, §6, §8, §12, §16, §17) |
-| S6, S7, S11 | not run; now unblocked, since Task C's expected outputs exist | — |
+| S6 | **Pass**: no measurable regression on 10 charts (69 cells) and 3 KVP pages (20 fields); identical chart values and byte-identical KVP output; bf16 alone peaks at 10.12 GB | yes: S6 settled; bf16 ruled out on memory too; multi-panel pairing needs chart boxes in the manifests; rule 4 pairs numbers with labels; the capped page loses charts; the mangled-header comma case; summaries contradicting their CSV (§2, §8.2, §12, §17) |
+| S7, S11 | not run; unblocked, since Task C's expected outputs exist | — |
 | Task C | **Public tier done except the scan** (branch `test/eval-corpus`, PR 2): 6 PDFs, 13 charts, 6 tables, 3 KVP cases; the scan and the private tier wait on the user | yes: §4.1 status and the scan's pages; the text layer can disagree with the page (§8.2 rule 2); en-dash minus, significance asterisks, row pairing (§8.2 rule 3); the expected-output format (§8.1) |
 
 ## S1 — dependency resolution and the chunking tokenizer (2026-10-24)
@@ -1174,3 +1175,161 @@ Upstream reporting is not decided.
   clean while the modules cache said otherwise. Any `sys.modules` check that PR 4 or
   PR 7 automates should write per-process results, or should check the modules
   cache's contents as well.
+
+## S6 — 8-bit vs bf16 Granite Vision on charts and KVP (2026-10-25)
+
+**Question.** Does the 8-bit conversion degrade Granite Vision's chart CSVs or KVP
+fields against bf16? Pass: CSVs match on values; KVP fields match. If 8-bit degrades,
+try 6-bit or bf16 and re-measure S4.
+
+**Environment.** A fresh S6 scratch project with S10's constraints plus `pypdfium2`.
+A fresh lock at highest resolution moved nothing against S8–S10: docling / docling-slim
+2.142.1, docling-core 2.104.0, mlx-vlm 0.7.10, mlx 0.32.4, transformers 5.20.2,
+tokenizers 0.23.3, torch 2.14.1, huggingface-hub 1.33.0, pypdfium2 5.14.0, jsonschema
+4.26.0. Models: the S10 models directory (real files, Granite Vision 8-bit stripped).
+The bf16 reference was converted from the same pinned source `dd48e97…` with
+`python -m mlx_vlm convert … --dtype bfloat16` (no `-q`), offline, in 10 s, to
+**8.5 GB** in two shards, then stripped the same way. Apart from the weights and
+`config.json`'s quantization key, the two folders are byte-identical: tokenizer,
+processor configs, chat template. Every run used `HF_HUB_OFFLINE=1`, a socket guard
+and `mx.set_cache_limit(1 << 30)`, and made 0 network attempts. M2 Pro, 16 GB,
+macOS 27.0.1. Corpus: `test/eval-corpus` at `7565ae1`, every PDF's SHA-256 equal to its
+manifest's.
+
+**What was run.** The design holds Phase A fixed, so quantization is the only variable.
+
+1. **Phase A once**, through the §3.2 converter with 8-bit Granite Vision, on
+   GAO-07-631 (42 pages) and the GAO-08-14 excerpt (the pie). A spy on
+   `MlxVlmEngine.predict_batch` saved every chart request's exact image (lossless PNG),
+   prompt and generation inputs. A spy on Docling's chart handler recorded each raw
+   response and the picture it belonged to. Docling keeps neither (S2).
+2. **Replay** of those 20 requests (10 charts × `<chart2csv>` and `<chart2summary>`)
+   through `mlx_vlm`, reproducing `MlxVlmEngine.predict_batch` line by line: Docling's
+   `preprocess_image_batch`, mlx-vlm's `apply_chat_template(…, num_images=1)` and
+   `stream_generate` with the recorded `max_tokens` 4096 and temperature 0.0. The model
+   loads as Docling loads it (`strict=True`), plus `trust_remote_code=False`. Run once
+   per variant. **Control:** the 8-bit replay reproduced all 20 of Docling's recorded
+   responses **byte for byte**, so the replay is the pipeline.
+3. **KVP**, §3.3's design, on each manifest's `kvp.pages`: the W-9, the GAO-07-631
+   cover and the adversarial purchase order. The page is rendered at scale 2.0 (the
+   scale `GRANITE_VISION_4_1_TRANSFORMERS` uses). The prompt is Docling's
+   `_build_extraction_prompt` around the JSON Schema, serialized as Docling serializes
+   a dict template (`json.dumps(indent=2)`). Generation is greedy, max 1024 tokens.
+   The first JSON object is taken and validated with `jsonschema`.
+4. **Scoring** with a scratchpad script applying §8.1's chart metrics and §8.2
+   rule 3's normalization and pairing: same page, reading order; rows by first-column
+   label; numbers within 1%. A response is parsed the way Docling's handler parses it,
+   so a parse error counts as a dropped CSV and scores zero. A lenient parse that
+   rejoins comma-split labels was scored beside it. Summaries got rule 4's
+   unsupported-number check, and every one was also read.
+
+**Results — charts.** 13 expected charts; 10 reached Granite Vision (below).
+
+| Chart | Kind | Cells | 8-bit | bf16 | Same CSV text |
+|---|---|---|---|---|---|
+| GAO-07-631 p12, Fig. 1 | line (geometry) | 11 | 3 | 3 | yes |
+| p13, Fig. 2 | bar | 6 | 6 | 6 | yes |
+| p14, Fig. 3 | bar | 6 | 6 | 6 | yes |
+| p15, Fig. 4 | grouped bar, broken axis | 6 | 6 | 6 | yes |
+| p17, Fig. 5 | bar | 6 | 6 | 6 | yes |
+| p18, Fig. 6 | line (geometry) | 12 | 0 | 0 | yes |
+| p24, Fig. 7 (2 panels) | bar | 3 + 3 | not sent | not sent | — |
+| p25, Fig. 8 panel 1 | bar | 3 | 3 | 3 | header only (`Value (in millions)` / `Value`) |
+| p25, Fig. 8 panel 2 | bar | 3 | 3 | 3 | yes |
+| p26, Fig. 9 (2 panels) | bar | 3 + 3 | 0 (one merged picture) | 0 | yes |
+| GAO-08-14 p2, Fig. 3 | pie | 4 | 4 | 4 | yes |
+| **Total** | | **69** | **37 (53.6%)** | **37 (53.6%)** | 9 of 10 |
+
+- **Values are identical across variants on every chart sent.** The one textual
+  difference is a header neither variant gets right (expected `Dollars in millions`).
+  The lenient parse changed no score: none of these responses has the S2 comma drop.
+- **Every miss is shared and comes from upstream of the quantization:**
+  - **p24:** Figure 7 is never sent. PDF page 24 holds the letter's last prose *and*
+    Figure 7, and it is the page that hits the 8192-token cap (S5, S8: identical in
+    every run), so its pictures never exist. The cap costs **2 of 13 charts**, not
+    only a page of prose.
+  - **p26:** granite-docling boxes Figure 9's two panels as **one** picture (p25's
+    two panels came back as two). Granite Vision then writes one transposed four-row
+    table covering both panels, and nothing pairs with panel 2.
+  - **p12 and p18, the two line charts read from geometry:** both variants round to
+    the nearest ~5 (`130, 125, 120…` for `132, 128, 124…`), outside the 1% tolerance.
+- **Headers:** 1 of 10 matched in either variant. The model writes generic headers
+  (`Category`, `Value`) where the expected CSVs carry the printed axis title.
+- **Figure 6's header has an unquoted comma** (`…without supplemental funds, transfers,
+  and reprogramming`). It is *not* dropped: with `header=None`, pandas takes the first
+  line's five fields as the width and pads the three-field rows, so Docling keeps a
+  five-column table whose header is split across cells. That is a second, quieter form
+  of S2's comma problem: mangled rather than dropped.
+
+**Results — summaries.** Rule 4 counted 16 of 99 numbers unsupported for 8-bit and 12
+of 111 for bf16. Reading every one: the extras are axis ranges (`0 to 250`), list
+numbering (`1. 2. 3.`) and the merged p26 picture quoting panel 2's correct values.
+Approximate readings of Figure 1 are the only real errors, three per variant: 8-bit
+`180 / 200 / 220`, bf16 `120 / 200 / 220`, against 196, 195 and 210 (and 124). **Neither
+variant invents a value.** Both summaries of the pie attach **every percentage to the
+wrong slice** (`Maritime 60%`, `Motor carriers 30%`, `Rail 6%`, `Pipelines 4%`), while
+the CSV beside them is right. Rule 4 scores that 0 unsupported, because each number
+occurs somewhere in the chart.
+
+**Results — KVP.** The raw output is **byte-identical** between the variants on all
+three pages.
+
+| Case | Fields | 8-bit | bf16 | Schema-valid | Shared miss |
+|---|---|---|---|---|---|
+| W-9 page 1 | 11 | 10 | 10 | both | `name`: `Alex O. Sample` for `Alex Q. Sample` |
+| GAO-07-631 cover | 4 | 3 | 3 | both | `addressee`: `Congressional Committees`, dropping "Report to" |
+| Adversarial PO (excluded from averages) | 5 | 4 | 4 | both | `order_date`: `03/14/2026` for the printed `2026-03-14` |
+
+The adversarial output contains none of the four injected values, in either variant.
+
+**Speed and memory (same inputs).**
+
+| | 8-bit | bf16 |
+|---|---|---|
+| Load | 1.9 s | 3.1 s |
+| Chart CSV, 10 charts / median | 22.0 s / 2.17 s (21.7 tok/s) | 30.8 s / 2.96 s (15.4 tok/s) |
+| Chart summary, 10 charts | 57.9 s (35.4 tok/s) | 101.0 s (21.3 tok/s) |
+| KVP per page | 5.6–8.3 s | 5.9–10.6 s |
+| `mx.get_peak_memory()`, charts / KVP | 6.37 / 6.52 GB | 9.95 / **10.12 GB** |
+
+Phase A with 8-bit peaked at 7.0 GB, as in S4. bf16 alone, with no granite-docling
+beside it, already passes the 10 GB ceiling on a KVP page. In Phase A, where Docling
+holds both models, it would add ~3.6 GB to S4's 7.0 GB.
+
+**Verdict: pass.** On this corpus (10 charts, 69 cells; 3 KVP pages, 20 fields) 8-bit
+shows **no measurable regression** against bf16: identical chart values, identical KVP
+output, the same summary errors. It is also 1.4–1.7× faster per token and 3.6 GB
+lighter. 6-bit is not tried, because nothing degraded. Per §8.2 rule 10 this is a
+regression statement about this corpus, not a general ranking. PR 7 re-runs it through
+`score.py`, which needs the bf16 source kept until then.
+
+**Amendments (applied to the plan).**
+
+- **§2:** "Why 8-bit" cites S6. bf16 is also ruled out by memory: 10.12 GB peak alone.
+- **§12, §17:** S6 settled; the 8-bit-degrades risk retired.
+- **§8.2 rule 3:** pairing a merged multi-panel picture needs boxes the manifests
+  don't yet have. Rule 3 falls back to IoU when a page's counts differ, which p26 hits,
+  but no `manifest.json` records a chart's bounding box. So Task C adds `bbox` to each
+  chart, or PR 7 defines another fallback.
+- **§8.2 rule 4:** the hallucination check also pairs each number with the category a
+  summary names beside it. A number-only check passed a summary that swapped every slice.
+- **§17:** the capped-page row now counts the charts lost with the text (GAO-07-631
+  p. 24: Figure 7, 2 of 13 charts). The comma row adds the mangled-header form. A new
+  row records summaries contradicting their own CSV.
+
+**Found on the way: work for S7, Task C and PR 7, not S6 failures.**
+
+- **The corpus manifest calls PDF page 24 "a prose page".** It carries Figure 7 too
+  (`gao-07-631/manifest.json` `notes`, on `test/eval-corpus`). The note should say so.
+- **The line-chart tolerance.** Granite Vision reads unlabelled line charts to about
+  ±5 units, so at 1% the two geometry charts score 3/11 and 0/12 in both variants. S7
+  (granite-docling's own chart tables) is the next measurement. Whether `budgets.toml`
+  wants a looser tolerance for `values_from: geometry` is PR 7's call, made against a
+  baseline per rule 1, not here.
+- **Headers** are the weakest chart metric (1 of 10): generic `Category` / `Value`.
+  S7 and PR 4 decide whether a header should come from the axis title Docling already
+  has.
+- **Docling's handler refs are page-local.** During enrichment every picture's
+  `self_ref` is numbered within its page (`#/pictures/0`, `#/pictures/1`). Any code
+  that maps a chart response back to the document has to pair by page and order, not
+  by ref.

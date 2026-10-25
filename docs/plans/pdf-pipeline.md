@@ -88,7 +88,10 @@ It also costs 0.63 GB to read every page, against 4.92 GB for the 4B model.
 (`max_recommended_working_set_size`, measured in S4 on macOS 27; ~10.7 GB was assumed); bf16 GV + granite-docling is ~8.6 GB
 before KV cache, page rasters, Docling's own models and the OS. 8-bit brings GV to
 **4.92 GB** (S2: 9.26 bits per weight, because mlx-vlm leaves the 0.86 GB vision tower
-in bf16). Convert it ourselves rather than use a community build: the four on the Hub
+in bf16). **S6 (2026-10-25) found no measurable regression** against bf16: identical
+chart values on 10 charts and byte-identical KVP output on 3 pages. bf16 is also ruled
+out on memory, at **10.12 GB** peak with Granite Vision alone on a KVP page.
+Convert it ourselves rather than use a community build: the four on the Hub
 (`inferencerlabs/…-MLX-Q9`, `beaupi/…-oQ4`/`-oQ8`, `brainworkup/…-oQ8`) have 15–103
 downloads and no published evaluation.
 
@@ -1241,11 +1244,22 @@ detail rather than a quality change.
    markers can leave two rows with the same label, as with Table A-2's two `2017`
    rows). The expected values keep the source's own spelling, and the normalization
    is the scorer's (`eval/expected/README.md`). These rules live in
-   `eval/matching.py` with their own tests (rule 9).
+   `eval/matching.py` with their own tests (rule 9). **The IoU fallback has no
+   expected boxes yet** (found by S6): granite-docling boxed GAO-07-631 Figure 9's two
+   panels as one picture, so that page's counts differ (1 predicted, 2 expected), but
+   no `manifest.json` records a chart's bounding box. Task C adds a `bbox` to each
+   chart entry, or PR 7 defines another fallback. A picture that covers several
+   expected panels is then scored against each of them.
 4. **Chart summaries and chunks are checked.**
    - Summaries: a **hallucination check** — every number in a summary must appear,
      within tolerance, in that chart's expected CSV (or be a simple derivative: a
      difference, a ratio, a year); report the unsupported-number rate per chart.
+     **Where a summary names a category next to a number, the pair is checked too**
+     (amended by S6): both Granite Vision variants attached every percentage of the
+     GAO-08-14 pie to the wrong slice, and a number-only check scored that 0
+     unsupported. Axis ranges (`0 to 250`) and list numbering are what most remaining
+     "unsupported" numbers turned out to be, so the scorer reports them apart from
+     value claims rather than as hallucinations.
    - Chunks: each chunk ≤ `chunk_tokens` by the configured tokenizer; every
      `page_nos` entry is a page the chunk's text actually comes from (checked against
      the text-layer reference); heading breadcrumbs match the expected headings.
@@ -1463,7 +1477,7 @@ GitHub details (§9.2); UI theme and layout for v1.x (§14, §15).
 | Phase B ordering in batches (per PDF vs all-A-then-all-B) | S4 — **settled 2026-10-25:** per PDF (§3.8) |
 | `mx.set_cache_limit` value | S4 — **settled 2026-10-25:** 1 GiB (§3.14 rule 5) |
 | `--text-source` default | S5 — **settled 2026-10-25:** `vlm`; `pdf` is opt-in for trusted born-digital text layers (§3.2) |
-| 8-bit vs 6-bit/bf16 Granite Vision | S6 |
+| 8-bit vs 6-bit/bf16 Granite Vision | S6 — **settled 2026-10-25:** 8-bit; no measurable regression on 10 charts and 3 KVP pages, and bf16 alone peaks at 10.12 GB (§2). PR 7 re-runs it through `score.py`, so the bf16 source stays until then |
 | Granite Vision's chart role | S7 |
 | page-level resume (trigger: typical PDF > ~5 min) | S8 — **trigger fired; decided 2026-10-25:** in v1, PR 6, DocTags only, gated on a public-API feasibility check in PR 4 (§3.14 rule 7) |
 | torch-free install, ONNX classifier | S9 — **settled 2026-10-25:** torch stays, classifier on transformers; reopen when Docling's two torch imports go lazy (§2.1) |
@@ -1656,16 +1670,17 @@ of the working text app; `git checkout v0.6.0` restores it intact if the rebuild
 | Risk | Earliest signal | Fallback |
 |---|---|---|
 | Docling's MLX engine won't load a local conversion | S2 — **retired 2026-10-25**: it loads through `artifacts_path` (§3.2) | — |
-| Docling silently drops a chart's CSV when the model writes a label containing a comma unquoted (`status=success`, `errors=[]`, raw response not kept) | S2 (2 of 5 Census charts) | capture the raw chart2csv response in our code and parse it leniently; S7 and PR 4 decide how; S6 counts a drop as a failure |
+| Docling silently drops a chart's CSV when the model writes a label containing a comma unquoted (`status=success`, `errors=[]`, raw response not kept) | S2 (2 of 5 Census charts); S6 found the quieter form, a comma in the **header** line, which pandas takes as the table's width, so the CSV is kept but its header is split across cells (GAO-07-631 Fig. 6) | capture the raw chart2csv response in our code and parse it leniently; S7 and PR 4 decide how; S6 counted a drop as a failure (none occurred on its corpus) |
 | Memory isn't released between phases, or creeps across pages | S4 — **retired 2026-10-25**: release returns active memory to 0, per-page peak flat over 42 pages, 7.00 GB run peak (§3.1) | — |
 | Model-repo code executes despite native transformers | S10 — **fired 2026-10-25**: mlx-vlm's `trust_remote_code=True` default ran GV's `configuration.py` on every load of the 8-bit folder, Docling's chart stage included. **Mitigated:** the repo's code is stripped from the converted folder, and `convert()` refuses a folder that has any (§3.13 rule 2) | if a future transformers drops native `granite4_vision`, the load fails loudly. Then pin a transformers version that has it, or vendor and review the config class — user decides |
-| 8-bit Granite Vision degrades charts or KVP | S6 | 6-bit or bf16, re-measured against the 10 GB ceiling |
+| 8-bit Granite Vision degrades charts or KVP | S6 — **retired 2026-10-25**: chart values identical to bf16 on 10 charts, KVP output byte-identical on 3 pages (§2) | — |
+| A chart summary contradicts its own CSV: both variants attached every percentage of the GAO-08-14 pie to the wrong slice while the CSV was right, and a number-only hallucination check scores that clean | S6 | §8.2 rule 4 pairs each number with the category the summary names; PR 4 decides whether the summary is shown beside a CSV that disagrees with it |
 | Too slow to be useful on 16 GB | S8 — born-digital measured: ~6 s/page, ~10 pages/min sustained, no throttling over ~10 min; S11 | batch/scale tuning (S11); page-level resume (§3.14 rule 7, now in v1); fewer charts by default |
 | On image-only pages granite-docling drops the page's text (`<logo></picture></doctag>`, 25 tokens, `status=success`) or emits hundreds of false pictures, and the false charts multiply Granite Vision's time (S8's stand-in: 441 pictures, 102 chart pairs, 3.4× slower). It reproduces from Docling's softer page render; pypdfium2's render of the same page converts in full | S8 (image-only stand-in) | confirm on the real scan (S5 and S8 scanned halves); then test a sharper render (`images_scale`, S11) or a different render path; a cap on pictures per page sent to Granite Vision — the classifier cannot filter them, because the stand-in's false charts were all typed by DocTags, which skips it (S9); §3.10's detection extended to near-empty pages |
 | A Docling or mlx-vlm release breaks the API mid-build | a lock move fails the eval | §2.2: caps + per-package deliberate upgrades; stay on the locked version |
 | `main` stays tooling-only for weeks after PR 3 | calendar | nothing ships until PR 9; `v0.6.0` remains installable; PR 3's README note says so |
 | A sideways-printed or very wide table loops silently in granite-docling | S3 (seen: Table A-2 of the Census P60-282 report) | post-hoc loop/cap detection puts the page in `run.json` warnings (§3.10); `force_backend_text` does **not** recover it (S5: it empties the looped items and leaves the table absent); the corpus includes one such page (§4.1) |
-| granite-docling silently mis-transcribes prose: a wrong number ("73" for "7.3"), an inserted phrase, invented paragraphs on a chart page, or a whole prose page lost to a loop (GAO-07-631 p. 24) | S5 | cap/loop detection flags the lost page (§3.10); `--text-source pdf` for trusted born-digital PDFs (§3.2); PR 7 decides whether the eval scores prose numbers against the text-layer reference (§8.2) |
+| granite-docling silently mis-transcribes prose: a wrong number ("73" for "7.3"), an inserted phrase, invented paragraphs on a chart page, or a whole page lost to a loop, its charts with it (GAO-07-631 p. 24 carries Figure 7, so the cap costs 2 of the corpus's 13 charts — S6) | S5, S6 | cap/loop detection flags the lost page (§3.10); `--text-source pdf` for trusted born-digital PDFs (§3.2); PR 7 decides whether the eval scores prose numbers against the text-layer reference (§8.2) |
 | The eval corpus can't be licensed cleanly | Task C | public-domain US federal sources + project-made PDFs only (§4.1) |
 
 ## Appendix A — kickoff prompt for the implementing session
@@ -1722,7 +1737,7 @@ Phase 0 may already be under way. Before anything else:
 Finish by summarizing each spike's verdict and every plan amendment, and ask me to
 approve the spike report before any Phase 1 work starts.
 
-This session: do S6 only, then commit, push and stop.
+This session: do S7 only, then commit, push and stop.
 ```
 
 The last line limits one session to one spike. Change it to the next open spike
