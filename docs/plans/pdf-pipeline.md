@@ -72,7 +72,7 @@ Inputs: one or more PDFs, **or a directory** of them, with resume (§3.8).
 | Stage | Model | Runtime | Weights | Runs on |
 |---|---|---|---|---|
 | Page → structure | `ibm-granite/granite-docling-258M-mlx` | Docling `VlmPipeline`, preset `granite_docling` on the MLX engine (§3.2) | 0.63 GB, bf16 (unquantized) | every page |
-| Charts → CSV + summary | `ibm-granite/granite-vision-4.1-4b`, **converted locally to 8-bit MLX** | Docling chart-extraction enrichment, preset `granite_vision_v4_mlx`, `repo_id` overridden | ~4.65 GB | pictures Docling classifies as charts |
+| Charts → CSV + summary | `ibm-granite/granite-vision-4.1-4b`, **converted locally to 8-bit MLX** | Docling chart-extraction enrichment, preset `granite_vision_v4_mlx`, loaded from the models directory (§3.2, S2) | 4.92 GB | pictures Docling classifies as charts |
 | Key-value extraction | the same 8-bit Granite Vision | **our code**, `mlx-vlm` directly | (same files) | pages the user selects |
 
 **Why two models and not Granite Vision alone.** Granite Vision 4.1 is an *extraction*
@@ -81,13 +81,14 @@ full-page parsing — and Docling ships it only for chart extraction, table stru
 KVP, never as a page converter (its `granite_vision` *page* preset is the older 3.x 2B
 emitting Markdown). granite-docling emits **DocTags** — element types, bounding boxes,
 reading order — which is what lets the pipeline find the charts to hand Granite Vision.
-It also costs 0.63 GB to read every page, against ~4.65 GB for the 4B model.
+It also costs 0.63 GB to read every page, against 4.92 GB for the 4B model.
 
 **Why 8-bit Granite Vision.** IBM publishes **no** MLX build of 4.1 (bf16 safetensors
 8.0 GB, and GGUF). On 16 GB the Metal working set is ~10.7 GB
 (`max_recommended_working_set_size` ≈ ⅔ of RAM); bf16 GV + granite-docling is ~8.6 GB
 before KV cache, page rasters, Docling's own models and the OS. 8-bit brings GV to
-~4.65 GB. Convert it ourselves rather than use a community build: the four on the Hub
+**4.92 GB** (S2: 9.26 bits per weight, because mlx-vlm leaves the 0.86 GB vision tower
+in bf16). Convert it ourselves rather than use a community build: the four on the Hub
 (`inferencerlabs/…-MLX-Q9`, `beaupi/…-oQ4`/`-oQ8`, `brainworkup/…-oQ8`) have 15–103
 downloads and no published evaluation.
 
@@ -208,9 +209,15 @@ Read from Docling `main` on 2026-10-18 (PyPI latest: **2.140.0**, 2026-10-16):
 - `do_chart_extraction=True` (it auto-enables picture classification)
 - `chart_extraction_options=ChartExtractionVlmEngineOptions.from_preset("granite_vision_v4_mlx", …)`
   with **chart2csv and chart2summary on** — summary defaults to **off**; chart2code stays off
-- the MLX engine honours `EngineModelConfig.repo_id` (`mlx_engine.py` ~L134) — the hook
-  for pointing it at the local 8-bit conversion. Whether it accepts a *local path* is
-  **unverified** (Spike S2)
+- **models come from one local directory** (amended by S2, 2026-10-25):
+  `VlmPipelineOptions.artifacts_path=$GDI_CACHE_DIR/models`, with Granite Vision's MLX
+  override set to `repo_id="local/granite-vision-4.1-4b-8bit"`. A local *path* as
+  `repo_id` does not work (`HFValidationError` from `snapshot_download`). With
+  `artifacts_path` set, every engine loads `<artifacts_path>/<repo_id, "/" → "--">` and
+  ignores `revision`, and the option is pipeline-wide, so granite-docling and the figure
+  classifier must be in that directory too. That is Docling's own offline mode, so it
+  needs no Hub repo and no patch. Pins are enforced when the directory is filled
+  (§3.13 rule 1).
 - `generate_picture_images=True` to save chart crops alongside their CSVs
 - the preset's `min_engine_version="0.7.0"` for mlx-vlm
 
@@ -296,9 +303,10 @@ src/granite_document_intelligence/
   __init__.py
   cli.py          # argparse; console script `gdi` (convert-model in PR 4, convert in PR 6)
   config.py       # model ids + the four pinned SHAs (§3.13 rule 1), paths, env vars
-                  # (GDI_CACHE_DIR, GRANITE_VISION_MLX_PATH, HF_TOKEN)
+                  # (GDI_CACHE_DIR, HF_TOKEN)
   api.py          # the public surface (§3.7); cli.py is a thin wrapper over it
-  models.py       # convert_model(): the 8-bit Granite Vision conversion (§4.2, §3.12 rule 3)
+  models.py       # convert_model(): fetch the pinned models, convert GV to 8-bit, write the
+                  # manifest (§3.2, §4.2, §3.12 rule 3, §3.13 rule 1)
   convert.py      # Phase A: build + run the DocumentConverter, then release it
   kvp.py          # Phase B: prompt, generate, parse, validate
   chunk.py        # §3.9
@@ -490,9 +498,10 @@ Everything is files — no database, no server. Where each thing lives:
 
 | What | Where | Size | Lifecycle |
 |---|---|---|---|
-| granite-docling, picture classifier, embedding tokenizer | Hugging Face cache (`~/.cache/huggingface/hub`) | 0.63 GB + small | downloaded on first use; kept |
+| Embedding tokenizer | Hugging Face cache (`~/.cache/huggingface/hub`) | small | downloaded on first use; kept |
+| granite-docling, picture classifier | `$GDI_CACHE_DIR/models/<ns>--<name>/` (S2) | 0.63 GB + small | fetched at their pinned SHAs by `gdi convert-model`; kept |
 | Granite Vision **bf16 source** | Hugging Face cache | **8.0 GB** | needed only to convert (and for S6); **deletable after** |
-| Granite Vision **8-bit** | `~/.cache/granite-document-intelligence/` (`GRANITE_VISION_MLX_PATH`) | ~4.65 GB | written by `gdi convert-model`; kept |
+| Granite Vision **8-bit** | `$GDI_CACHE_DIR/models/local--granite-vision-4.1-4b-8bit/` | 4.92 GB | written by `gdi convert-model`; kept |
 | Results | `OUT_DIR/<pdf>/` (§3.5) | per PDF | user-owned; never deleted by the tool except its own staging folders |
 | Eval corpus / results | `eval/` (§4.1, §8.1) | < 20 MB committed | private tier gitignored |
 | Spikes | session scratchpad | — | never in the repo |
@@ -587,7 +596,16 @@ everything the program *executes or loads* is pinned and local.
    the revision S3 ran,
    Granite Vision, `DocumentFigureClassifier-v2.5`, the `granite-embedding-english-r2`
    tokenizer) and overrides Docling's presets with them; `run.json` records them;
-   `test_convert.py` asserts each reaches its loader. A pin moves only in a PR that runs
+   `test_convert.py` asserts each reaches its loader. **Amended by S2 (2026-10-25):**
+   the three Docling models load from `artifacts_path` (§3.2), where Docling ignores
+   `revision`, so for them the pin is enforced **at fetch**. `gdi convert-model`
+   downloads each at its SHA into its folder (real files via `local_dir`, not symlinks
+   into the HF cache, which `hf cache delete` would break) and writes
+   `models/manifest.json` with every SHA, plus the conversion's source SHA, mlx-vlm
+   version and q-bits. `convert()` compares the manifest with `config.py` before
+   loading and refuses a mismatch with the command that fixes it. `run.json` records
+   the manifest, and `test_convert.py` asserts the check rather than a revision
+   reaching Docling. The tokenizer keeps its revision at its loader. A pin moves only in a PR that runs
    the eval. (On 2026-10-18 Granite Vision's `main` was already at `37d591f…`, past
    Docling's pin — pins are what keep that from mattering silently.)
 2. **No model-repo code runs.** `granite-vision-4.1-4b` ships `modeling.py`,
@@ -711,7 +729,7 @@ amendment in that PR.
 | S7 | granite-docling's own `<chart>` → table vs Granite Vision `<chart2csv>` on the same charts | if granite-docling is as good, Granite Vision's chart role shrinks to summaries — record either way |
 | S8 | Throughput | seconds/page for Phase A (born-digital and scanned separately), seconds/chart, seconds/KVP page and cold-start load time; **sustained** pages/min across the 30+ page document, first page to last (§3.14 rule 6); whether a typical PDF exceeds ~5 min (the page-level-resume trigger, rule 7); a sanity reference for PR 7's budgets (§3.11) and the README's first numbers |
 | S9 | How far toward torch-free can the stack go (§2.1)? (a) Does `docling-slim` with only `format-pdf`, `feat-chunking` and `mlx-vlm` added directly — no `models-vlm-inline` — import and run `VlmPipeline` with the `granite_docling` preset on the MLX engine (§3.2) and the MLX chart preset? (b) Does the classifier run on `ONNXRUNTIME` without importing torch (`"torch" not in sys.modules` after a run)? (c) Does granite-docling's DocTags already label picture types, making the classifier redundant? | each answered yes/no with evidence; (a) yes → drop torch from the lock; (b) yes and same chart picks on the corpus → ONNX classifier; (c) yes → note it, but keep Docling's classifier unless S7 says otherwise |
-| S10 | Does any load path execute model-repo code, and do revision overrides reach every loader (§3.13 rules 1–2)? Run `mlx_vlm.convert`, a Phase A conversion and the classifier with every model pinned, then list `sys.modules` entries whose file lives under the HF cache. | **none** from the cache; each of the four pinned SHAs observed at its loader (e.g. via `HF_HUB_OFFLINE=1` with only those revisions cached). Any repo code imported → **stop and report** |
+| S10 | Does any load path execute model-repo code, and do revision overrides reach every loader (§3.13 rules 1–2)? Run `mlx_vlm.convert`, a Phase A conversion and the classifier with every model pinned, then list `sys.modules` entries whose file lives under the HF cache. | **none** from the HF cache **or the models directory** (the conversion copies the repo's `modeling.py`, `processing.py`, `configuration.py` and `downsampling.py` into it — S2); the three Docling models' SHAs matched against `models/manifest.json` (S2) and the tokenizer's observed at its loader (e.g. via `HF_HUB_OFFLINE=1` with only those revisions cached). Any repo code imported → **stop and report** |
 | S11 | Speed levers under the 10 GB ceiling (§3.14 rules 1–3): page batch size 1/2/4 and CPU–GPU overlap, if Docling or mlx-vlm exposes them; `images_scale` 1.5/2.0/2.5; whether Docling exposes per-stage timing hooks | pages/min, peak memory and eval scores per setting; the shipped setting is the fastest that fits **and** does not regress the eval; batch 1 / scale 2.0 recorded as fallbacks |
 
 Spike results go in **`docs/plans/pdf-pipeline-spikes.md`** — one section per spike:
@@ -768,13 +786,18 @@ with its expected JSON, and the must-appear headings.
 
 ### 4.2 Converting Granite Vision
 
-Conversion command to try in S2 (flag names unverified — check `--help`):
+The command S2 ran (flags verified against mlx-vlm 0.7.10; the `python -m
+mlx_vlm.convert` form is deprecated):
 
 ```bash
-uv run python -m mlx_vlm.convert --hf-path ibm-granite/granite-vision-4.1-4b \
+uv run python -m mlx_vlm convert --hf-path ibm-granite/granite-vision-4.1-4b \
   --revision dd48e97503de471803850df70843cf9eb5da8712 \
-  -q --q-bits 8 --mlx-path ~/.cache/granite-document-intelligence/granite-vision-4.1-4b-8bit
+  -q --q-bits 8 \
+  --mlx-path ~/.cache/granite-document-intelligence/models/local--granite-vision-4.1-4b-8bit
 ```
+
+It took 184 s including the 8.0 GB download, peaked at 3.8 GB RSS and wrote 4.92 GB.
+Never pass `--trust-remote-code` (§3.13 rule 2); none was needed.
 
 ## 5. Phase 1 — tear down the text app (one commit, gate green)
 
@@ -828,7 +851,7 @@ on each Stop and invalidate the memo on every run. Add, in this PR:
 # Docling's --debug-vlm-native-output writes debug_<document>/ in the working dir
 debug_*/
 
-# Model weights must never be committed (8-bit GV is ~4.65 GB)
+# Model weights must never be committed (8-bit GV is 4.92 GB)
 /models/
 *.safetensors
 *.gguf
@@ -861,12 +884,15 @@ Order: packaging (§3.6) → `config.py` → `models.py` + a minimal `cli.py` ex
 stubs, so every module after `convert.py` targets the public types rather than raw
 Docling objects. Notes:
 
-- **Model acquisition.** `gdi convert-model` runs the S2-validated conversion into
-  `$GDI_CACHE_DIR` (default `~/.cache/granite-document-intelligence/`; the model path
-  alone can be overridden with `GRANITE_VISION_MLX_PATH`),
-  load-tests the result, and offers the bf16-source cleanup in §3.12 rule 3.
-  `gdi convert` with a missing conversion fails with the exact command to run — never a
-  silent fallback to bf16 or to the Hub.
+- **Model acquisition.** `gdi convert-model` fills `$GDI_CACHE_DIR/models/` (default
+  `~/.cache/granite-document-intelligence/models/`), the single `artifacts_path` every
+  Docling stage loads from (§3.2, S2). It fetches granite-docling and the figure
+  classifier at their pinned SHAs, runs the S2-validated conversion (§4.2) into
+  `local--granite-vision-4.1-4b-8bit/`, writes `manifest.json` (§3.13 rule 1),
+  load-tests the result, and offers the bf16-source cleanup in §3.12 rule 3. There is
+  no per-model path override, because Docling fixes the folder names. `gdi convert`
+  with a missing folder or a manifest that disagrees with `config.py` fails with the
+  exact command to run — never a silent fallback to bf16 or to the Hub.
 - **Lazy imports.** `docling` and `mlx_vlm` imported inside functions, so `gdi --help`
   and the test suite don't pay for torch/mlx at import.
 - **Greedy decoding everywhere** (`temperature=0.0`) — reproducible output, and the
@@ -905,10 +931,12 @@ Same philosophy as today: **mock at the model boundary**, never download in CI.
   validation pass/fail, `--pages` parsing, with `mlx_vlm.generate` mocked.
 - `test_convert.py` — the `VlmPipelineOptions` actually built: the `granite_docling` `VlmConvertOptions`
   preset on `MlxVlmEngineOptions` (not the deprecated `GRANITEDOCLING_MLX`),
-  chart extraction on with the **`_mlx` preset**, summary on, code off, `repo_id` pointed
-  at the local path. This is the silent-degradation guard: the auto preset or a dropped
-  `repo_id` still produces output, just from the wrong model. Also (§3.13): each of
-  the four models reaches its loader at its pinned SHA, and no call from our code
+  chart extraction on with the **`_mlx` preset**, summary on, code off,
+  `artifacts_path` set to the models directory and Granite Vision's MLX `repo_id` set to
+  `local/granite-vision-4.1-4b-8bit` (S2). This is the silent-degradation guard: the
+  auto preset or a dropped `repo_id` still produces output, just from the wrong model.
+  Also (§3.13): a manifest that disagrees with `config.py` is refused before any model
+  loads, the tokenizer reaches its loader at its pinned SHA, and no call from our code
   passes `trust_remote_code=True`.
 - `test_chunk.py` — chunks from a hand-built `DoclingDocument`: headings carried,
   page numbers present, every line valid JSON with the §3.9 keys (tokenizer mocked or
@@ -1239,7 +1267,7 @@ GitHub details (§9.2); UI theme and layout for v1.x (§14, §15).
 
 | Item | Spike |
 |---|---|
-| local-path model loading | S2 |
+| local-path model loading | S2 — **settled 2026-10-25:** one `artifacts_path` models directory (§3.2) |
 | Phase B ordering in batches (per PDF vs all-A-then-all-B) | S4 |
 | `mx.set_cache_limit` value | S4 |
 | `--text-source` default | S5 |
@@ -1264,7 +1292,7 @@ embedding model is chosen); the v1.x UI (§14, §15).
   pin), `docling/datamodel/pipeline_options.py` (`VlmPipelineOptions`,
   `do_chart_extraction`, `VlmExtractionPipelineOptions`,
   `GraniteVisionTableStructureOptions`), `docling/models/inference_engines/vlm/mlx_engine.py`
-  (`repo_id` override), `docling/models/stages/chart_extraction/granite_vision.py`
+  (`repo_id` override; `artifacts_path` lookup, S2), `docling/models/stages/chart_extraction/granite_vision.py`
   (where chart output lands on `PictureItem.meta`)
 - mlx-vlm 0.7.8 (2026-10-13); Granite Vision 4.1 support: Blaizzy/mlx-vlm#1104
   (merged 2026-05-05), model type `granite4_vision`
@@ -1432,7 +1460,8 @@ of the working text app; `git checkout v0.6.0` restores it intact if the rebuild
 
 | Risk | Earliest signal | Fallback |
 |---|---|---|
-| Docling's MLX engine won't load a local conversion | S2 | publish the conversion to a private Hub repo, or a narrow, tested monkeypatch (S2 decides) |
+| Docling's MLX engine won't load a local conversion | S2 — **retired 2026-10-25**: it loads through `artifacts_path` (§3.2) | — |
+| Docling silently drops a chart's CSV when the model writes a label containing a comma unquoted (`status=success`, `errors=[]`, raw response not kept) | S2 (2 of 5 Census charts) | capture the raw chart2csv response in our code and parse it leniently; S7 and PR 4 decide how; S6 counts a drop as a failure |
 | Memory isn't released between phases, or creeps across pages | S4 | run chart extraction in our own code against one Granite Vision instance (§3.1); `mx.set_cache_limit` |
 | Model-repo code executes despite native transformers | S10 | stop; pin a transformers version that loads natively, or patch the loader — user decides |
 | 8-bit Granite Vision degrades charts or KVP | S6 | 6-bit or bf16, re-measured against the 10 GB ceiling |
