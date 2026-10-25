@@ -15,7 +15,8 @@ Spike scripts live in the session scratchpad, never in the repo.
 | S9 | **Pass** — (a) no, (b) the ONNX engine matches but torch is imported anyway, (c) no | yes — torch stays, the classifier stays on transformers; torch's cost corrected; DocTags labels skip the classifier (§0, §2.1, §3.2, §9.2, §12, §17) |
 | S10 | **Fail, resolved by option 1**: Granite Vision's repo `configuration.py` ran on every load of the 8-bit folder, through mlx-vlm's `trust_remote_code=True` default; stripping the repo's code from the converted folder leaves none (tested). Revisions reach every loader | yes: the repo's code is stripped at conversion, `convert()` refuses a folder that has any, Phase B passes `trust_remote_code=False`, and the tokenizer is pinned to `47ea694…` (§3.6, §3.12, §3.13, §4.2, §6, §8, §12, §16, §17) |
 | S6 | **Pass**: no measurable regression on 10 charts (69 cells) and 3 KVP pages (20 fields); identical chart values and byte-identical KVP output; bf16 alone peaks at 10.12 GB | yes: S6 settled; bf16 ruled out on memory too; multi-panel pairing needs chart boxes in the manifests; rule 4 pairs numbers with labels; the capped page loses charts; the mangled-header comma case; summaries contradicting their CSV (§2, §8.2, §12, §17) |
-| S7, S11 | not run; unblocked, since Task C's expected outputs exist | — |
+| S7 | **Pass**: granite-docling is not as good, so Granite Vision keeps the chart role. Its page DocTags carried no `<chart>` table on 16 pages; on the crop it matched 12 of 69 cells against Granite Vision's 37. Summaries and CSVs reach the chunks | yes: `images_scale` stays 1.0, since any other value corrupts every box; S11 sweeps `VlmConvertOptions.scale` and our own chart-crop scale (2× crops: 37 → 43 cells); §3.9's fallback chunk dropped (§3.9, §3.10, §3.11, §3.14, §4, §12, §17) |
+| S11 | not run; unblocked, since Task C's expected outputs exist | — |
 | Task C | **Public tier done except the scan** (branch `test/eval-corpus`, PR 2): 6 PDFs, 13 charts, 6 tables, 3 KVP cases; the scan and the private tier wait on the user | yes: §4.1 status and the scan's pages; the text layer can disagree with the page (§8.2 rule 2); en-dash minus, significance asterisks, row pairing (§8.2 rule 3); the expected-output format (§8.1) |
 
 ## S1 — dependency resolution and the chunking tokenizer (2026-10-24)
@@ -880,7 +881,9 @@ the ONNX engine needs no conversion and no new download. Every run used
    CoreML + CPU. The crops are every embedded picture image from the S2, S4 and S8
    born-digital runs (86) and from S8's image-only stand-in (441). These are the
    crops the classifier itself reads: it calls `element.get_image()`, at
-   `images_scale = 2` with no expansion.
+   `images_scale = 2` with no expansion. (**Corrected by S7:** the classifier's
+   `images_scale = 2` is never used. A picture's embedded image wins, and it is cut at
+   the pipeline's `images_scale`, 1.0, so these crops are 72 dpi.)
 4. The classifier's peak RSS, per engine, in a fresh process each.
 
 **(a) — no.** The pipeline cannot be imported without torch:
@@ -1333,3 +1336,182 @@ regression statement about this corpus, not a general ranking. PR 7 re-runs it t
   `self_ref` is numbered within its page (`#/pictures/0`, `#/pictures/1`). Any code
   that maps a chart response back to the document has to pair by page and order, not
   by ref.
+
+## S7 — granite-docling's chart tables vs Granite Vision's `<chart2csv>` (2026-10-25)
+
+**Question.** Is granite-docling's own chart-to-table output as good as Granite
+Vision's `<chart2csv>` on the same charts? If so, Granite Vision's chart role shrinks to
+summaries. §3.9 adds a second question: do chart summaries reach the chunks?
+
+**Environment.** A fresh S7 scratch project with S6's constraints. A fresh lock at
+highest resolution moved nothing against S6: docling / docling-slim 2.142.1,
+docling-core 2.104.0, mlx-vlm 0.7.10, mlx 0.32.4, transformers 5.20.2, tokenizers
+0.23.3, torch 2.14.1, huggingface-hub 1.33.0, pypdfium2 5.14.0, pandas 3.1.0. Models:
+the stripped models directory from S10 (granite-docling `e9939db…`, Granite Vision
+8-bit, classifier `f859dfb…`), and the embedding tokenizer at `47ea694…`. Every run
+used `HF_HUB_OFFLINE=1`, a socket guard and `mx.set_cache_limit(1 << 30)`, and made 0
+network attempts. M2 Pro, 16 GB, macOS 27.0.1. Corpus: `test/eval-corpus` at
+`44a5321`, every PDF's SHA-256 equal to its manifest's. That commit changes only a
+manifest note against S6's `7565ae1`: it is S6's own finding that page 24 carries
+Figure 7.
+
+**granite-docling has two ways to produce a chart table, and both were tested.**
+
+- **In the page DocTags.** docling-core turns a DocTags `<chart>` element holding OTSL
+  into the picture's `tabular_chart`. The chart stage then **skips** `<chart2csv>` for
+  that picture (`_needs_prompt` returns `tabular_chart is None`). So if granite-docling
+  wrote chart tables while converting pages, Granite Vision would never be asked.
+- **On the crop.** granite-docling's card lists "Convert chart to table." (short form
+  `<chart>`). Docling has no preset for this: its chart stage parses only Granite
+  Vision's output formats. Using it would mean writing our own code.
+
+**What was run.**
+
+1. **Page arm.** The §3.2 converter with chart extraction off, on GAO-07-631 pages
+   12–26 and the whole GAO-08-14 excerpt. A spy kept every page's raw DocTags.
+2. **Crop arm.** Every image S6's Phase A sent to `<chart2csv>` (10 charts), in two
+   sizes:
+   - Docling's own crop, S6's lossless PNG;
+   - the same picture box rendered from the PDF with pypdfium2 at scale 2.0.
+
+   Each went through granite-docling with both instructions (greedy, 8192 tokens,
+   Docling's stop strings) and through Granite Vision 8-bit `<chart2csv>` (4096
+   tokens). Both reproduce `MlxVlmEngine.predict_batch` as S6's replay did.
+   **Control:** Granite Vision on Docling's crops reproduced S6's 10 responses **byte
+   for byte**.
+3. **Scoring.** S6's scorer is reused unchanged for normalization, label pairing, the 1%
+   tolerance and transposition. Granite Vision output is parsed as Docling's handler
+   parses it. granite-docling output is parsed by `docling_core`'s
+   `parse_otsl_table_content`, the function Docling applies to a DocTags `<chart>`.
+   Every output was also read.
+4. **Two pipeline runs** to check what the 2× crop result means for configuration: one
+   at `VlmPipelineOptions.images_scale=2.0`, and one with
+   `generate_picture_images=False`.
+5. **Chunks.** The GAO-08-14 excerpt converted with summaries on, saved as a
+   `DoclingDocument`, and chunked by §3.9's `HybridChunker` (512 tokens,
+   `merge_peers=True`).
+
+**Results — page arm: no.** On 16 pages, granite-docling emitted **no `<chart>`
+element**. Every chart came back as a `<picture>` holding the caption and sometimes a
+type tag. That tag is wrong for the pie, which it typed `line_chart`. On this corpus,
+then, the page DocTags never carry chart data, and every chart reaches Granite Vision.
+That matches S6, where all 10 grids came from `<chart2csv>`.
+
+**Results — crop arm.** 13 expected charts and 69 cells. The three charts that never
+become pictures (Figure 7, lost with capped page 24; p26's second panel, merged into
+the first) score 0 in every column.
+
+| Chart | Kind | Cells | GV, Docling crop | GV, 2× crop | gd long, Docling | gd short, Docling | gd long, 2× | gd short, 2× |
+|---|---|---|---|---|---|---|---|---|
+| p12 Fig. 1 | line (geometry) | 11 | 3 | 4 | 1 | 1 | 0 (capped) | 0 |
+| p13 Fig. 2 | bar | 6 | 6 | 6 | 3 | 3 | 1 | 0 |
+| p14 Fig. 3 | bar | 6 | 6 | 6 | 2 | 1 | 0 | 1 |
+| p15 Fig. 4 | grouped bar | 6 | 6 | 6 | 0 | 0 | 1 | 1 |
+| p17 Fig. 5 | bar | 6 | 6 | 6 | 5 | 5 | 1 | 0 |
+| p18 Fig. 6 | line (geometry) | 12 | 0 | 2 | 0 | 0 | 0 (capped) | 3 |
+| p25 Fig. 8 ×2 | bar | 6 | 6 | 6 | 0 | 0 | 0 (both capped) | 0 |
+| p26 Fig. 9 panel 1 | bar | 3 | 0 | 3 | 0 | 0 | 0 | 0 |
+| GAO-08-14 pie | pie | 4 | 4 | 4 | 1 | 0 | 1 | 0 |
+| **Total of 69** | | | **37 (53.6%)** | **43 (62.3%)** | 12 (17.4%) | 10 (14.5%) | 4 (5.8%) | 5 (7.2%) |
+| Time, 10 charts | | | 22.2 s | 32.3 s | 13.8 s | 13.5 s | 154.9 s | 42.4 s |
+| Peak memory | | | 6.38 GB | 6.68 GB | 1.61 GB | 1.61 GB | 1.61 GB | 1.61 GB |
+
+Reading the granite-docling output shows failures of kind, not degree:
+
+- **Line charts flatten.** p12 is `130.0` for every year from 1995 to 2004. p18 is
+  `100.0` for every year.
+- **Wrapped labels split, and the values slide with them.** "Military personnel"
+  becomes `Military` | `Personnel`, so each value pairs with the wrong category
+  (`Military,21`).
+- **Labels are invented:** `Firefight and development`, `Earnings`, `DDO total`.
+- **The sharper crop makes it loop.** At 2× the long instruction hit the 8192 cap on 4
+  of 10 charts. A fifth run, with the short instruction, stopped at 6,912 tokens.
+
+The best granite-docling case is p17, where every value is right, but laid out as one
+transposed row. It is also not much cheaper: 13.8 s against 22.2 s for the same 10
+charts.
+
+**Verdict: pass — granite-docling is not as good, and Granite Vision keeps the chart
+role.** On this corpus granite-docling's best configuration matched 12 of 69 cells
+against Granite Vision's 37. Its page DocTags never carried a chart table, and its crop
+output is structurally unreliable. Per §8.2 rule 10, this is a statement about this
+corpus. PR 7 re-runs it through `score.py`.
+
+**Results — chunks: yes.** The pie's summary *and* its CSV table both land in the chunk
+that cites the picture (chunk 1 of 2, 455 tokens), after the caption. So §3.9's
+fallback, a separate `"kind": "chart_summary"` chunk, is not needed. Two things travel
+with them into the embedded text:
+- the summary's wrong slice percentages (S6's §17 row);
+- DocTags' wrong `Line chart` label, which the Markdown export prints too.
+
+**Found on the way: `images_scale` is not a usable knob in the VLM pipeline.**
+
+- **Docling crops charts at 72 dpi.** For example, a 226 × 222 pt chart box arrives at
+  Granite Vision as a 227 × 222 px image. The chart stage and the classifier each
+  declare `images_scale = 2.0`. But `prepare_element` takes a picture's **embedded**
+  image first. That image is cut from the page image at the **pipeline's**
+  `images_scale`, which defaults to 1.0. So the stages' own 2.0 is never used. S9's
+  description of the classifier's crops as "at `images_scale = 2`" is corrected
+  accordingly: they are at 1.0.
+- **Raising the pipeline's `images_scale` corrupts every box.** `_doctags_page_document`
+  maps DocTags' 0–500 grid onto `page.image`, which is rendered at `images_scale`. So
+  provenance comes out in pixels of that image rather than PDF points. Picture crops
+  then multiply by `images_scale` again.
+  - Measured at 2.0: p12's box reads `l = 430.8` on a 612 pt page, twice its 1.0
+    value.
+  - Every chart crop was the wrong region of the page: prose from the lower right,
+    padded with black.
+  - The classifier re-typed every non-chart picture (five logos and the signature) as
+    `table` and three charts as `page_thumbnail`, so 3 fewer charts were sent.
+  - Granite Vision wrote a "CSV" of p15's prose, which Docling then dropped.
+
+  At 1.0, pixels and points coincide, which is the only reason the default works. The
+  same scaling is applied to every DocTags item (read from the code; measured on
+  pictures). So any non-1.0 value would also mis-place every text box in the output.
+- **No configuration produces a correct 2× crop.** With
+  `generate_picture_images=False`, the crop falls back to the document's page image,
+  also at `images_scale`: the crops were still 226 × 222.
+- **What a 2× crop would buy.** Our own 2× crops raised Granite Vision from **37 to 43
+  cells**:
+  - p26's merged picture went from transposed and unpaired to a correct table. It
+    holds both panels as columns, so all 6 values are right, but rule 3 credits panel 1
+    only.
+  - The two line charts read closer: 3 → 4 and 0 → 2 cells.
+  - It costs 45% more time on CSV (32.3 s against 22.2 s) and 0.3 GB more peak.
+
+**Amendments (applied to the plan).**
+
+- **§3.14 rule 2:** rewritten. `VlmPipelineOptions.images_scale` stays at **1.0**.
+  - The two resolutions are separate knobs: granite-docling's page input is
+    `VlmConvertOptions.scale` (2.0, the preset's), and a chart crop's resolution is
+    whatever **our code** renders.
+  - Getting a 2× crop to Granite Vision means our own crop from the PDF. Whether to
+    ship that is S11's measurement and PR 4's code.
+- **§4, S11 row; §12:** S11 sweeps `VlmConvertOptions.scale` and our chart-crop scale,
+  not `images_scale`.
+- **§3.11:** the capped-page retry changes `VlmConvertOptions.scale`.
+- **§3.10:** the rasterization the Pillow rule guards is `VlmConvertOptions.scale`'s.
+- **§3.9:** settled, summaries and CSVs reach the chunks; the fallback chunk is dropped.
+- **§12:** S7 settled.
+- **§17:**
+  - the image-only row's "sharper render" now names `VlmConvertOptions.scale`;
+  - the comma row: S7 leaves the lenient parse to PR 4, since Granite Vision stays the
+    source of every chart table;
+  - a new row: a non-1.0 `images_scale` silently corrupts every box.
+
+**Found on the way: work for PR 4, PR 7 and S11, not S7 failures.**
+
+- **Headers.** The page DocTags carry each chart's caption, not its axis title, so
+  Docling has no axis title to offer. Granite Vision's generic `Category` / `Value`
+  stays the known weakness (1 of 10 at either crop size). PR 4 decides whether to
+  leave headers as the model writes them.
+- **DocTags types the pie as `line_chart`,** at confidence 1.0. Docling never shows
+  that label to the classifier (S9), and it reaches the Markdown and the chunks.
+  Routing is unaffected, since any chart type goes to Granite Vision. PR 4 decides
+  whether to print the type.
+- **Merged multi-panel pictures.** At 2× Granite Vision writes one column per panel.
+  Rule 3 could pair columns with panels when a page has fewer pictures than expected
+  charts. PR 7's call, alongside S6's `bbox` note.
+- **The classifier is trained on 2× crops and gets 1×.** It still picked the right 9
+  charts here. If S11 also feeds our own crop to the classifier, the sweep must
+  re-check which pictures it picks, not only the CSV scores.
