@@ -847,7 +847,8 @@ fastest configuration" — and by quality per second through the eval (§8.1).
    - **A chart crop's resolution** is what Granite Vision tiles (384 px tiles). Docling
      crops charts at 72 dpi: the chart stage's own `images_scale = 2.0` is never used,
      and no option reaches it. A sharper crop is therefore **our code**, which renders
-     the picture's box from the PDF. **S11 ships a 1.5× crop** (PR 4), for Granite
+     the picture's box from the PDF. **S11 ships a 1.5× crop** (PR 4; approved by the
+     user 2026-10-25), for Granite
      Vision only. The classifier keeps Docling's crop, so the pictures chosen as
      charts do not change. On the 10 corpus charts, 1.5× matched 43 of 69 cells,
      against 37 for Docling's crop and 43 for 2×. It cost +2.3 s per chart (CSV +
