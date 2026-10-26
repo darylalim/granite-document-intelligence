@@ -16,7 +16,7 @@ Spike scripts live in the session scratchpad, never in the repo.
 | S10 | **Fail, resolved by option 1**: Granite Vision's repo `configuration.py` ran on every load of the 8-bit folder, through mlx-vlm's `trust_remote_code=True` default; stripping the repo's code from the converted folder leaves none (tested). Revisions reach every loader | yes: the repo's code is stripped at conversion, `convert()` refuses a folder that has any, Phase B passes `trust_remote_code=False`, and the tokenizer is pinned to `47ea694…` (§3.6, §3.12, §3.13, §4.2, §6, §8, §12, §16, §17) |
 | S6 | **Pass**: no measurable regression on 10 charts (69 cells) and 3 KVP pages (20 fields); identical chart values and byte-identical KVP output; bf16 alone peaks at 10.12 GB | yes: S6 settled; bf16 ruled out on memory too; multi-panel pairing needs chart boxes in the manifests; rule 4 pairs numbers with labels; the capped page loses charts; the mangled-header comma case; summaries contradicting their CSV (§2, §8.2, §12, §17) |
 | S7 | **Pass**: granite-docling is not as good, so Granite Vision keeps the chart role. Its page DocTags carried no `<chart>` table on 16 pages; on the crop it matched 12 of 69 cells against Granite Vision's 37. Summaries and CSVs reach the chunks | yes: `images_scale` stays 1.0, since any other value corrupts every box; S11 sweeps `VlmConvertOptions.scale` and our own chart-crop scale (2× crops: 37 → 43 cells); §3.9's fallback chunk dropped (§3.9, §3.10, §3.11, §3.14, §4, §12, §17) |
-| S11 | not run; unblocked, since Task C's expected outputs exist | — |
+| S11 | **Pass**: one change. Our own 1.5× chart crop for Granite Vision (37 → 43 of 69 cells, +2.3 s per chart). Page batch size is inert on MLX, true batching (−18%) needs an engine patch, overlap has ≤ 1.2% to gain, and page scale is a quality knob, not a speed one (2.0 stays). Neither capped-page fix pays, and the preset caps 3 of 52 corpus pages | yes: batching, scale, crop and timing settled; the in-generation stopper corrected; three capped pages; invented pages; image-only stand-in recovers at 1.5 (§3.10, §3.11, §3.14, §12, §17) |
 | Task C | **Public tier done except the scan** (branch `test/eval-corpus`, PR 2): 6 PDFs, 13 charts, 6 tables, 3 KVP cases; the scan and the private tier wait on the user | yes: §4.1 status and the scan's pages; the text layer can disagree with the page (§8.2 rule 2); en-dash minus, significance asterisks, row pairing (§8.2 rule 3); the expected-output format (§8.1) |
 
 ## S1 — dependency resolution and the chunking tokenizer (2026-10-24)
@@ -1515,3 +1515,276 @@ with them into the embedded text:
 - **The classifier is trained on 2× crops and gets 1×.** It still picked the right 9
   charts here. If S11 also feeds our own crop to the classifier, the sweep must
   re-check which pictures it picks, not only the CSV scores.
+
+## S11 — speed levers under the 10 GB ceiling (2026-10-25)
+
+**Question.** §3.14 rules 1–3: does a page batch size of 1, 2 or 4 or any CPU–GPU
+overlap speed up Phase A? Which `VlmConvertOptions.scale` (1.5 / 2.0 / 2.5) and which
+chart-crop scale (Docling's 1.0, or our own 2.0) should ship? Does Docling expose
+per-stage timing hooks? Pass: the shipped setting is the fastest one that fits under
+the ceiling **and** does not regress the eval. Batch 1, page scale 2.0 and Docling's
+1.0 crop are recorded as fallbacks. §3.11 also asked S11 to try two fixes for capped
+pages: a retry at another page scale, and stopping at loop detection.
+
+**Environment.** A fresh S11 scratch project with S7's constraints. `uv lock
+--upgrade` on the day moved nothing against S6–S8: docling / docling-slim 2.142.1,
+docling-core 2.104.0, mlx-vlm 0.7.10, mlx 0.32.4, transformers 5.20.2, tokenizers
+0.23.3, torch 2.14.1, huggingface-hub 1.33.0, pypdfium2 5.14.0, pandas 3.1.0.
+Models: the S10 models directory (granite-docling `e9939db…`, Granite Vision 8-bit
+stripped, classifier `f859dfb…`). Corpus: `test/eval-corpus` at `44a5321`, all six
+public PDFs (54 pages). Every run used `HF_HUB_OFFLINE=1`, a socket guard and
+`mx.set_cache_limit(1 << 30)`, and made 0 network attempts. M2 Pro, 16 GB, macOS
+27.0.1, on AC power with the battery full. `pmset -g therm` recorded no warning.
+
+**What was run.**
+
+1. **Page-scale sweep.** The §3.2 converter (S7's probe, with `images_scale` asserted
+   at 1.0) over the whole corpus at `VlmConvertOptions.scale` 1.5, 2.0 and 2.5, with
+   charts on. Each run recorded per page: the raw DocTags, tokens, generation time and
+   the image granite-docling received. It also recorded every chart request and
+   response (as in S6), every `stream_generate` call, Docling's stage timings and peak
+   memory.
+2. **Docling's page batch size.** GAO-07-631 at `settings.perf.page_batch_size` 1
+   against the sweep's default 4.
+3. **True batching.** Docling's MLX engine never batches (below), so a stand-in
+   `predict_batch` sent each Docling page batch to **`mlx_vlm.batch_generate`**:
+   greedy, max 8192 tokens, the model's EOS as stop. It ran on GAO-07-631 at page
+   batches 1, 2 and 4 with charts off, against a sequential run with charts off.
+4. **Chart crops.** For the 10 charts the 2.0 run sent to Granite Vision (the S6/S7
+   set), four inputs: Docling's own crop, and the picture's box rendered from the PDF
+   by pypdfium2 at 1.0, 1.5 and 2.0. Each went through `<chart2csv>` and
+   `<chart2summary>` with S7's `run.py`, which reproduces Docling's engine.
+5. **Capped-page fixes.**
+   - The sweep is also the retry experiment: what each capped page produced at the
+     other two scales.
+   - Docling's `DocTagsRepetitionStopper` was replayed **offline** on every page's
+     token ids. The ids were decoded fully every 32 tokens and checked on a 640-character
+     window.
+   - It was then run **in generation**, through the public
+     `VlmModelSpec.extra_generation_config["custom_stopping_criteria"]`, on the three
+     PDFs that hold a capped or looping page.
+6. **Image-only stand-in.** S8's four-page raster PDF (GAO-07-631 pages 2, 4, 5 and
+   10, 200 DPI, no text layer) at page scales 1.5, 2.0, 2.5 and 3.0, with charts off,
+   against the born-digital originals.
+7. **Scoring.** A scratchpad script applied §8.1's metrics and §8.2's rules by hand:
+   - **Text:** per page, against the text layer. Normalized Levenshtein similarity
+     and word-bag F1, after NFKC, line-end de-hyphenation and whitespace collapse. The
+     hidden-text removal of rule 2 was not done. The text layer is the same for every
+     setting, so this shifts all settings alike.
+   - **Headings, tables and charts:** headings found, table cells as a multiset
+     (exact after whitespace normalization), and charts by S6's matcher.
+   - **Summaries:** S6's rule-4 check.
+   - **Every degraded page was also read.**
+   - The adversarial PDF is excluded from the totals (rule 6).
+
+**Results — what Docling exposes.**
+
+- **Docling has no batched generation on MLX.** `VlmPipeline` groups pages by
+  `settings.perf.page_batch_size` (default 4). But `MlxVlmEngine.predict_batch` loops
+  over the batch one page at a time under a global lock ("MLX does not support batched
+  inference"). `VlmConvertOptions.batch_size` is declared, and nothing reads it.
+- **Measured:** `page_batch_size` 1 against 4 on GAO-07-631 gave 250.0 s against
+  249.6 s, the same 7.00 GB peak, byte-identical DocTags on all 42 pages, and the same
+  18 chart responses in a different order. **The option is inert.**
+- **No overlap option for the VLM pipeline.** `ThreadedPdfPipelineOptions` and its
+  per-stage batch sizes belong to the standard pipeline. `VlmPipeline` runs render,
+  generation, assembly and enrichment in one thread. The ceiling on what overlap could
+  buy is everything outside generation: **3.1 s of 249.6 s (1.2%)**. Not worth
+  building.
+- **Timing hooks exist, at batch granularity.** `settings.debug.profile_pipeline_timings`
+  records `vlm_convert` once per page batch (11 calls for 42 pages at the default,
+  **42 at `page_batch_size` 1**, at no measured cost) and `doc_enrich` per enriched
+  page. Each page's `vlm_response` carries `num_tokens` and `generation_time`. Render
+  time is not exposed separately: it is inside `vlm_convert` and logged only at debug
+  level. At batch 1, `vlm_convert − generation_time` gives it.
+
+**Results — page scale is not a speed lever.** granite-docling's
+`Idefics3ImageProcessor` resizes every page to a 2048 px longest edge and tiles it at
+512. A letter page therefore becomes **17 tiles and 1,134 prompt tokens at every scale
+from 1.0 to 3.0** (checked with the processor directly). Scale changes only how sharp
+the image is before that resize: 2.0 renders 1224 × 1584 and is upscaled 1.29×, while
+2.5 renders 1530 × 1980, close to native. Speed per page is the same at every scale.
+What differs is which pages degenerate, and that is not monotone in scale:
+
+| Corpus, 52 pages (ex. adversarial) | 1.5 | **2.0 (preset)** | 2.5 |
+|---|---|---|---|
+| Text similarity / word F1, mean per page | 0.762 / 0.846 | **0.791 / 0.866** | 0.782 / 0.853 |
+| GAO-07-631 alone (42 pages) | 0.784 / 0.858 | **0.835 / 0.902** | 0.815 / 0.877 |
+| Headings found | 24 / 27 | 20 / 27 | 19 / 27 |
+| Table cells found | 498 / 1198 | 499 / 1198 | 526 / 1198 |
+| Chart cells (Docling's crops) / charts sent | 44 / 69, 11 / 13 | 37 / 69, 10 / 13 | 37 / 69, 9 / 13 |
+| Capped pages (8193 tokens) | none | **GAO-07-631 p24, GAO-08-1044 p2, W-9 p1** | GAO-07-631 p24, Census p2 |
+| Long loops that closed themselves under the cap | Census p2 (7,356 tok), W-9 (7,362) | Census p2 (7,371) | GAO-07-631 p26 (7,374), W-9 (7,453) |
+| Phase A wall, whole corpus | 323 s | 391 s | 382 s |
+| Peak memory | 7.32 GB | 7.00 GB | 7.01 GB |
+
+Every wall-time difference is degenerate pages: a capped page costs ~36 s and a
+self-closed loop ~32 s, at the same ~225 tok/s. Reading the pages that moved most
+shows each scale has **its own failures**:
+
+- **1.5**
+  - p16 became "The text of this document is not available in the original format."
+    repeated (similarity 0.50 against 0.98 at 2.0).
+  - p42 lost its text: an empty table box and a picture, 43 tokens.
+  - p25 lost its prose.
+- **2.5**
+  - p35 opens with an invented paragraph ("The purpose of the contract is to provide a
+    set of terms and conditions…").
+  - p26 loops on `35` for 7,374 tokens, then closes itself.
+- **2.0** loses p3's contents table to a single cell, and p40's text drifts.
+
+**1.5's lead on headings and charts is an artifact.** It recovers capped page 24 only
+by inventing it (below), and Figure 7 is "sent" from that invented page. **2.0 leads
+on the text of the one long PDF.** No scale dominates, and none is faster except by
+luck in which pages loop.
+
+**Results — true batching works, but only by replacing Docling's engine.**
+GAO-07-631, charts off:
+
+| GAO-07-631, charts off | Phase A wall | Peak | Pages whose DocTags differ from sequential | Text sim / F1 |
+|---|---|---|---|---|
+| Docling, sequential | 173.7 s | 1.61 GB | — | 0.8354 / 0.9020 |
+| `batch_generate`, batch 1 | 175.1 s | 1.61 GB | 0 | 0.8354 / 0.9020 |
+| `batch_generate`, batch 2 | 174.8 s | 2.05 GB | 33 | 0.8349 / 0.9045 |
+| `batch_generate`, batch 4 | **141.7 s (−18%)** | 2.93 GB | 32 | 0.8349 / 0.9045 |
+
+- **Batch 4 saves 32 s of 174 and stays far under the ceiling.** Its +1.3 GB beside
+  Phase A's 7.0 GB is ~8.3 GB. Batch 2 saves nothing measurable.
+- **Batched greedy decoding is not bit-identical to sequential.** 32 of 42 pages
+  differ. On 25 of them only `<loc_…>` values move. Seven change text, by 0.6–22%
+  (pages 3, 4, 12, 14, 25, 26 and 35). Quality is unchanged on every metric, and the
+  capped page stays capped.
+- **Two costs.**
+  - A page's output now depends on which pages share its batch. Page-level resume
+    (§3.14 rule 7) would cache DocTags that a rerun does not reproduce.
+  - There is no public way to ship it. VLM engines are chosen by a hard-coded branch
+    on `VlmEngineType` in `create_vlm_engine`. Docling's plugin factories cover only
+    layout, OCR, table and picture-description models. The only route is replacing
+    `MlxVlmEngine.predict_batch`, which is the kind of private-internals patch §3.14
+    rule 7 already rules out.
+
+**Results — chart crops: our own 1.5× crop.** The same 10 charts and 69 cells as S6/S7.
+**Control:** Docling's crops reproduced S6's 37 cells and 16 / 99 unsupported summary
+numbers exactly.
+
+| Granite Vision input | CSV cells | CSV time, 10 charts | Summary time | Unsupported summary numbers (rule 4) | Peak |
+|---|---|---|---|---|---|
+| Docling's crop (72 dpi) | 37 (53.6%) | 21.5 s | 57.9 s | 16 / 99 | 6.37 GB |
+| ours, 1.0 | 38 (55.1%) | 22.1 s | 57.8 s | 14 / 94 | 6.37 GB |
+| **ours, 1.5** | **43 (62.3%)** | **25.5 s** | **76.9 s** | 26 / 154 | 6.68 GB |
+| ours, 2.0 | 43 (62.3%) | 32.0 s | 87.8 s | 13 / 166 | 6.68 GB |
+
+- **1.5 buys every cell 2.0 does**, on the same charts: p26's merged panels, and the
+  two geometry line charts at 4 / 11 and 2 / 12. It costs **+2.3 s per chart**
+  (CSV + summary) against 2.0's +4.0 s.
+- **Our 1.0 render matches Docling's crop** (38 against 37). The gain is resolution,
+  not the render path.
+- **Summaries read the same.** The extra "unsupported" numbers at 1.5 are p26's list
+  numbering (`1. 2. 3.`) and its correct panel-2 values, which rule 4 already reports
+  apart. The real errors are the same approximate readings of Figure 1 in every
+  column (`175 / 200 / 200` at 1.5, `120 / 200` at 2.0, `180 / 200 / 220` on
+  Docling's crop). 2.0's summaries quote more values (166 numbers) and get more of
+  them right.
+- **The classifier was not fed our crops.** It keeps Docling's crop, so the pictures
+  selected as charts are unchanged (S7's caveat).
+- **On GAO-07-631's 9 charts, 1.5 adds about 21 s to a 250 s Phase A (+8%).**
+
+One run was discarded: during the first Docling-crop summary pass two charts took 538 s
+and 583 s for ~200 tokens each, while the other eight took 3–10 s. A rerun gave 57.9 s
+and **byte-identical text**, so the stall was the machine, not the model. The table
+reports the rerun. It is also a reminder of why §8.2 rule 8 takes the median of three:
+every other number here is a single run. That is acceptable for a spike only because
+greedy decoding makes the outputs repeat exactly, and S8's two back-to-back runs
+agreed within 0.5%.
+
+**Results — capped pages: neither fix pays, and the corpus has more of them.**
+
+- **The preset caps 3 of the corpus's 52 pages, not 1.** S8 saw GAO-07-631 p24; this
+  run also caps **GAO-08-1044 p2** (a map page) and the **W-9** (its only page).
+  Census p2, S3's sideways table, loops at every scale and closes itself at 2.0, just
+  under the cap. §3.11's named exceptions grow accordingly.
+- **Retry at another scale: rejected.** Of the four degenerate pages at 2.0:
+  - **GAO-08-1044 p2** converts properly at 1.5 and 2.5.
+  - **The W-9** loops at both ("P = Partnership" repeated across the page).
+  - **Census p2** loops at every scale.
+  - **GAO-07-631 p24 at 1.5 is invented, not recovered.** "The Army's 2015-2016 budget
+    for the year ended December 31, 2015, is $1,000 million." comes back repeated, in
+    847 tokens, with a clean `</doctag>`. No §3.10 check flags it: no cap, and the
+    stopper does not trip on text repeated inside one item.
+
+  A flagged lost page is the safer failure than an unflagged invented one, which is
+  the §3.2 reasoning behind the `vlm` default.
+- **Docling's repetition stopper, offline: precise but blind to most caps.** On all
+  156 page generations it never tripped on a page that was not looping. It tripped on
+  every self-closed long loop, at token 96–1,408. But it tripped on only **1 of 5**
+  capped generations, the W-9 at token 544. p24's `- 2020 - 2021 - 2022 …` and the
+  map page's runs have no repeated tag-and-box blocks for it to see.
+- **In generation, through public API, it does not pay.**
+  - **Gains:** it stopped the W-9 at 1,754 tokens in 8.9 s instead of the 36.7 s cap.
+  - **Misses:** Census p2's loop ran to 7,371 tokens, though the offline check trips at
+    token 128. The streamed text lags the ids, the detokenizer behaviour §3.10
+    describes. It also missed GAO-08-1044 p2's cap.
+  - **Costs:** its regex is pathological on some pages. Census p3 fell from 224 to
+    83 tok/s (8.5 s → 22.8 s), GAO-08-1044 p2 from 225 to 159 tok/s (+15 s), and other
+    pages lost 4–5%.
+  - Output was otherwise byte-identical.
+
+  Net on these three PDFs: −28 s and +30 s. §3.10's post-hoc detection stays the
+  mechanism.
+
+**Results — image-only stand-in: page scale changes the collapse.** On S8's 4-page
+raster (born-digital reference: 4,837 / 830 / 2,332 / 2,557 characters per page):
+
+| Page scale | Characters per page | Pictures | Capped |
+|---|---|---|---|
+| 1.5 | 3,380 / 8,173 (loop) / 2,262 / 2,557 | 2 | p2 |
+| 2.0 | 391 / 318 / 1 / 11 | 334 | — |
+| 2.5 | 386 / 2 / 1 / 2,557 | 335 | — |
+| 3.0 | 386 / 2 / 1 / 11 | 335 | — |
+
+At 1.5, three of four pages convert and the picture explosion is gone. At 2.0 and
+above the collapse S8 found reproduces. So the collapse depends on the exact pixels
+granite-docling is resized from, not simply on sharpness, since 2.5 and 3.0 are
+sharper and still collapse. This is a stand-in, not the scan. It goes to the scanned
+halves of S5 and S8 as the first thing to try. It is not a reason to change the
+born-digital default, where 1.5 loses to 2.0.
+
+**Verdict: pass.** One setting changes, and it buys quality with time. The rest are
+the fallbacks.
+
+| Lever | Ships | Why |
+|---|---|---|
+| Page batch size | Docling's default (4). Set `page_batch_size = 1` only if `run.json` wants per-page `vlm_convert` timings | inert on MLX: identical output, time and memory |
+| Batched generation | **no** (batch 1) | −18% Phase A at batch 4, but only by patching Docling's engine. It also makes a page's output depend on its batch-mates |
+| CPU–GPU overlap | none | not exposed; ≤ 1.2% to gain |
+| `VlmConvertOptions.scale` | **2.0** (preset) | not a speed lever: one token count at every scale. Best text on the long PDF; each other scale has its own invented or lost pages |
+| Chart crop | **our own render at 1.5×**, for Granite Vision only (PR 4) | +6 of 69 cells (37 → 43), the same gain as 2.0, at +2.3 s per chart against +4.0 s. Peak 6.68 GB alone, ~7.3 GB in Phase A |
+| Timing hooks | `profile_pipeline_timings` plus `vlm_response` | stage totals per batch, and tokens and time per page; render time only at batch 1 |
+| Capped-page retry and in-generation stop | **no** | the retry invents a page undetectably; the stopper misses 2 of 3 caps and slows pages up to 2.7× |
+
+Per §8.2 rule 10, these are statements about this corpus: 54 pages, 10 charts, 69
+cells. PR 7 re-runs the sweep and the crop arm through `score.py`.
+
+**Amendments (applied to the plan).**
+
+- **§3.14 rule 1:** batching settled.
+  - Docling's page batch size is inert on MLX, and the VLM pipeline has no overlap
+    option.
+  - `batch_generate` at batch 4 is recorded (−18%, +1.3 GB, non-identical output),
+    with a reopen trigger: Docling exposes batched MLX generation or a VLM engine
+    plugin.
+- **§3.14 rule 2:** page scale stays 2.0, recorded as a quality knob, not a speed
+  one. The chart crop is our render at 1.5×.
+- **§3.14 rule 3:** timings come from `profile_pipeline_timings` and `vlm_response`.
+  Render time needs batch 1.
+- **§3.10:** the in-generation stopper sentence is corrected. It can run on MLX through
+  `extra_generation_config`, but missed 2 of 3 caps and slowed pages. Self-closed
+  loops are a real case on this corpus.
+- **§3.11:** the capped-page list grows to three on the public corpus. Both fixes are
+  rejected, with reasons.
+- **§12:** S11 settled.
+- **§17:**
+  - The "too slow" row cites S11.
+  - The image-only row records page scale 1.5's partial recovery on the stand-in.
+  - The mis-transcription row adds the invented pages S11 found and a check that sees
+    them.
