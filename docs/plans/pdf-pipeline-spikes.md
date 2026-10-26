@@ -1765,6 +1765,11 @@ the fallbacks.
 Per §8.2 rule 10, these are statements about this corpus: 54 pages, 10 charts, 69
 cells. PR 7 re-runs the sweep and the crop arm through `score.py`.
 
+**Decided with the user (2026-10-25):** the 1.5× crop is approved. Read literally,
+the pass rule picks the fastest non-regressing setting, which is Docling's crop. The
+crop was chosen instead by quality per second, as §3.14 also directs, and the user
+accepted the +2.3 s per chart for +6 of 69 cells. Docling's crop remains the fallback.
+
 **Amendments (applied to the plan).**
 
 - **§3.14 rule 1:** batching settled.
