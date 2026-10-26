@@ -19,6 +19,14 @@ Spike scripts live in the session scratchpad, never in the repo.
 | S11 | **Pass**: one change. Our own 1.5× chart crop for Granite Vision (37 → 43 of 69 cells, +2.3 s per chart). Page batch size is inert on MLX, true batching (−18%) needs an engine patch, overlap has ≤ 1.2% to gain, and page scale is a quality knob, not a speed one (2.0 stays). Neither capped-page fix pays, and the preset caps 3 of 52 corpus pages | yes: batching, scale, crop and timing settled; the in-generation stopper corrected; three capped pages; invented pages; image-only stand-in recovers at 1.5 (§3.10, §3.11, §3.14, §12, §17) |
 | Task C | **Public tier done except the scan** (branch `test/eval-corpus`, PR 2): 6 PDFs, 13 charts, 6 tables, 3 KVP cases; the scan and the private tier wait on the user | yes: §4.1 status and the scan's pages; the text layer can disagree with the page (§8.2 rule 2); en-dash minus, significance asterisks, row pairing (§8.2 rule 3); the expected-output format (§8.1) |
 
+**Approved by the user (2026-10-25), with the scanned halves carved out.** The design
+is frozen from here (§10, PR 1). The carve-out covers the scanned halves of S5 and S8,
+which wait on Task C's print-and-scan step. Their results land as ordinary plan
+amendments when the scan exists, and nothing that depends on them is code before PR 4.
+They can change only the image-only path: the page scale or render path for pages with
+no text layer (S11's 1.5 lead, §17), a cap on pictures per page, and §3.10's
+near-empty-page detection. Everything else in this report is settled.
+
 ## S1 — dependency resolution and the chunking tokenizer (2026-10-24)
 
 **Question.** Do `docling>=2.140` with its VLM and chunking extras, `mlx-vlm>=0.7.8`

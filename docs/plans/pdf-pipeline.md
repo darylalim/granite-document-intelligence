@@ -942,6 +942,12 @@ what was run (exact versions), the numbers, the verdict, and any amendment it fo
 this plan. Amendments are made to this plan in the same PR, so the plan stays the single
 source of truth.
 
+**The spike report was approved by the user on 2026-10-25 (PR 1), with the scanned
+halves of S5 and S8 carved out.** Those two halves wait on the print-and-scan step,
+and their results land as ordinary amendments. They can change only the image-only
+path: the page scale or render path for pages with no text layer, a cap on pictures
+per page, and §3.10's near-empty-page detection. Nothing there is code before PR 4.
+
 ### 4.1 Task C — assemble the eval corpus (runs alongside the spikes)
 
 The spikes need real PDFs, and S6/S7/S11 are scored against the expected outputs (§4
@@ -1711,6 +1717,8 @@ evidence (a link, a results file, a test name).
 
 - [ ] **Phase 0:** every spike S1–S11 has a verdict in `pdf-pipeline-spikes.md`, the
       user approved the report (PR 1), and PR 7 confirmed or amended S6/S7/S11.
+      (Report approved 2026-10-25, scanned halves of S5/S8 carved out; those and
+      PR 7's re-runs are what remains.)
 - [ ] **Outputs:** `gdi convert` produces the full §3.5 tree for every public-corpus
       PDF, including `--schema` KVP and `chunks.jsonl`.
 - [ ] **Library:** `convert`, `convert_many`, `ConvertOptions` and the §3.7 result types
