@@ -7,8 +7,8 @@ so the implementer can tell a load-bearing choice from a default.
 **Status (2026-10-27):** complete draft, reviewed cold on 2026-10-18 (18 findings
 fixed). Phase 0's spike report is approved ([`pdf-pipeline-spikes.md`](pdf-pipeline-spikes.md)),
 except the scanned halves of S5 and S8, which wait on the print-and-scan step. PR 3
-(teardown) and PR 4 (Phase A library, `gdi convert-model`) are merged; PR 5 (chunks and
-KVP) is open on `feat/chunks-kvp`. Per-PR progress is under §10. **To resume, paste Appendix B into a new session for the next PR,
+(teardown), PR 4 (Phase A library, `gdi convert-model`) and PR 5 (chunks and KVP) are
+merged; PR 6 (`api` complete, batch, `gdi convert`) is next. Per-PR progress is under §10. **To resume, paste Appendix B into a new session for the next PR,
 or Appendix A for the scanned halves once the scan exists.**
 
 ## 0. At a glance
@@ -1714,7 +1714,7 @@ the only record of them):
 | 2 | **draft** (#2), waiting on the scan (§4.1). Its rebase onto `main` must drop its two `eval/` `.gitignore` lines, which PR 3 already carries (§5) |
 | 3 | merged 2026-10-27 (#4, `6138255`). Moved suites 68 → 68 tests; actions SHA-pinned. After merge, with the user's confirmation: interim description and the 18 §9.2 topics set, Dependabot alerts on. The old Granite 4.2 bf16 cache entry was not present on the development Mac |
 | 4 | merged 2026-10-27 (#6, `468fa30`). Our own chart stage replaces Docling's (decided with the user 2026-10-27, §3.2); page-level resume failed its feasibility gate and is deferred (§3.14 rule 7); floors filled in (§2.2); gate 8.6–9.0 s; Pillow 13.0.0 and certifi moved past their advisories, Pillow made eval-gated (§2.2). After merge: 0 open Dependabot alerts on `main` |
-| 5 | **PR open** (`feat/chunks-kvp`). Phase B shares the chart stage's Granite Vision (§3.8); Docling's KVP prompt copied under MIT (`THIRD_PARTY_NOTICES.md`, §3.3); schema checks in `kvp.py` (§3.13 rule 8); `Chunk.kind` dropped (§3.9); `referencing` declared (§2.2); W-9 KVP 10/11 and GAO-07-631 cover 3/4, both matching S6; gate 9.3–9.4 s |
+| 5 | merged 2026-10-27 (#7, `9059e74`). Phase B shares the chart stage's Granite Vision (§3.8); Docling's KVP prompt copied under MIT (`THIRD_PARTY_NOTICES.md`, §3.3); schema checks in `kvp.py` (§3.13 rule 8); `Chunk.kind` dropped (§3.9); `referencing` declared (§2.2); W-9 KVP 10/11 and GAO-07-631 cover 3/4, both matching S6; gate 9.3–9.4 s |
 | 6 | **next** — start from Appendix B |
 
 ## 11. Release
@@ -2057,7 +2057,7 @@ Rules for the PR:
 Finish by summarizing what the PR does, the hand-run numbers, every plan amendment, and
 anything you need from me.
 
-This session: do PR 5 (feat/chunks-kvp) only, then open the PR and stop.
+This session: do PR 6 (feat/cli-batch) only, then open the PR and stop.
 ```
 
 Change the last line to the next PR before each paste.
