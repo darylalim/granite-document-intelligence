@@ -10,7 +10,7 @@ they run, so two runs on one Mac never load the models side by side.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator
+from collections.abc import Generator, Iterable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -270,7 +270,7 @@ def convert_many(
     force: bool = False,
     recursive: bool = False,
     wait: bool = True,
-) -> Iterator[BatchItem]:
+) -> Generator[BatchItem]:
     """Convert PDFs and directories of them into `out_dir`, yielding one item per PDF.
 
     Owns the §3.8 rules so a CLI and a UI cannot diverge on them: directory
@@ -280,7 +280,8 @@ def convert_many(
     failed PDF. Nothing happens until the first item is requested; a problem
     with the batch as a whole — a missing input, two PDFs sharing an output
     folder, an unready models directory, a bad schema — raises then, before any
-    model loads.
+    model loads. The run lock is held from then until the generator finishes or
+    is closed.
     """
     from granite_document_intelligence.batch import run
 

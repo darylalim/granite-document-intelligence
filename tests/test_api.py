@@ -26,6 +26,9 @@ def test_importing_the_package_loads_no_heavy_library() -> None:
 def test_the_public_names_are_exported() -> None:
     for name in (
         "convert",
+        "convert_many",
+        "BatchItem",
+        "RunLockedError",
         "ConvertOptions",
         "ConvertResult",
         "Chart",
@@ -67,6 +70,18 @@ class TestConvertOptions:
             "chunks": True,
             "chunk_tokens": 512,
         }
+
+    def test_limits_default_and_stay_out_of_what_resume_compares(self) -> None:
+        options = ConvertOptions(max_pages=10, max_file_mb=1)
+        assert (ConvertOptions().max_pages, ConvertOptions().max_file_mb) == (500, 200)
+        # A limit decides whether a PDF converts, not its output (§3.8).
+        assert options.as_dict() == ConvertOptions().as_dict()
+
+    def test_a_limit_below_one_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="max_pages"):
+            ConvertOptions(max_pages=0)
+        with pytest.raises(ValueError, match="max_file_mb"):
+            ConvertOptions(max_file_mb=0)
 
     def test_as_dict_is_json(self) -> None:
         import json

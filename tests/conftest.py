@@ -97,6 +97,42 @@ def build_document(*, charts: int = 1) -> Any:
     return doc
 
 
+@pytest.fixture(autouse=True)
+def _package_logger() -> Any:
+    """Undo `gdi`'s logging setup after each test.
+
+    `cli` stops the package logger propagating to the root, which would hide
+    every later test's progress messages from `caplog`.
+    """
+    import logging
+
+    logger = logging.getLogger("granite_document_intelligence")
+    saved = logger.handlers[:], logger.level, logger.propagate
+    yield
+    logger.handlers[:], logger.level, logger.propagate = saved
+
+
+def make_pdf_bytes(pages: int = 1) -> bytes:
+    """A US-letter PDF of `pages` blank pages, as bytes."""
+    import io
+
+    import pypdfium2
+
+    pdf = pypdfium2.PdfDocument.new()
+    for _ in range(pages):
+        pdf.new_page(PAGE_W, PAGE_H)
+    buffer = io.BytesIO()
+    pdf.save(buffer)
+    pdf.close()
+    return buffer.getvalue()
+
+
+@pytest.fixture(scope="session")
+def pdf_bytes() -> bytes:
+    """One blank page, built once: batch tests write it to many files."""
+    return make_pdf_bytes()
+
+
 @pytest.fixture
 def blank_pdf(tmp_path: Path) -> Path:
     """A one-page US-letter PDF with nothing drawn on it."""

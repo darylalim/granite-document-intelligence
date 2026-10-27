@@ -129,3 +129,34 @@ def test_profiling_settings_are_restored() -> None:
         settings.debug.profile_pipeline_timings,
         settings.perf.page_batch_size,
     ) == before
+
+
+def test_page_progress_reports_counts_from_doclings_public_events(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import logging
+
+    from docling.datamodel.progress import (
+        PageCompletedProgress,
+        PhaseStartedProgress,
+    )
+
+    from granite_document_intelligence.phase_a import _page_progress
+
+    with caplog.at_level(logging.INFO, logger="granite_document_intelligence"):
+        _page_progress(
+            PageCompletedProgress(
+                document_index=1,
+                document_name="report.pdf",
+                page_no=7,
+                success=True,
+                completed_pages=3,
+                total_pages=42,
+            )
+        )
+        _page_progress(
+            PhaseStartedProgress(
+                document_index=1, document_name="report.pdf", phase="build"
+            )
+        )
+    assert [r.getMessage() for r in caplog.records] == ["  page 3/42"]
