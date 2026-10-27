@@ -253,6 +253,16 @@ class GraniteVision:
 
     def generate(self, image: Image, prompt: str) -> str:
         """Greedy generation, as Docling's preset runs it (temperature 0, 4096 tokens)."""
+        text, _ = self.generate_counted(image, prompt, config.CHART_MAX_NEW_TOKENS)
+        return text
+
+    def generate_counted(
+        self, image: Image, prompt: str, max_tokens: int
+    ) -> tuple[str, int]:
+        """Greedy generation on one image; the text and how many tokens it took.
+
+        The count is what tells a capped generation from a finished one (§3.10).
+        """
         from mlx_vlm import stream_generate
         from mlx_vlm.prompt_utils import apply_chat_template
 
@@ -260,17 +270,19 @@ class GraniteVision:
             self.processor, self.config, prompt, num_images=1
         )
         text = ""
+        tokens = 0
         for chunk in stream_generate(
             self.model,
             self.processor,
             formatted,
             [image],  # ty: ignore[invalid-argument-type]
-            max_tokens=config.CHART_MAX_NEW_TOKENS,
+            max_tokens=max_tokens,
             temperature=0.0,
             verbose=False,
         ):
             text += chunk.text
-        return text
+            tokens = chunk.generation_tokens
+        return text, tokens
 
     def close(self) -> None:
         del self.model, self.processor

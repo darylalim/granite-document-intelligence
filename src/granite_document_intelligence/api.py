@@ -4,9 +4,8 @@ The CLI and any later UI call these and nothing below them, so they cannot
 diverge. Heavy imports (Docling, torch, mlx) happen inside `convert`, never at
 import time (§6), so importing the package stays cheap.
 
-PR 4 ships Phase A — the document, tables, charts and pictures. The KVP and
-chunk types are declared now so every module targets the public types, and are
-filled by PR 5; `convert_many` and resume arrive with PR 6.
+PR 4 shipped Phase A — the document, tables, charts and pictures — and PR 5 the
+key-values (`schema`) and chunks; `convert_many` and resume arrive with PR 6.
 """
 
 from __future__ import annotations
@@ -20,6 +19,12 @@ if TYPE_CHECKING:
     from docling_core.types.doc import DoclingDocument
     from PIL.Image import Image
 
+from granite_document_intelligence.config import (
+    CHUNK_TOKENS_DEFAULT,
+    CHUNK_TOKENS_MAX,
+    CHUNK_TOKENS_MIN,
+)
+
 TextSource = Literal["vlm", "pdf"]
 TEXT_SOURCES: tuple[TextSource, ...] = ("vlm", "pdf")
 
@@ -31,12 +36,20 @@ class ConvertOptions:
     `text_source="pdf"` replaces each text item's text with the PDF's own text
     layer; it is an opt-in for born-digital PDFs whose text layer you trust, and
     empties every text item on a scan (§3.2).
+
+    `schema` turns on key-value extraction (§3.3) on `pages` — page 1 by
+    default, `"1,3-4"` or `"all"`; the schema file is checked before any model
+    loads (§3.13 rule 8). `chunk_tokens` sizes the RAG chunks (§3.9).
     """
 
     text_source: TextSource = "vlm"
     charts: bool = True
     chart_code: bool = False
     save_page_images: bool = False
+    schema: Path | None = None
+    pages: str = "1"
+    chunks: bool = True
+    chunk_tokens: int = CHUNK_TOKENS_DEFAULT
 
     def __post_init__(self) -> None:
         if self.text_source not in TEXT_SOURCES:
@@ -46,9 +59,22 @@ class ConvertOptions:
             )
         if self.chart_code and not self.charts:
             raise ValueError("chart_code needs charts")
+        from granite_document_intelligence.kvp import parse_pages
+
+        parse_pages(self.pages)
+        if self.schema is None and self.pages != "1":
+            raise ValueError("pages needs a schema")
+        if not CHUNK_TOKENS_MIN <= self.chunk_tokens <= CHUNK_TOKENS_MAX:
+            raise ValueError(
+                f"chunk_tokens must be {CHUNK_TOKENS_MIN}–{CHUNK_TOKENS_MAX}, "
+                f"not {self.chunk_tokens}"
+            )
 
     def as_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        """The options as JSON values; the schema's content hash is added by the run."""
+        options = asdict(self)
+        options["schema"] = str(self.schema) if self.schema is not None else None
+        return options
 
 
 @dataclass
@@ -95,18 +121,31 @@ class Table:
 
 @dataclass
 class KvpResult:
-    """Key-value extraction against a user schema (§3.3). Filled by PR 5."""
+    """Key-value extraction against a user schema (§3.3).
+
+    `pages` holds each page's parsed answer (None when its output held no JSON
+    object) and `raw` what the model wrote. `merged` takes each field's first
+    non-null value in page order; `conflicts` lists fields the pages disagree
+    on. `valid` is whether `merged` matches the schema, and `errors` says where
+    it does not — an off-schema answer is recorded, never raised (§7).
+    """
 
     pages: dict[int, dict[str, Any] | None]
     merged: dict[str, Any]
     conflicts: list[dict[str, Any]]
     valid: bool
+    errors: list[str]
     raw: dict[int, str]
 
 
 @dataclass
 class Chunk:
-    """One `chunks.jsonl` line (§3.9). Filled by PR 5."""
+    """One `chunks.jsonl` line (§3.9).
+
+    `contextualized` is the heading-prefixed text meant for embedding; `refs`
+    are the document items the chunk covers (`doc_item_refs` in the file).
+    Chart summaries and CSVs arrive inside the chunk that cites the chart (S7).
+    """
 
     id: str
     text: str
@@ -114,7 +153,6 @@ class Chunk:
     headings: list[str]
     page_nos: list[int]
     refs: list[str]
-    kind: str
 
 
 @dataclass
@@ -147,6 +185,7 @@ class RunInfo:
     chart_ms: list[float]
     peak_memory_bytes: dict[str, int]
     warnings: list[str] = field(default_factory=list)
+    kvp_ms: list[float] = field(default_factory=list)
 
 
 @dataclass

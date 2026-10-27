@@ -25,11 +25,13 @@ if TYPE_CHECKING:
     from docling_core.types.doc import DoclingDocument
     from PIL.Image import Image
 
-    from granite_document_intelligence.api import ConvertResult
+    from granite_document_intelligence.api import Chunk, ConvertResult, KvpResult
 
 PARTIAL_SUFFIX = ".partial"
 OLD_SUFFIX = ".old"
 RUN_JSON = "run.json"
+KVP_JSON = "kvp.json"
+CHUNKS_JSONL = "chunks.jsonl"
 
 
 def chart_code_header(source: str, page_no: int) -> str:
@@ -125,10 +127,44 @@ def _write_tree(result: ConvertResult, staging: Path) -> None:
                 _save_png(image, staging / rel)
                 page_paths[page_no] = rel
 
+    if result.kvp is not None:
+        (staging / KVP_JSON).write_text(
+            json.dumps(kvp_record(result.kvp), indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+    if result.run.options.get("chunks", True):
+        with (staging / CHUNKS_JSONL).open("w", encoding="utf-8") as f:
+            for chunk in result.chunks:
+                f.write(json.dumps(chunk_record(chunk), ensure_ascii=False) + "\n")
+
     doc = _referenced_document(result, image_paths, page_paths)
     doc.save_as_json(staging / "document.json", image_mode=ImageRefMode.PLACEHOLDER)
     markdown = doc.export_to_markdown(image_mode=ImageRefMode.REFERENCED)
     (staging / "document.md").write_text(markdown + "\n", encoding="utf-8")
+
+
+def kvp_record(kvp: KvpResult) -> dict[str, Any]:
+    """`kvp.json` (§3.5): pages keyed by page number, as JSON object keys are strings."""
+    return {
+        "pages": {str(page): answer for page, answer in kvp.pages.items()},
+        "merged": kvp.merged,
+        "conflicts": kvp.conflicts,
+        "valid": kvp.valid,
+        "errors": kvp.errors,
+        "raw": {str(page): text for page, text in kvp.raw.items()},
+    }
+
+
+def chunk_record(chunk: Chunk) -> dict[str, Any]:
+    """One `chunks.jsonl` line, with §3.9's keys."""
+    return {
+        "id": chunk.id,
+        "text": chunk.text,
+        "contextualized": chunk.contextualized,
+        "headings": chunk.headings,
+        "page_nos": chunk.page_nos,
+        "doc_item_refs": chunk.refs,
+    }
 
 
 def run_record(result: ConvertResult, output_bytes: int) -> dict[str, Any]:
@@ -145,12 +181,15 @@ def run_record(result: ConvertResult, output_bytes: int) -> dict[str, Any]:
         "timings_ms": run.timings_ms,
         "pages": [asdict(page) for page in run.pages],
         "chart_ms": run.chart_ms,
+        "kvp_ms": run.kvp_ms,
         "peak_memory_bytes": run.peak_memory_bytes,
         "warnings": run.warnings,
         "counts": {
             "charts": len(result.charts),
             "pictures": len(result.pictures),
             "tables": len(result.tables),
+            "chunks": len(result.chunks),
+            "kvp_pages": len(result.kvp.pages) if result.kvp is not None else 0,
         },
         "output_bytes": output_bytes,
     }

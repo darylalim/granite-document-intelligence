@@ -43,6 +43,10 @@ class TestConvertOptions:
         assert options.charts is True
         assert options.chart_code is False
         assert options.save_page_images is False
+        assert options.schema is None
+        assert options.pages == "1"  # forms put their fields up front (§3.3)
+        assert options.chunks is True
+        assert options.chunk_tokens == 512
 
     def test_an_unknown_text_source_is_refused(self) -> None:
         with pytest.raises(ValueError, match="text_source"):
@@ -58,7 +62,34 @@ class TestConvertOptions:
             "charts": True,
             "chart_code": True,
             "save_page_images": False,
+            "schema": None,
+            "pages": "1",
+            "chunks": True,
+            "chunk_tokens": 512,
         }
+
+    def test_as_dict_is_json(self) -> None:
+        import json
+
+        options = ConvertOptions(schema=Path("fields.json"), pages="all")
+        assert json.loads(json.dumps(options.as_dict()))["schema"] == "fields.json"
+
+    @pytest.mark.parametrize("tokens", [63, 8193, 0], ids=["below", "above", "zero"])
+    def test_chunk_tokens_outside_64_to_8192_is_refused(self, tokens: int) -> None:
+        with pytest.raises(ValueError, match="chunk_tokens"):
+            ConvertOptions(chunk_tokens=tokens)
+
+    @pytest.mark.parametrize("tokens", [64, 8192], ids=["min", "max"])
+    def test_chunk_tokens_at_the_bounds_is_accepted(self, tokens: int) -> None:
+        assert ConvertOptions(chunk_tokens=tokens).chunk_tokens == tokens
+
+    def test_malformed_pages_are_refused(self) -> None:
+        with pytest.raises(ValueError, match="pages"):
+            ConvertOptions(schema=Path("fields.json"), pages="1-")
+
+    def test_pages_need_a_schema(self) -> None:
+        with pytest.raises(ValueError, match="schema"):
+            ConvertOptions(pages="all")
 
 
 def test_convert_refuses_an_unready_models_directory_before_loading(
