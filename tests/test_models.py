@@ -8,6 +8,7 @@ import json
 import sys
 import types
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -186,6 +187,9 @@ class _FakeBackends:
         self.convert_kwargs: dict[str, object] = {}
         self.load_fails = load_fails
         monkeypatch.setattr(models, "_fetch", self.fetch)
+        monkeypatch.setattr(
+            models, "_fetch_tokenizer", lambda: self.events.append("fetch-tokenizer")
+        )
         monkeypatch.setattr(models, "_load_test", self.load_test)
         monkeypatch.setattr(
             models, "_hf_cached_source", lambda: (8_000_000_000, ["dd48e97"])
@@ -221,6 +225,32 @@ class _FakeBackends:
 
 
 class TestConvertModel:
+    def test_caches_the_chunking_tokenizer(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # An offline `gdi convert` chunks from the HF cache (§3.9), so setup fills it.
+        fake = _FakeBackends(monkeypatch)
+        models.convert_model(tmp_path, log=lambda _: None)
+        assert "fetch-tokenizer" in fake.events
+
+    def test_the_tokenizer_is_fetched_at_its_pin_without_weights(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen: dict[str, Any] = {}
+
+        def snapshot_download(repo_id: str, **kwargs: Any) -> str:
+            seen.update(kwargs, repo_id=repo_id)
+            return ""
+
+        monkeypatch.setattr("huggingface_hub.snapshot_download", snapshot_download)
+        models._fetch_tokenizer()
+        assert seen["repo_id"] == config.EMBEDDING_TOKENIZER.repo_id
+        assert seen["revision"] == config.EMBEDDING_TOKENIZER.revision
+        assert "tokenizer.json" in seen["allow_patterns"]
+        assert not any(
+            p.endswith((".safetensors", ".bin", ".py")) for p in seen["allow_patterns"]
+        )
+
     def test_converts_without_trusting_remote_code(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

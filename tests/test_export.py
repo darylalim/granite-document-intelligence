@@ -9,8 +9,10 @@ from conftest import build_document
 
 from granite_document_intelligence.api import (
     Chart,
+    Chunk,
     ConvertOptions,
     ConvertResult,
+    KvpResult,
     Picture,
     RunInfo,
     Table,
@@ -37,7 +39,12 @@ def _chart(doc: Any, index: int, **overrides: Any) -> Chart:
 
 
 def make_result(
-    *, charts: int = 1, options: ConvertOptions | None = None, **chart_overrides: Any
+    *,
+    charts: int = 1,
+    options: ConvertOptions | None = None,
+    kvp: KvpResult | None = None,
+    chunks: list[Chunk] | None = None,
+    **chart_overrides: Any,
 ) -> ConvertResult:
     doc = build_document(charts=charts)
     options = options or ConvertOptions()
@@ -66,8 +73,8 @@ def make_result(
                 ref=table.self_ref,
             )
         ],
-        kvp=None,
-        chunks=[],
+        kvp=kvp,
+        chunks=chunks or [],
         run=RunInfo(
             input_sha256="0" * 64,
             page_count=1,
@@ -95,6 +102,7 @@ class TestTree:
             "document.md",
             "document.json",
             "run.json",
+            "chunks.jsonl",
             "charts/chart-001.png",
             "charts/chart-001.csv",
             "charts/chart-001.summary.txt",
@@ -199,7 +207,13 @@ class TestRunJson:
         assert record["status"] == "ok"
         assert record["input_sha256"] == "0" * 64
         assert record["options"] == ConvertOptions().as_dict()
-        assert record["counts"] == {"charts": 1, "pictures": 1, "tables": 1}
+        assert record["counts"] == {
+            "charts": 1,
+            "pictures": 1,
+            "tables": 1,
+            "chunks": 0,
+            "kvp_pages": 0,
+        }
         others = sum(
             p.stat().st_size
             for p in out.rglob("*")
@@ -257,3 +271,67 @@ class TestAtomicSwap:
         (tmp_path / "report.partial" / "chart-009.csv").write_text("stale")
         make_result().save(tmp_path / "report")
         assert not (tmp_path / "report" / "chart-009.csv").exists()
+
+
+KVP = KvpResult(
+    pages={1: {"name": "Alex Q. Sample"}, 2: None},
+    merged={"name": "Alex Q. Sample"},
+    conflicts=[],
+    valid=True,
+    errors=[],
+    raw={1: '{"name": "Alex Q. Sample"}', 2: "no idea"},
+)
+CHUNK = Chunk(
+    id="chunk-0001",
+    text="Revenue rose in every region.",
+    contextualized="Quarterly report\nRevenue rose in every region.",
+    headings=["Quarterly report"],
+    page_nos=[1],
+    refs=["#/texts/1"],
+)
+
+
+class TestKvpJson:
+    def test_only_with_a_schema(self, tmp_path: Path) -> None:
+        make_result().save(tmp_path / "report")
+        assert not (tmp_path / "report" / "kvp.json").exists()
+
+    def test_records_every_field_with_pages_as_keys(self, tmp_path: Path) -> None:
+        make_result(kvp=KVP).save(tmp_path / "report")
+        record = json.loads((tmp_path / "report" / "kvp.json").read_text())
+        assert record == {
+            "pages": {"1": {"name": "Alex Q. Sample"}, "2": None},
+            "merged": {"name": "Alex Q. Sample"},
+            "conflicts": [],
+            "valid": True,
+            "errors": [],
+            "raw": {"1": '{"name": "Alex Q. Sample"}', "2": "no idea"},
+        }
+
+    def test_document_text_stays_out_of_run_json(self, tmp_path: Path) -> None:
+        # run.json is provenance and costs, never document text (§3.13 rule 5).
+        make_result(kvp=KVP, chunks=[CHUNK]).save(tmp_path / "report")
+        run = (tmp_path / "report" / "run.json").read_text()
+        assert "Alex" not in run and "Revenue rose" not in run
+        assert json.loads(run)["counts"]["kvp_pages"] == 2
+
+
+class TestChunksJsonl:
+    def test_one_line_per_chunk_with_the_documented_keys(self, tmp_path: Path) -> None:
+        make_result(chunks=[CHUNK, CHUNK]).save(tmp_path / "report")
+        lines = (tmp_path / "report" / "chunks.jsonl").read_text().splitlines()
+        assert len(lines) == 2
+        record = json.loads(lines[0])
+        assert list(record) == [
+            "id",
+            "text",
+            "contextualized",
+            "headings",
+            "page_nos",
+            "doc_item_refs",
+        ]
+        assert record["doc_item_refs"] == ["#/texts/1"]
+
+    def test_absent_with_chunks_off(self, tmp_path: Path) -> None:
+        make_result(options=ConvertOptions(chunks=False)).save(tmp_path / "report")
+        assert not (tmp_path / "report" / "chunks.jsonl").exists()

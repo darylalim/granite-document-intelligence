@@ -218,6 +218,29 @@ def _fetch(repo_id: str, revision: str, destination: Path) -> None:
     snapshot_download(repo_id, revision=revision, local_dir=destination)
 
 
+# The chunking tokenizer's files: no weights, and no repo code to run (S10).
+TOKENIZER_FILES = (
+    "config.json",
+    "special_tokens_map.json",
+    "tokenizer.json",
+    "tokenizer_config.json",
+)
+
+
+def _fetch_tokenizer() -> None:
+    """Cache the chunking tokenizer at its pin, where `chunk.load_tokenizer` reads it.
+
+    It stays in the Hugging Face cache rather than the models directory: it is
+    loaded by transformers, not Docling, so `artifacts_path` never applies.
+    """
+    from huggingface_hub import snapshot_download
+
+    pinned = config.EMBEDDING_TOKENIZER
+    snapshot_download(
+        pinned.repo_id, revision=pinned.revision, allow_patterns=list(TOKENIZER_FILES)
+    )
+
+
 def convert_model(
     cache_dir: Path | None = None,
     *,
@@ -226,7 +249,7 @@ def convert_model(
 ) -> Path:
     """Fill `<cache_dir>/models/` and return it (§6 "Model acquisition").
 
-    Fetches the two Docling models at their pins, converts Granite Vision to
+    Fetches the two Docling models and the chunking tokenizer at their pins, converts Granite Vision to
     8-bit with `trust_remote_code=False`, strips the repo's code, load-tests the
     result and writes `manifest.json` last — its presence is what says the
     directory is complete. The bf16 source is deleted from the HF cache only with
@@ -249,6 +272,10 @@ def convert_model(
         if stripped["files"] or stripped["auto_map"]:
             log(f"  stripped repo code from {model.folder}: {stripped}")
         fetched[model.repo_id] = {"revision": model.revision, "folder": model.folder}
+
+    tokenizer = config.EMBEDDING_TOKENIZER
+    log(f"Fetching the {tokenizer.repo_id} tokenizer at {tokenizer.revision[:12]}…")
+    _fetch_tokenizer()
 
     source = config.GRANITE_VISION_SOURCE
     staging = models_dir / (config.GRANITE_VISION_FOLDER + ".partial")

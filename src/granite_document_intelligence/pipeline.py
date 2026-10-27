@@ -3,6 +3,9 @@
 Phases run one after another with a release between them, so no two models'
 weights are resident at once beyond what a phase itself needs (§3.1): Phase A
 holds granite-docling and the classifier, the chart stage holds Granite Vision.
+With a schema, Phase B runs on the chart stage's Granite Vision instance rather
+than loading its own (§3.8, decided in PR 5): the same weights, so the peak is
+the larger of the two stages', and the model loads once per PDF instead of twice.
 """
 
 from __future__ import annotations
@@ -12,10 +15,20 @@ import time
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
-from granite_document_intelligence import charts, config, memory, models, phase_a
+from granite_document_intelligence import (
+    charts,
+    chunk,
+    config,
+    kvp,
+    memory,
+    models,
+    phase_a,
+)
 from granite_document_intelligence.api import (
+    Chunk,
     ConvertOptions,
     ConvertResult,
+    KvpResult,
     Picture,
     RunInfo,
     Table,
@@ -59,11 +72,32 @@ def package_versions() -> dict[str, str]:
     return versions
 
 
+def pdf_page_count(pdf: Path) -> int:
+    import pypdfium2
+
+    document = pypdfium2.PdfDocument(pdf)
+    try:
+        return len(document)
+    finally:
+        document.close()
+
+
 def run(pdf: Path, options: ConvertOptions) -> ConvertResult:
     models_dir = config.models_dir()
-    # Before any model loads: a wrong or unstripped directory is refused here.
+    # Before any model loads: a wrong or unstripped directory is refused here,
+    # and so are a bad schema and pages the PDF does not have.
     manifest = models.verify_models_dir(models_dir)
+    schema = kvp.load_schema(options.schema) if options.schema is not None else None
+    kvp_pages = (
+        kvp.resolve_pages(options.pages, pdf_page_count(pdf))
+        if schema is not None
+        else []
+    )
     input_sha256 = sha256_of(pdf)
+    recorded_options = options.as_dict()
+    if options.schema is not None:
+        # Resume compares options (§3.8): an edited schema at the same path re-runs.
+        recorded_options["schema_sha256"] = sha256_of(options.schema)
     memory.configure()
 
     timings_ms: dict[str, float] = {}
@@ -74,20 +108,49 @@ def run(pdf: Path, options: ConvertOptions) -> ConvertResult:
     t = time.perf_counter()
     a = phase_a.run(pdf, options, models_dir)
     timings_ms["phase_a"] = (time.perf_counter() - t) * 1000
+    # Docling's own per-stage profile (§3.14 rule 3), dropped before PR 5.
+    timings_ms.update(a.timings_ms)
     peaks["phase_a"] = memory.peak_bytes()
     document = a.document
     warnings = list(a.warnings)
 
     chart_list = []
     chart_ms: list[float] = []
-    if options.charts:
-        memory.reset_peak()
-        t = time.perf_counter()
-        c = charts.run(pdf, document, models_dir, code=options.chart_code)
-        timings_ms["charts"] = (time.perf_counter() - t) * 1000
-        peaks["charts"] = memory.peak_bytes()
-        chart_list, chart_ms = c.charts, c.chart_ms
-        warnings.extend(c.warnings)
+    kvp_result: KvpResult | None = None
+    kvp_ms: list[float] = []
+    # One Granite Vision for the chart stage and Phase B. Without a schema the
+    # chart stage loads its own, and only if the document has a chart.
+    vision: charts.GraniteVision | None = None
+    try:
+        if schema is not None:
+            memory.reset_peak()
+            t = time.perf_counter()
+            vision = charts.GraniteVision(models_dir)
+            timings_ms["granite_vision_load"] = (time.perf_counter() - t) * 1000
+        if options.charts:
+            if vision is None:
+                memory.reset_peak()
+            t = time.perf_counter()
+            c = charts.run(
+                pdf, document, models_dir, code=options.chart_code, vision=vision
+            )
+            timings_ms["charts"] = (time.perf_counter() - t) * 1000
+            peaks["charts"] = memory.peak_bytes()
+            chart_list, chart_ms = c.charts, c.chart_ms
+            warnings.extend(c.warnings)
+        if schema is not None:
+            memory.reset_peak()
+            t = time.perf_counter()
+            k = kvp.run(pdf, schema, kvp_pages, models_dir, vision=vision)
+            timings_ms["kvp"] = (time.perf_counter() - t) * 1000
+            peaks["kvp"] = memory.peak_bytes()
+            kvp_result, kvp_ms = k.result, k.page_ms
+            warnings.extend(k.warnings)
+    finally:
+        if vision is not None:
+            vision.close()
+            del vision
+            memory.release()
 
     chart_refs = {chart.ref for chart in chart_list}
     pictures = [
@@ -119,12 +182,19 @@ def run(pdf: Path, options: ConvertOptions) -> ConvertResult:
         for index, table in enumerate(document.tables, start=1)
     ]
     timings_ms["tables"] = (time.perf_counter() - t) * 1000
+
+    # After the chart stage, so summaries and CSVs are on the pictures (S7).
+    chunk_list: list[Chunk] = []
+    if options.chunks:
+        t = time.perf_counter()
+        chunk_list = chunk.run(document, options.chunk_tokens)
+        timings_ms["chunks"] = (time.perf_counter() - t) * 1000
     timings_ms["total"] = (time.perf_counter() - started) * 1000
 
     run_info = RunInfo(
         input_sha256=input_sha256,
         page_count=len(document.pages),
-        options=options.as_dict(),
+        options=recorded_options,
         models={
             "manifest": manifest,
             "granite_vision": config.GRANITE_VISION_LOCAL_ID,
@@ -139,6 +209,7 @@ def run(pdf: Path, options: ConvertOptions) -> ConvertResult:
         chart_ms=chart_ms,
         peak_memory_bytes=peaks,
         warnings=warnings,
+        kvp_ms=kvp_ms,
     )
     return ConvertResult(
         source=pdf,
@@ -146,7 +217,7 @@ def run(pdf: Path, options: ConvertOptions) -> ConvertResult:
         charts=chart_list,
         pictures=pictures,
         tables=tables,
-        kvp=None,
-        chunks=[],
+        kvp=kvp_result,
+        chunks=chunk_list,
         run=run_info,
     )

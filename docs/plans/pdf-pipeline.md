@@ -8,7 +8,7 @@ so the implementer can tell a load-bearing choice from a default.
 fixed). Phase 0's spike report is approved ([`pdf-pipeline-spikes.md`](pdf-pipeline-spikes.md)),
 except the scanned halves of S5 and S8, which wait on the print-and-scan step. PR 3
 (teardown) and PR 4 (Phase A library, `gdi convert-model`) are merged; PR 5 (chunks and
-KVP) is next. Per-PR progress is under §10. **To resume, paste Appendix B into a new session for the next PR,
+KVP) is open on `feat/chunks-kvp`. Per-PR progress is under §10. **To resume, paste Appendix B into a new session for the next PR,
 or Appendix A for the scanned halves once the scan exists.**
 
 ## 0. At a glance
@@ -185,6 +185,7 @@ docling-core 21, mlx 4.
 | `jsonschema` | `>=4.18` | the `referencing`-based API rule 8 of §3.13 relies on |
 | `mlx` | not declared | floats under `mlx-vlm`, as it did under `mlx-lm` — the lock pins it |
 | `pypdfium2`, `huggingface-hub` | `>=<locked>` (5.14.0, 1.33.0) | added in PR 4: imported directly by the chart crop and `gdi convert-model`, so declared rather than left transitive; floor-only, like `jsonschema` |
+| `referencing` | `>=0.37.0` (locked) | added in PR 5: the KVP validator passes an empty `referencing.Registry` explicitly, so it is imported directly (§3.13 rule 8); floor-only, like `jsonschema` |
 | `pillow` | `>=13.0.0` | added in PR 4 and moved off 12.3.0 in the same PR: 12.3.0 carried 41 Dependabot alerts (5 critical), all fixed in 13.0.0, and Pillow decodes every PDF-derived image (§3.13). **Pillow is on the model's input path**: mlx-vlm resizes each image with it, and 12.3.0 → 13.0.0 changed one of nine chart summaries on a byte-identical crop (deterministically, checked twice under each version), so it moves under the eval like the packages below |
 
 `uv.lock` pins exact versions as today. **Upgrades are deliberate and per package**
@@ -252,7 +253,7 @@ PDF ──► Phase A: Docling DocumentConverter (VlmPipeline)
         ──► Chart stage (charts.py): Granite Vision 8-bit via mlx-vlm, only if a chart was found
           • our 1.5× render of each chart → <chart2csv>, <chart2summary>
             kept raw, parsed, attached to PictureItem.meta
-        ──► release (PR 5: or keep it for Phase B, the same model)
+        ──► with --schema, Phase B on the same instance (PR 5, §3.8); then release
         ──► Phase B (only if --schema), Export
 ```
 
@@ -263,6 +264,12 @@ during it; the chart stage **89 s** (9.9 s/chart, 5.1–18.2) at **6.68 GB**, S1
 for the 1.5× crop alone; 268.5 s in all, against S4's 247 s with Docling's 72 dpi crop
 (S11 predicted +21 s for the crop). The capped page 24 was flagged, as S5 found. The
 whole-run peak fell from 7.00 GB to 6.68 GB.
+
+**PR 5's hand run, same PDF with its cover schema** (same versions, `HF_HUB_OFFLINE=1`,
+socket guard, 0 network attempts): Phase A 172 s at 1.61 GB; one Granite Vision load
+(2.0 s) shared by the chart stage (85 s, 9 charts, **6.68 GB**) and Phase B (5.3 s for
+the cover page, **6.51 GB**); chunking 0.3 s for 56 chunks; 266 s in all. The whole-run
+peak stays at 6.68 GB, so Phase B on the shared instance costs no memory.
 
 ### 3.2 Docling configuration (verify against the installed version)
 
@@ -364,6 +371,18 @@ exists to avoid. So:
 - Parse defensively — first JSON object in the output (the current app's
   `parse_json_output` is a proven implementation; port it with its tests).
 - Validate against the user's schema with `jsonschema`; keep the raw output on failure.
+- **Implemented in PR 5** (docling 2.143.1, mlx-vlm 0.7.10, jsonschema 4.26.0,
+  referencing 0.37.0). `_build_extraction_prompt` is **private**, so `kvp.py` copies it
+  as `extraction_prompt`, with the header comment and `THIRD_PARTY_NOTICES.md` (added to
+  `license-files`) that §9.1 rule 1 requires. `test_kvp.py` compares the copy against
+  Docling's own function, so a Docling upgrade that changes the prompt fails the gate.
+  The schema is serialized as Docling serializes a dict template (`json.dumps(indent=2)`,
+  as S6 ran it). Each page is rendered whole with pypdfium2 at **2.0**, the scale of
+  Docling's `GRANITE_VISION_4_1_TRANSFORMERS` spec, and generated with that spec's
+  **4096**-token cap (S6 used 1024; no answer came near either). A capped generation, an
+  answer with no JSON object, an off-schema answer and a cross-page conflict are each a
+  `run.json` warning. `valid` is whether `merged` validates; `kvp.json` also carries
+  `errors`, the validator's messages, so "invalid" says where.
 - Scope: `--schema fields.json` plus `--pages 1,3-4`. **Default: page 1 only**
   (decided 2026-10-18) — forms and invoices put their fields up front, and a per-page
   run over a 50-page PDF is 50 generations. `--pages all` is the explicit opt-in.
@@ -394,7 +413,8 @@ out/<pdf-stem>/
   pictures/picture-001.png # non-chart pictures (§3.12 rule 2)
   pages/page-001.png       # only with --save-page-images (§3.12 rule 2)
   kvp.json                 # only with --schema; {"pages": {...}, "merged": {...},
-                           #   "conflicts": [...], "valid": bool, "raw": {...}}
+                           #   "conflicts": [...], "valid": bool, "errors": [...],
+                           #   "raw": {...}}
   chunks.jsonl             # one chunk per line (§3.9)
   run.json                 # "status" ("ok" | "error") + error type/message (§3.8);
                            # the four model ids + pinned SHAs (§3.13 rule 1),
@@ -432,7 +452,8 @@ src/granite_document_intelligence/
   chunk.py        # §3.9
   export.py       # writes §3.5 from a DoclingDocument
   batch.py        # §3.8: input expansion, done-detection, continue-on-error
-  safety.py       # §3.10 limits, %PDF- check, path containment, symlinks; schema checks (§3.13)
+  safety.py       # §3.10 limits, %PDF- check, path containment, symlinks
+                  # (the §3.13 rule 8 schema checks landed in kvp.py, PR 5)
   runlock.py      # §3.14 rule 4: the process-level run lock
   memory.py       # release helper, cache limit, peak-memory reporting
 ```
@@ -482,8 +503,8 @@ result.document  # docling_core DoclingDocument
 result.charts  # list[Chart]: index, page_no, csv (str | None), summary, code, image
 result.pictures  # list[Picture]: index, page_no, image (non-chart pictures)
 result.tables  # list[Table]: index, page_no, dataframe, html
-result.kvp  # KvpResult | None: pages, merged, conflicts, valid, raw
-result.chunks  # list[Chunk]: id, text, contextualized, headings, page_nos, refs, kind
+result.kvp  # KvpResult | None: pages, merged, conflicts, valid, errors, raw
+result.chunks  # list[Chunk]: id, text, contextualized, headings, page_nos, refs
 result.run  # RunInfo: models, versions, timings, peak_memory_bytes, warnings
 
 result.save(Path("out/report"))  # writes the §3.5 tree
@@ -521,6 +542,15 @@ diverge on it.
     and Phase B can share one Granite Vision instance through `charts.run(...,
     vision=…)`, with no Docling handle involved. PR 5 decides whether to keep it loaded
     from the chart stage into Phase B; the two bullets below are what was weighed before.
+  - **Decided in PR 5 (2026-10-27): kept loaded.** With `--schema`, `pipeline.py` loads
+    Granite Vision once after Phase A's release, hands it to `charts.run(..., vision=…)`
+    and `kvp.run(..., vision=…)`, and releases it after Phase B, in a `finally`. It is
+    our own object, so the public-API condition below is met without touching Docling.
+    The reload is gone for every batch size: on GAO-07-631 one load (2.0 s) served 9
+    charts and the KVP page, and the peak was the chart stage's **6.68 GB** (Phase B
+    6.51 GB), well inside §3.11's 10 GB. A one-page form with no chart loads it once
+    for Phase B, as before; the per-PDF converter rebuild (~2.6 s) remains, so
+    all-A-then-all-B stays the alternative for batches of one-page forms.
   - If `kvp` can run on Docling's loaded instance, or hand Docling one that `kvp`
     loaded, through **public API**, the converter is not released before Phase B. The
     reload disappears for every batch size, and the peak should stay near 7 GB. PR 5
@@ -542,6 +572,16 @@ so chunk sizes match the Granite embedding model a later stage would most likely
 the tokenizer loads through this API (as transformers 5's `TokenizersBackend`) and
 chunks with heading context and budget splits. Chunking needs `docling-core[chunking]`,
 which plain `docling` already installs (§2.1).
+
+**Implemented in PR 5.** The tokenizer loads at `config.EMBEDDING_TOKENIZER`'s pinned
+revision with `trust_remote_code=False` (`test_chunk.py` pins both reaching the loader).
+It is read from the Hugging Face cache, not the models directory, because transformers
+loads it and `artifacts_path` is Docling's. So `gdi convert-model` now also caches its
+four tokenizer files (no weights, no code) at the pin, and an `HF_HUB_OFFLINE=1` run
+finds it. Chunk ids are `chunk-0001`, … in reading order. `--no-chunks` skips the
+stage, and then no `chunks.jsonl` is written. The `kind` field §3.7 listed on `Chunk`
+was dropped: it existed for the separate chart-summary chunk that S7 made unnecessary,
+so every chunk would have carried the same value.
 
 **Chunk size (decided 2026-10-18):** `chunk_tokens` defaults to **512** and is
 configurable (`--chunk-tokens`, `ConvertOptions.chunk_tokens`). It is a retrieval
@@ -871,6 +911,13 @@ everything the program *executes or loads* is pinned and local.
    relied on as a default), the schema is capped at 256 KB, and it must be a JSON
    object. A schema with a remote `$ref` is rejected with a clear message, and a test
    proves no network call is attempted.
+   **Implemented in PR 5, in `kvp.py`** rather than `safety.py`: PR 5 is the first PR to
+   load a schema, and `convert()` checks it before any model loads. Two guards: any
+   `$ref`/`$dynamicRef` not starting with `#` is refused, and the validator is built with
+   an explicit empty `referencing.Registry`. The explicit registry is load-bearing:
+   jsonschema 4.26 given no registry falls back to `_REMOTE_WARNING_REGISTRY`, which
+   fetches an unknown `$ref` with `urlopen` and only warns. `test_kvp.py` runs both
+   guards with socket creation patched to raise.
 9. **Repository hygiene.** A `SECURITY.md` says how to report a vulnerability privately
    (GitHub's private advisories) and states the threat model above in two lines. CI's
    third-party actions are pinned to **commit SHAs** with the version in a comment
@@ -1005,7 +1052,9 @@ fastest configuration" — and by quality per second through the eval (§8.1).
    8.6–9.0 s over three forced runs. The added ~4.5 s is mostly one in-test import of
    Docling's pipeline options, which imports torch (~2.4 s), plus docling-core (~0.9 s).
    `TestImportCost` now fails any test or library module that imports `docling`,
-   `torch`, `mlx`, `mlx_vlm` or `transformers` at module level.
+   `torch`, `mlx`, `mlx_vlm` or `transformers` at module level. **Re-measured on PR 5
+   (2026-10-27):** 9.3–9.4 s over three forced runs; `test_chunk.py`'s in-test import
+   of `HybridChunker` (which brings transformers) is most of the +0.4 s.
 
 ## 4. Phase 0 — spikes (before any production code)
 
@@ -1230,7 +1279,8 @@ Docling objects. Notes:
   classifier at their pinned SHAs, runs the S2-validated conversion (§4.2) into
   `local--granite-vision-4.1-4b-8bit/` with `trust_remote_code=False`, strips the
   repo's `*.py` files and `auto_map` keys (§3.13 rule 2, S10), writes
-  `manifest.json` (§3.13 rule 1), load-tests the result, and offers the bf16-source cleanup in §3.12 rule 3. There is
+  `manifest.json` (§3.13 rule 1), load-tests the result, and offers the bf16-source cleanup in §3.12 rule 3.
+  Since PR 5 it also caches the chunking tokenizer at its pin (§3.9). There is
   no per-model path override, because Docling fixes the folder names. `gdi convert`
   with a missing folder, a manifest that disagrees with `config.py`, or a folder
   holding a `*.py` file or an `auto_map` key fails with the exact command to run — never a silent fallback to bf16 or to the Hub.
@@ -1270,6 +1320,16 @@ Same philosophy as today: **mock at the model boundary**, never download in CI.
   `tabular_chart` produces no CSV rather than an empty one.
 - `test_kvp.py` — prompt construction, the ported `parse_json_output` cases, schema
   validation pass/fail, `--pages` parsing, with `mlx_vlm.generate` mocked.
+  **PR 5** fakes Granite Vision one level up (`generate_counted`), as `test_charts.py`
+  does, and adds: the copied prompt equal to Docling's own, the page sent at 2.0 with
+  the 4096-token cap, a shared model left loaded and an owned one released, an
+  off-schema or JSON-less answer recorded rather than raised, the cap warning, the
+  multi-page merge and conflicts, and the §3.13 rule 8 schema refusals (they live in
+  `kvp.py`, so they are tested here rather than in `test_safety.py`).
+  **`test_pipeline.py` (PR 5)** runs the phase sequence with every stage faked: with a
+  schema, one Granite Vision is loaded, shared by the chart stage and Phase B, and closed
+  after (also when Phase B raises); without one, the chart stage owns its model; a bad
+  schema or a page past the end is refused before Phase A.
 - `test_phase_a.py` (named `test_convert.py` until PR 4, §3.6) — the
   `VlmPipelineOptions` actually built: the `granite_docling` `VlmConvertOptions` preset on
   `MlxVlmEngineOptions` (not the deprecated `GRANITEDOCLING_MLX`), `artifacts_path` set to
@@ -1296,7 +1356,9 @@ Same philosophy as today: **mock at the model boundary**, never download in CI.
   `trust_remote_code=False` on our Granite Vision load (S10).
 - `test_chunk.py` — chunks from a hand-built `DoclingDocument`: headings carried,
   page numbers present, every line valid JSON with the §3.9 keys (tokenizer mocked or
-  a tiny local one — no download).
+  a tiny local one — no download). **PR 5** uses a word-count `BaseTokenizer`, and
+  adds a chart's summary and CSV reaching the chunk that cites it (S7) and the
+  tokenizer's pin and `trust_remote_code=False` reaching its loader.
 - `test_api.py` — `convert()` writes nothing to disk (run it in a read-only tmp dir);
   `save()` produces exactly the §3.5 tree; result types are the public dataclasses;
   `document.json` contains no base64 image data and its image references resolve to
@@ -1652,7 +1714,8 @@ the only record of them):
 | 2 | **draft** (#2), waiting on the scan (§4.1). Its rebase onto `main` must drop its two `eval/` `.gitignore` lines, which PR 3 already carries (§5) |
 | 3 | merged 2026-10-27 (#4, `6138255`). Moved suites 68 → 68 tests; actions SHA-pinned. After merge, with the user's confirmation: interim description and the 18 §9.2 topics set, Dependabot alerts on. The old Granite 4.2 bf16 cache entry was not present on the development Mac |
 | 4 | merged 2026-10-27 (#6, `468fa30`). Our own chart stage replaces Docling's (decided with the user 2026-10-27, §3.2); page-level resume failed its feasibility gate and is deferred (§3.14 rule 7); floors filled in (§2.2); gate 8.6–9.0 s; Pillow 13.0.0 and certifi moved past their advisories, Pillow made eval-gated (§2.2). After merge: 0 open Dependabot alerts on `main` |
-| 5 | **next** — start from Appendix B |
+| 5 | **PR open** (`feat/chunks-kvp`). Phase B shares the chart stage's Granite Vision (§3.8); Docling's KVP prompt copied under MIT (`THIRD_PARTY_NOTICES.md`, §3.3); schema checks in `kvp.py` (§3.13 rule 8); `Chunk.kind` dropped (§3.9); `referencing` declared (§2.2); W-9 KVP 10/11 and GAO-07-631 cover 3/4, both matching S6; gate 9.3–9.4 s |
+| 6 | **next** — start from Appendix B |
 
 ## 11. Release
 

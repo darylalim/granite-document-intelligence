@@ -67,6 +67,16 @@ IMAGES_SCALE = 1.0
 CHART_CROP_SCALE = 1.5
 # Docling's chart preset generation settings, reproduced in our chart stage.
 CHART_MAX_NEW_TOKENS = 4096
+# Key-value extraction (§3.3) reads the whole page at the scale and token cap of
+# Docling's `GRANITE_VISION_4_1_TRANSFORMERS` extraction spec (S6 rendered at 2.0).
+KVP_PAGE_SCALE = 2.0
+KVP_MAX_NEW_TOKENS = 4096
+# A KVP schema is local and bounded (§3.13 rule 8).
+KVP_MAX_SCHEMA_BYTES = 256 * 1024
+# The chunk-size range `chunk_tokens` must fall in (§3.9); 512 is the default.
+CHUNK_TOKENS_DEFAULT = 512
+CHUNK_TOKENS_MIN = 64
+CHUNK_TOKENS_MAX = 8192
 # MLX's default cache limit (16.32 GB) bounds nothing on 16 GB; 1 GiB was as
 # fast as the default and bounds the cache well inside the ceiling (S4).
 MLX_CACHE_LIMIT_BYTES = 1 << 30

@@ -3,14 +3,15 @@ name = "granite-document-intelligence"
 version = "0.6.0"
 description = "Being rebuilt as a local PDF document-intelligence CLI (IBM Granite + Docling on MLX). See docs/plans/pdf-pipeline.md."
 license = "Apache-2.0"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
 requires-python = ">=3.12"
 # Floors are the versions PR 4's hand run executed the models on, not researched
 # ones; caps guard API drift. Moving any model-touching package needs the eval
 # (plan §2.2). transformers never goes below 5.16, the darwin floor no single
 # package states (§2.1). mlx is deliberately undeclared: it floats under mlx-vlm
 # and uv.lock pins it. pypdfium2, pillow and huggingface-hub are imported
-# directly (the chart crop, `gdi convert-model`), so they are declared too.
+# directly (the chart crop, `gdi convert-model`), so they are declared too, as
+# is referencing (the KVP validator's fetch-nothing registry, §3.13 rule 8).
 dependencies = [
     "docling-core>=2.105.0,<3",
     "docling[vlm]>=2.143.1,<3",
@@ -20,6 +21,7 @@ dependencies = [
     "pillow>=13.0.0",
     "pypdfium2>=5.14.0",
     "python-dotenv>=1.2.2",
+    "referencing>=0.37.0",
     "transformers>=5.21.0,<6",
 ]
 
