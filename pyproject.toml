@@ -1,16 +1,12 @@
 [project]
 name = "granite-document-intelligence"
 version = "0.6.0"
-description = "Streamlit application for summarization, topic, intent, and sentiment analysis using IBM Granite on Apple Silicon with MLX."
+description = "Being rebuilt as a local PDF document-intelligence CLI (IBM Granite + Docling on MLX). See docs/plans/pdf-pipeline.md."
 license = "Apache-2.0"
-# static/fonts/ ships IBM Plex under the OFL, so its notice is declared alongside
-# the project's own license rather than being implied by it.
-license-files = ["LICENSE", "static/fonts/LICENSE.txt", "static/icons/LICENSE.txt"]
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
-    "mlx-lm>=0.31,<0.32",
     "python-dotenv>=1.2.2",
-    "streamlit>=1.57",
 ]
 
 [dependency-groups]
@@ -20,6 +16,15 @@ dev = [
     "ruff",
     "ty",
 ]
+# The v1.x UI prototypes (docs/plans/ui-theme/preview.py, ui-layout/layout.py) import
+# Streamlit, and ty checks them, so it stays resolvable here; the library never
+# imports it (plan §1, §5).
+ui = [
+    "streamlit>=1.57",
+]
+
+[tool.uv]
+default-groups = ["dev", "ui"]
 
 [tool.ruff.lint]
 extend-select = ["I"]

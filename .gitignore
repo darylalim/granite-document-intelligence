@@ -9,3 +9,29 @@
 .venv
 .worktrees
 __pycache__
+
+# Eval: the private corpus and score.py working output (plan §4.1, §8.1)
+/eval/private/
+/eval/runs/
+
+# Pipeline output (§3.5) — kept out of git, ruff and the gate's fingerprint
+/out/
+*.partial/
+*.old/
+
+# Docling's --debug-vlm-native-output writes debug_<document>/ in the working dir
+debug_*/
+
+# Model weights must never be committed (8-bit GV is 4.92 GB)
+/models/
+*.safetensors
+*.gguf
+*.npz
+
+# User documents dropped at the repo root; the corpus lives in eval/corpus/
+/*.pdf
+
+# Packaging (src/ layout, uv build)
+build/
+dist/
+*.egg-info/

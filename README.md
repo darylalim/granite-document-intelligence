@@ -6,7 +6,7 @@
 
 **Granite Document Intelligence** is a Streamlit application for **summarization, topic, intent, and sentiment analysis** using IBM's [granite-4.2-3b](https://huggingface.co/ibm-granite/granite-4.2-3b) on Apple Silicon with [MLX](https://github.com/ml-explore/mlx) (Apple's on-device ML framework, via `mlx-lm`), running locally. It's a single-shot playground: provide text, choose which analyses to run, and get the results back — all powered by prompting one Granite model. Results can be returned in the input's language or any of Granite's 12 supported languages.
 
-![Granite Document Intelligence in dark mode: the feature toggles and output language in the sidebar, the Product review sample analyzed, with the Sentiment tab showing a positive result at 95% confidence](docs/images/screenshot-dark.png)
+> **Being rebuilt.** The text app described below has been removed from `main`; the project is becoming a local PDF document-intelligence CLI, per [the plan](docs/plans/pdf-pipeline.md). The last release of the text app is [v0.6.0](https://github.com/darylalim/granite-document-intelligence/releases/tag/v0.6.0).
 
 Requires an Apple Silicon (M-series) Mac with ~16 GB+ of unified memory — the default model is IBM's own full-precision MLX build of the 3B ([`ibm-granite/granite-4.2-3b-bf16-mlx`](https://huggingface.co/ibm-granite/granite-4.2-3b-bf16-mlx)), which uses ~7.3 GB for weights plus up to ~1.3 GB of KV cache at the default input length. For the larger 8B at about the same footprint, set `MODEL_NAME` in `streamlit_app.py` to `ibm-granite/granite-4.2-8b-q4-mlx` (~5 GB, 4-bit); on a 32 GB+ Mac, `ibm-granite/granite-4.2-8b-q8-mlx` (~9.3 GB) or `ibm-granite/granite-4.2-8b-bf16-mlx` (~17.6 GB, full precision).
 
@@ -102,5 +102,3 @@ Committing `pyproject.toml` alone fails CI at `uv sync --locked`, which cuts no 
 ## License
 
 This project's code is released under the [Apache License 2.0](LICENSE). The IBM Granite model it loads is distributed separately under [its own Apache 2.0 license](https://huggingface.co/ibm-granite/granite-4.2-3b) and is downloaded at runtime, not included in this repository.
-
-The [IBM Plex](https://github.com/IBM/plex) font files bundled in `static/fonts/` are third-party assets under the [SIL Open Font License 1.1](static/fonts/LICENSE.txt), not Apache-2.0. The favicon in `static/icons/` is a [Material Symbols](https://github.com/google/material-design-icons) glyph, Apache-2.0, recolored to the theme's primary.

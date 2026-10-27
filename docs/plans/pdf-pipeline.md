@@ -1111,7 +1111,9 @@ Anchoring is deliberate: `/*.pdf` catches private documents at the root without 
 the committed `eval/corpus/*.pdf` (an unanchored `*.pdf` would), and `/out/` ignores
 only the top-level folder. Left out on purpose: coverage files (no coverage tool
 planned) and a ty cache (unverified that one exists — add it when it appears). The
-`eval/` entries land with the corpus in PR 2 (§4.1).
+`eval/` entries land with the corpus in PR 2 (§4.1). **Amended 2026-10-27:** PR 3 was
+started while PR 2 still waited on the scan, so it carries the same two `eval/` lines
+to keep its `check-ignore` guard green on its own; PR 2's rebase drops its duplicate.
 
 At this point the repo is tooling-only, the gate is green, and `version` is **not** yet
 bumped (§11).
