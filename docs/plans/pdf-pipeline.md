@@ -1347,7 +1347,9 @@ Same philosophy as today: **mock at the model boundary**, never download in CI.
 
 **CI cost check:** `docling` pulls `torch`; measure `uv sync --locked` time on the
 `macos-26` runner in the first PR and record it. The job's 15-minute timeout is the
-constraint. Locally, `GATE_FORCE=1 ./scripts/gate.sh` stays **≤ 15 s** (§3.14 rule 9).
+constraint. Locally, `GATE_FORCE=1 ./scripts/gate.sh` stays **≤ 15 s** (§3.14 rule 9). **Measured on PR 4's first CI run (2026-10-27, run 40576445218):** `uv sync --locked`
+**12 s** with torch in the lock, the gate 27 s, the whole `check` job 1m13s — far inside
+the 15-minute timeout.
 
 ### 8.1 Quality eval harness (real models, run by hand — never in CI)
 
