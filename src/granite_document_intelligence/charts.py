@@ -72,9 +72,15 @@ def parse_chart_csv(raw: str) -> tuple[list[list[str]] | None, int]:
     """Rows of the model's table, and how many rows had to be repaired.
 
     The table's width is the commonest field count among the body rows. A longer
-    row is a label holding an unquoted comma (`Full-Time, Year-Round Workers,…`,
-    S2) or a header split the same way (S6): its leading fields are joined back
-    into the first cell. A shorter row is padded. Returns None for no rows.
+    row was split by an unquoted comma, and where the comma sat differs by row,
+    on the evidence of one case each:
+
+    - a **body** row's comma is in its label, the first column (`Full-Time,
+      Year-Round Workers,Male,61440`, S2), so its leading fields are rejoined;
+    - the **header**'s was in the last series name (GAO-07-631 Figure 6, S6 and
+      PR 4's hand run), so its trailing fields are rejoined.
+
+    A shorter row is padded. Returns None for no rows.
     """
     rows = [
         [cell.strip() for cell in row]
@@ -87,10 +93,13 @@ def parse_chart_csv(raw: str) -> tuple[list[list[str]] | None, int]:
     width = Counter(len(row) for row in body).most_common(1)[0][0]
     repaired = 0
     out: list[list[str]] = []
-    for row in rows:
+    for i, row in enumerate(rows):
         if len(row) > width:
             extra = len(row) - width + 1
-            row = [", ".join(row[:extra]), *row[extra:]]
+            if i == 0 and len(rows) > 1:
+                row = [*row[: width - 1], ", ".join(row[width - 1 :])]
+            else:
+                row = [", ".join(row[:extra]), *row[extra:]]
             repaired += 1
         elif len(row) < width:
             row = row + [""] * (width - len(row))
@@ -140,6 +149,53 @@ def rows_to_table_data(rows: list[list[str]]) -> TableData:
 def python_code(raw: str) -> str | None:
     match = _PYTHON_FENCE.search(raw)
     return match.group(1).strip() if match else None
+
+
+_NUMBER = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
+_CLAUSE = re.compile(r"\n|(?<=[.;])\s+")
+_MIN_LABEL = 3  # shorter labels ("A", "US") match inside ordinary words
+
+
+def _value(text: str) -> float | None:
+    cleaned = text.strip().replace(",", "").replace("$", "").rstrip("%").strip()
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
+def summary_disagreements(rows: list[list[str]], summary: str) -> list[str]:
+    """Labels the summary pairs with a number its own CSV row does not hold.
+
+    Both Granite Vision variants attached every percentage of the GAO-08-14 pie
+    to the wrong slice while the CSV was right (S6), so the summary is checked
+    against the CSV: in each clause naming a row's label, the first number after
+    the label must be one of that row's values (within 1%). The summary is still
+    written as generated; a disagreement is a `run.json` warning. It reads only
+    label–number pairs, so it misses a wrong number stated without its label.
+    """
+    by_label: dict[str, list[float]] = {}
+    for row in rows[1:]:
+        label = row[0].strip() if row else ""
+        values = [v for v in (_value(cell) for cell in row[1:]) if v is not None]
+        if len(label) >= _MIN_LABEL and _value(label) is None and values:
+            by_label[label] = values
+    found: list[str] = []
+    for clause in _CLAUSE.split(summary):
+        lowered = clause.lower()
+        for label, values in by_label.items():
+            at = lowered.find(label.lower())
+            if at < 0:
+                continue
+            match = _NUMBER.search(clause, at + len(label))
+            claimed = _value(match.group()) if match else None
+            if claimed is None:
+                continue
+            if not any(abs(claimed - v) <= 0.01 * max(abs(v), 1e-9) for v in values):
+                found.append(
+                    f"{label} {claimed:g} (CSV: {', '.join(f'{v:g}' for v in values)})"
+                )
+    return found
 
 
 # --- The crop -----------------------------------------------------------------
@@ -289,6 +345,13 @@ def run(
                     f"{name} (page {page_no}): {repaired} row(s) had a stray field count; "
                     "joined a comma-split label or padded"
                 )
+            if rows is not None and summary is not None:
+                disagreements = summary_disagreements(rows, summary)
+                if disagreements:
+                    warnings.append(
+                        f"{name} (page {page_no}): the summary disagrees with its CSV: "
+                        + "; ".join(disagreements)
+                    )
             chart_code = python_code(raw_code) if raw_code is not None else None
 
             if picture.meta is None:

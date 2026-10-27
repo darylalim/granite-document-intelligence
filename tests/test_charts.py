@@ -28,12 +28,21 @@ class TestParseChartCsv:
         assert rows[2] == ["Full-Time, Year-Round Workers", "Male", "1"]
         assert repaired == 1
 
-    def test_rejoins_a_split_header(self) -> None:
-        # S6: a comma in the header line, which pandas takes as the table's width.
-        raw = "Fiscal year, constant dollars,Total\n2001,10\n2002,12\n"
+    def test_rejoins_a_split_header_at_its_last_field(self) -> None:
+        # GAO-07-631 Figure 6 (S6, PR 4's hand run): the comma is in the last series
+        # name, which pandas takes as the table's width.
+        raw = (
+            "Fiscal Year,O&M total,O&M without supplemental funds, transfers,"
+            " and reprogrammings\n2000,85,85\n2001,90,80\n"
+        )
         rows, repaired = charts.parse_chart_csv(raw)
         assert rows is not None
-        assert rows[0] == ["Fiscal year, constant dollars", "Total"]
+        assert rows[0] == [
+            "Fiscal Year",
+            "O&M total",
+            "O&M without supplemental funds, transfers, and reprogrammings",
+        ]
+        assert rows[1] == ["2000", "85", "85"]
         assert repaired == 1
 
     def test_pads_a_short_row(self) -> None:
@@ -228,3 +237,54 @@ class TestGraniteVisionLoad:
         charts.GraniteVision(Path("/models"))
         assert seen["trust_remote_code"] is False
         assert seen["path"] == f"/models/{config.GRANITE_VISION_FOLDER}"
+
+
+PIE = [
+    ["Category", "Percentage"],
+    ["Maritime", "30"],
+    ["Motor carriers", "6"],
+    ["Rail", "4"],
+    ["Pipelines", "60"],
+]
+
+
+class TestSummaryDisagreements:
+    def test_the_s6_pie_summary_is_caught(self) -> None:
+        # The GAO-08-14 summary Granite Vision wrote beside a correct CSV (S6, PR 4).
+        summary = (
+            "- **Maritime** transport accounts for the largest portion at **60%**.\n"
+            "- **Motor carriers** make up **30%** of the distribution.\n"
+            "- **Rail** transport represents **6%**.\n"
+            "- **Pipelines** constitute the smallest segment at **4%**."
+        )
+        found = charts.summary_disagreements(PIE, summary)
+        assert [entry.split(" ")[0] for entry in found] == [
+            "Maritime",
+            "Motor",
+            "Rail",
+            "Pipelines",
+        ]
+
+    def test_an_agreeing_summary_is_clean(self) -> None:
+        summary = "Pipelines carry 60% and maritime 30%. Rail carries 4 percent."
+        assert charts.summary_disagreements(PIE, summary) == []
+
+    def test_a_label_without_a_number_is_not_judged(self) -> None:
+        assert charts.summary_disagreements(PIE, "Rail is the smallest mode.") == []
+
+    def test_thousands_separators_and_currency_compare_as_numbers(self) -> None:
+        rows = [["Group", "Earnings"], ["Women", "$42,110"]]
+        assert charts.summary_disagreements(rows, "Women earned $42,110.") == []
+        assert charts.summary_disagreements(rows, "Women earned 48,110.") == [
+            "Women 48110 (CSV: 42110)"
+        ]
+
+    def test_a_disagreement_is_a_warning(self, blank_pdf: Path) -> None:
+        vision = FakeVision({**GOOD, charts.SUMMARY_PROMPT: "North reached 999."})
+        doc = build_document()
+        result = charts.run(blank_pdf, doc, Path("unused"), vision=vision)  # ty: ignore[invalid-argument-type]
+        assert any(
+            "disagrees with its CSV" in w and "North 999" in w for w in result.warnings
+        )
+        # The summary itself is kept as generated.
+        assert result.charts[0].summary == "North reached 999."
