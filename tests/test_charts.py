@@ -288,3 +288,24 @@ class TestSummaryDisagreements:
         )
         # The summary itself is kept as generated.
         assert result.charts[0].summary == "North reached 999."
+
+    def test_a_closing_quote_ends_the_clause(self) -> None:
+        # GAO-07-631 p. 25 (PR 4's hand run): `…savings." The y-axis … from 0 to 300`
+        # paired every label with the axis's 0.
+        rows = [["Category", "Value"], ["Estimated savings", "56"]]
+        summary = (
+            'It shows "Estimated total in-house costs," and "Estimated savings." '
+            "The y-axis ranges from 0 to 300. Estimated savings are 56 million."
+        )
+        assert charts.summary_disagreements(rows, summary) == []
+
+    def test_labels_holding_a_digit_are_not_judged(self) -> None:
+        # GAO-07-631 p. 15: row labels are year ranges, so the "next number" after
+        # `1995 to 2000` was the 2000 of the next label.
+        rows = [
+            ["Fiscal Years", "Army"],
+            ["1995 to 2000", "2"],
+            ["2000 to 2005", "137"],
+        ]
+        summary = "It covers two periods: 1995 to 2000 and 2000 to 2005."
+        assert charts.summary_disagreements(rows, summary) == []

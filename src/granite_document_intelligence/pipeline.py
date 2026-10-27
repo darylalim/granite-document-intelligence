@@ -35,6 +35,9 @@ RECORDED_PACKAGES = (
     "torch",
     "huggingface-hub",
     "pypdfium2",
+    # Pillow resizes every image Granite Vision reads: moving 12.3.0 → 13.0.0
+    # changed one chart summary on an identical crop (PR 4).
+    "pillow",
 )
 
 

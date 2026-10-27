@@ -152,7 +152,9 @@ def python_code(raw: str) -> str | None:
 
 
 _NUMBER = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
-_CLAUSE = re.compile(r"\n|(?<=[.;])\s+")
+# A clause ends at a newline or after ., ; ! or ?, also when a closing quote or
+# bracket follows it (`…savings." The y-axis…`).
+_CLAUSE = re.compile(r"\n|(?<=[.;!?])\s+|(?<=[.;!?][\"'”’)\]])\s+")
 _MIN_LABEL = 3  # shorter labels ("A", "US") match inside ordinary words
 
 
@@ -172,13 +174,16 @@ def summary_disagreements(rows: list[list[str]], summary: str) -> list[str]:
     against the CSV: in each clause naming a row's label, the first number after
     the label must be one of that row's values (within 1%). The summary is still
     written as generated; a disagreement is a `run.json` warning. It reads only
-    label–number pairs, so it misses a wrong number stated without its label.
+    label–number pairs, so it misses a wrong number stated without its label, and
+    it skips labels holding a digit (`1995 to 2000`), whose "next number" is often
+    part of another label — a false alarm PR 4's hand run hit.
     """
     by_label: dict[str, list[float]] = {}
     for row in rows[1:]:
         label = row[0].strip() if row else ""
         values = [v for v in (_value(cell) for cell in row[1:]) if v is not None]
-        if len(label) >= _MIN_LABEL and _value(label) is None and values:
+        has_digit = any(ch.isdigit() for ch in label)
+        if len(label) >= _MIN_LABEL and not has_digit and values:
             by_label[label] = values
     found: list[str] = []
     for clause in _CLAUSE.split(summary):
