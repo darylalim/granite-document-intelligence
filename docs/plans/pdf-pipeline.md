@@ -4,9 +4,12 @@ Drafted 2026-10-18. Written to be executed in a **fresh session** with no memory
 conversation that produced it — every decision below carries its reason and its evidence,
 so the implementer can tell a load-bearing choice from a default.
 
-**Status:** complete draft, reviewed cold on 2026-10-18 (18 findings fixed). Phase 0 is
-under way — progress is in [`pdf-pipeline-spikes.md`](pdf-pipeline-spikes.md); no
-production code exists. **To start or resume, paste Appendix A into a new session.**
+**Status (2026-10-27):** complete draft, reviewed cold on 2026-10-18 (18 findings
+fixed). Phase 0's spike report is approved ([`pdf-pipeline-spikes.md`](pdf-pipeline-spikes.md)),
+except the scanned halves of S5 and S8, which wait on the print-and-scan step. PR 3
+(teardown) is merged, so `main` is tooling-only; no production code exists yet. Per-PR
+progress is under §10. **To resume, paste Appendix B into a new session for the next PR,
+or Appendix A for the scanned halves once the scan exists.**
 
 ## 0. At a glance
 
@@ -908,7 +911,9 @@ fastest configuration" — and by quality per second through the eval (§8.1).
    import `docling`, `torch` or `mlx_vlm` at module level — import inside the test that
    needs it, mock the rest — and **`GATE_FORCE=1 ./scripts/gate.sh` must stay ≤ 15 s**
    on the development Mac. PR 3 measures it after the teardown; PR 4 (the first PR to
-   bring Docling in) re-measures it, and a breach is fixed before merge.
+   bring Docling in) re-measures it, and a breach is fixed before merge. **Measured
+   2026-10-27 on `main` after PR 3:** 4.0–4.6 s over three forced runs (81 tests), so
+   PR 4 starts with about 10 s of headroom.
 
 ## 4. Phase 0 — spikes (before any production code)
 
@@ -1532,6 +1537,17 @@ Rules:
   the new API.
 - Every PR runs the full gate (`GATE_FORCE=1 ./scripts/gate.sh`) locally before push.
 
+**Progress** (update as each PR lands; repository settings are not in git, so this is
+the only record of them):
+
+| PR | State |
+|---|---|
+| 0 | merged 2026-10-18 (#1) |
+| 1 | merged 2026-10-25 (#3); report approved, scanned halves of S5/S8 carved out (§4) |
+| 2 | **draft** (#2), waiting on the scan (§4.1). Its rebase onto `main` must drop its two `eval/` `.gitignore` lines, which PR 3 already carries (§5) |
+| 3 | merged 2026-10-27 (#4, `6138255`). Moved suites 68 → 68 tests; actions SHA-pinned. After merge, with the user's confirmation: interim description and the 18 §9.2 topics set, Dependabot alerts on. The old Granite 4.2 bf16 cache entry was not present on the development Mac |
+| 4 | **next** — start from Appendix B |
+
 ## 11. Release
 
 The change removes every existing feature, so bump to **1.0.0** — in PR 9 (§10), last,
@@ -1734,7 +1750,8 @@ evidence (a link, a results file, a test name).
       every score within tolerance and every budget; adversarial PDF passes.
 - [ ] **Memory:** peak ≤ 10 GB on every corpus PDF; flat across the 30+ page document.
 - [ ] **Gate:** `GATE_FORCE=1 ./scripts/gate.sh` green and ≤ 15 s; CI green on
-      `macos-26` with SHA-pinned actions.
+      `macos-26` with SHA-pinned actions. (Actions pinned and tested since PR 3; the
+      gate measured 4.0–4.6 s after it — §3.14 rule 9.)
 - [ ] **Docs:** README and CLAUDE.md rewritten (§9), `SECURITY.md`, the README's
       measured numbers dated with versions; every README command run as written.
 - [ ] **Licensing:** `license-files` entries all exist (tested); `SOURCES.md` complete;
@@ -1825,3 +1842,53 @@ with S11's page-scale finding for image-only pages), then commit, push and stop.
 
 The last line limits one session to one spike. Change it to the next open spike
 before each paste, or delete it to run the rest of Phase 0 in one session.
+
+## Appendix B — kickoff prompt for Phases 1–3 (PR 4 onward)
+
+Paste this as the first message of a new Claude Code session to carry the next PR in
+§10. Like Appendix A it resumes: the session finds the next PR from §10's progress
+table and from the branches that exist, so one prompt serves PR 4 through PR 9.
+
+```text
+You are implementing docs/plans/pdf-pipeline.md. Read §0, §16 and §17 first, then
+§10, then the sections the next PR needs. The plan was written in earlier sessions you
+have no memory of; it is the single source of truth, and every decision in it carries
+its reason — read the reason before deciding a choice is safe to change. Phase 0's
+findings are in docs/plans/pdf-pipeline-spikes.md and are already applied to the plan.
+
+CLAUDE.md still describes the OLD Streamlit text app (its rewrite is PR 8). Follow its
+tooling rules (uv.lock never hand-edited, Conventional Commits, the gate, the hooks);
+ignore its app-specific rules (the smoke test, MODEL_NAME, language_directive, the
+theme).
+
+Before anything else:
+- Read §10's progress table to find the next PR, and check `gh pr list --state all`
+  and the branches (local and origin) — if the next PR's branch already exists, resume
+  it rather than starting again.
+- The eval corpus lives on branch test/eval-corpus (PR 2) until that PR merges. For a
+  hand run, read a corpus PDF from it (`git show test/eval-corpus:eval/corpus/<file>`
+  into the scratchpad); do not merge or rebase PR 2 yourself.
+- Re-check every version and API the plan cites against what is installed now, inside
+  §2.2's floors and caps; record what you used.
+
+Rules for the PR:
+- One PR, on the branch §10 names, off a fresh main. Conventional Commits with the
+  type §10 gives it. Commit as you go, so a session that ends part-way leaves its work
+  on the branch.
+- Meet the PR's "Merge gate" column, and put the hand-run numbers in the PR
+  description (§10 rules). Run `GATE_FORCE=1 ./scripts/gate.sh` before every push and
+  keep it ≤ 15 s (§3.14 rule 9).
+- If implementation contradicts the plan, amend the plan in the same PR and say why in
+  the PR description. If a decision is genuinely mine to make, stop and ask.
+- Update §10's progress table in the same PR.
+- Use the /astral skills for uv, ruff and ty.
+- Open the PR, wait for CI, then STOP and ask me before merging. Anything outward-facing
+  after merge (repo settings, `gh repo edit`) also waits for my confirmation.
+
+Finish by summarizing what the PR does, the hand-run numbers, every plan amendment, and
+anything you need from me.
+
+This session: do PR 4 (feat/phase-a) only, then open the PR and stop.
+```
+
+Change the last line to the next PR before each paste.
