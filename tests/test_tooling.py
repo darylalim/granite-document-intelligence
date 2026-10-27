@@ -956,3 +956,42 @@ class TestPackaging:
             entries = tomllib.load(f)["project"]["license-files"]
         missing = [e for e in entries if not (self.ROOT / e).is_file()]
         assert not missing, f"license-files entries with no file: {missing}"
+
+    def test_the_console_script_points_at_the_cli(self) -> None:
+        with (self.ROOT / "pyproject.toml").open("rb") as f:
+            project = tomllib.load(f)["project"]
+        assert project["scripts"] == {"gdi": "granite_document_intelligence.cli:main"}
+
+
+class TestImportCost:
+    """The gate stays fast (plan §3.14 rule 9): ≤ 15 s, run on every Stop.
+
+    Importing docling or mlx-vlm costs seconds and brings torch with it, so no
+    test module may do it at module level — only inside the test that needs it —
+    and no library module may either, so `gdi --help` stays instant.
+    """
+
+    ROOT = Path(__file__).parent.parent
+    HEAVY = frozenset({"docling", "torch", "mlx_vlm", "mlx", "transformers"})
+
+    def _top_level_imports(self, path: Path) -> set[str]:
+        import ast
+
+        names: set[str] = set()
+        for node in ast.parse(path.read_text(encoding="utf-8")).body:
+            if isinstance(node, ast.Import):
+                names.update(alias.name.split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+                names.add(node.module.split(".")[0])
+        return names
+
+    @pytest.mark.parametrize("folder", ["tests", "src/granite_document_intelligence"])
+    def test_no_module_imports_a_heavy_library_at_top_level(self, folder: str) -> None:
+        offenders = {
+            str(path.relative_to(self.ROOT)): sorted(
+                self._top_level_imports(path) & self.HEAVY
+            )
+            for path in sorted((self.ROOT / folder).glob("*.py"))
+        }
+        offenders = {k: v for k, v in offenders.items() if v}
+        assert not offenders, f"move these imports inside the function: {offenders}"
