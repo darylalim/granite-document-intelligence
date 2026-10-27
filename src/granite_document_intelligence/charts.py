@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
 import re
 import time
 from collections import Counter
@@ -34,6 +35,8 @@ from granite_document_intelligence.api import Chart
 if TYPE_CHECKING:
     from docling_core.types.doc import DoclingDocument, PictureItem, TableData
     from PIL.Image import Image
+
+_log = logging.getLogger(__name__)
 
 # The picture classes Docling's own chart stage sends to Granite Vision.
 CHART_KINDS = frozenset({"bar_chart", "pie_chart", "line_chart"})
@@ -329,10 +332,11 @@ def run(
     warnings: list[str] = []
     pdf = pypdfium2.PdfDocument(pdf_path)
     try:
-        for picture, (kind, confidence) in targets:
+        for position, (picture, (kind, confidence)) in enumerate(targets, start=1):
             index = len(charts) + 1
             name = f"chart-{index:03d}"
             page_no = picture.prov[0].page_no if picture.prov else 0
+            _log.info("  chart %d/%d (page %d)", position, len(targets), page_no)
             page = document.pages.get(page_no)
             image = render_crop(pdf, picture, page.size.height) if page else None
             if image is None:

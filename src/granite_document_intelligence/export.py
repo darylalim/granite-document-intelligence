@@ -207,17 +207,53 @@ def swap_into_place(staging: Path, out_dir: Path) -> None:
         shutil.rmtree(old)
 
 
-def save(result: ConvertResult, out_dir: Path) -> None:
-    out_dir = Path(out_dir)
+def _staging(out_dir: Path) -> Path:
     out_dir.parent.mkdir(parents=True, exist_ok=True)
     staging = out_dir.with_name(out_dir.name + PARTIAL_SUFFIX)
     if staging.exists():
         shutil.rmtree(staging)
     staging.mkdir()
-    _write_tree(result, staging)
-    record = run_record(result, _tree_bytes(staging))
-    # Written last: only a complete tree carries a run.json (§3.5).
+    return staging
+
+
+def _write_run_json(staging: Path, record: dict[str, Any]) -> None:
     (staging / RUN_JSON).write_text(
         json.dumps(record, indent=2) + "\n", encoding="utf-8"
     )
+
+
+def save(result: ConvertResult, out_dir: Path) -> None:
+    out_dir = Path(out_dir)
+    staging = _staging(out_dir)
+    _write_tree(result, staging)
+    record = run_record(result, _tree_bytes(staging))
+    # Written last: only a complete tree carries a run.json (§3.5).
+    _write_run_json(staging, record)
+    swap_into_place(staging, out_dir)
+
+
+def save_error(
+    out_dir: Path,
+    source: Path,
+    error: dict[str, Any],
+    input_sha256: str | None,
+    options: dict[str, Any],
+) -> None:
+    """Replace `out_dir` with a tree holding only an error `run.json` (§3.8).
+
+    It goes through the same swap as a success, so a failed re-run replaces a
+    stale success rather than sitting beside its files (§3.12 rule 1), and
+    resume, which trusts only `"status": "ok"`, runs the PDF again next time.
+    `error` is `safety.error_record`'s: no locals, no foreign frames.
+    """
+    out_dir = Path(out_dir)
+    staging = _staging(out_dir)
+    record = {
+        "status": "error",
+        "source": source.name,
+        "input_sha256": input_sha256,
+        "options": options,
+        "error": error,
+    }
+    _write_run_json(staging, record)
     swap_into_place(staging, out_dir)

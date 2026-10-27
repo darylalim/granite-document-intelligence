@@ -5,6 +5,7 @@ package loads no model and imports neither Docling nor MLX.
 """
 
 from granite_document_intelligence.api import (
+    BatchItem,
     Chart,
     Chunk,
     ConvertOptions,
@@ -15,10 +16,13 @@ from granite_document_intelligence.api import (
     RunInfo,
     Table,
     convert,
+    convert_many,
 )
 from granite_document_intelligence.models import ModelsNotReadyError
+from granite_document_intelligence.runlock import RunLockedError
 
 __all__ = [
+    "BatchItem",
     "Chart",
     "Chunk",
     "ConvertOptions",
@@ -28,6 +32,8 @@ __all__ = [
     "PageStats",
     "Picture",
     "RunInfo",
+    "RunLockedError",
     "Table",
     "convert",
+    "convert_many",
 ]

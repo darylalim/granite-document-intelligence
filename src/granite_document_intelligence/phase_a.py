@@ -9,11 +9,12 @@ inside `run`, so no Docling model outlives the call (§3.1).
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from granite_document_intelligence import config, memory
 from granite_document_intelligence.api import ConvertOptions, PageStats
@@ -28,6 +29,8 @@ if TYPE_CHECKING:
 LOOP_WINDOW_CHARS = 640
 LOOP_STRIDE_CHARS = LOOP_WINDOW_CHARS // 2
 DOCTAG_END = "</doctag>"
+
+_log = logging.getLogger(__name__)
 
 
 def pipeline_options(options: ConvertOptions, models_dir: Path) -> VlmPipelineOptions:
@@ -93,6 +96,15 @@ def _profiled() -> Generator[None]:
         settings.debug.profile_pipeline_timings, settings.perf.page_batch_size = saved
 
 
+def _page_progress(event: Any) -> None:
+    """Per-page progress on stderr through the CLI's logging (§7), via Docling's
+    public progress events. It reports counts, never page content."""
+    from docling.datamodel.progress import PageCompletedProgress
+
+    if isinstance(event, PageCompletedProgress):
+        _log.info("  page %d/%d", event.completed_pages, event.total_pages)
+
+
 @dataclass
 class PhaseAResult:
     document: DoclingDocument
@@ -119,7 +131,9 @@ def run(pdf: Path, options: ConvertOptions, models_dir: Path) -> PhaseAResult:
                 )
             }
         )
-        result = converter.convert(pdf, raises_on_error=True)
+        result = converter.convert(
+            pdf, raises_on_error=True, progress_callback=_page_progress
+        )
 
     if result.status not in (
         ConversionStatus.SUCCESS,
