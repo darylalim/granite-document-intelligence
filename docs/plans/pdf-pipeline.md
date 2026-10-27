@@ -1777,7 +1777,6 @@ the only record of them):
 | 4 | merged 2026-10-27 (#6, `468fa30`). Our own chart stage replaces Docling's (decided with the user 2026-10-27, §3.2); page-level resume failed its feasibility gate and is deferred (§3.14 rule 7); floors filled in (§2.2); gate 8.6–9.0 s; Pillow 13.0.0 and certifi moved past their advisories, Pillow made eval-gated (§2.2). After merge: 0 open Dependabot alerts on `main` |
 | 5 | merged 2026-10-27 (#7, `9059e74`). Phase B shares the chart stage's Granite Vision (§3.8); Docling's KVP prompt copied under MIT (`THIRD_PARTY_NOTICES.md`, §3.3); schema checks in `kvp.py` (§3.13 rule 8); `Chunk.kind` dropped (§3.9); `referencing` declared (§2.2); W-9 KVP 10/11 and GAO-07-631 cover 3/4, both matching S6; gate 9.3–9.4 s |
 | 6 | **PR open** (`feat/cli-batch`). `convert_many`, `batch`, `safety`, `runlock`, `gdi convert`; Phase A's converter stays per PDF (decided with the user 2026-10-27, §3.8); output overlaps refused up front and limits kept out of resume (§3.8); progress through `logging` and Docling's public `progress_callback` (§7). Hand run on the whole public corpus (`HF_HUB_OFFLINE=1`, socket guard, 0 network attempts): 6/6 done in 425 s, peak 6.68 GB; an immediate re-run skipped 6/6 in 0.5 s; with each schema, W-9 KVP 10/11, GAO-07-631 cover 3/4 and the adversarial PO 4/5 with no injected value, all matching S6/PR 5. Warnings were the known set: three capped pages, the Census p. 2 loop and the GAO-08-14 pie summary. **For PR 7:** `adversarial.pdf` p. 2 did not loop (1,203 tokens, a clean 60-row table), so its manifest's `loop_pages: [2]` pass rule fails at the shipped settings. Gate 11.1–11.4 s |
-| 7 | **next** — start from Appendix B |
 
 ## 11. Release
 
@@ -2119,7 +2118,7 @@ Rules for the PR:
 Finish by summarizing what the PR does, the hand-run numbers, every plan amendment, and
 anything you need from me.
 
-This session: do PR 7 (test/eval-harness) only, then open the PR and stop.
+This session: do PR 6 (feat/cli-batch) only, then open the PR and stop.
 ```
 
 Change the last line to the next PR before each paste.
