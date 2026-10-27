@@ -4,12 +4,13 @@ The CLI and any later UI call these and nothing below them, so they cannot
 diverge. Heavy imports (Docling, torch, mlx) happen inside `convert`, never at
 import time (§6), so importing the package stays cheap.
 
-PR 4 shipped Phase A — the document, tables, charts and pictures — and PR 5 the
-key-values (`schema`) and chunks; `convert_many` and resume arrive with PR 6.
+Both entry points hold the process-level run lock (§3.14 rule 4) for as long as
+they run, so two runs on one Mac never load the models side by side.
 """
 
 from __future__ import annotations
 
+from collections.abc import Generator, Iterable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -23,6 +24,8 @@ from granite_document_intelligence.config import (
     CHUNK_TOKENS_DEFAULT,
     CHUNK_TOKENS_MAX,
     CHUNK_TOKENS_MIN,
+    MAX_FILE_MB_DEFAULT,
+    MAX_PAGES_DEFAULT,
 )
 
 TextSource = Literal["vlm", "pdf"]
@@ -50,8 +53,15 @@ class ConvertOptions:
     pages: str = "1"
     chunks: bool = True
     chunk_tokens: int = CHUNK_TOKENS_DEFAULT
+    max_pages: int = MAX_PAGES_DEFAULT
+    max_file_mb: int = MAX_FILE_MB_DEFAULT
 
     def __post_init__(self) -> None:
+        for name in ("max_pages", "max_file_mb"):
+            if getattr(self, name) < 1:
+                raise ValueError(
+                    f"{name} must be at least 1, not {getattr(self, name)}"
+                )
         if self.text_source not in TEXT_SOURCES:
             raise ValueError(
                 f"text_source must be one of {', '.join(TEXT_SOURCES)}, "
@@ -71,8 +81,14 @@ class ConvertOptions:
             )
 
     def as_dict(self) -> dict[str, Any]:
-        """The options as JSON values; the schema's content hash is added by the run."""
+        """The options that shape the output, as JSON values: what resume compares.
+
+        The limits are left out: they decide whether a PDF is converted, not
+        what its output is, so raising `max_pages` re-runs no finished PDF. The
+        schema's content hash is added by `recorded_options`.
+        """
         options = asdict(self)
+        del options["max_pages"], options["max_file_mb"]
         options["schema"] = str(self.schema) if self.schema is not None else None
         return options
 
@@ -206,13 +222,74 @@ class ConvertResult:
         save(self, out_dir)
 
 
-def convert(pdf: Path, options: ConvertOptions | None = None) -> ConvertResult:
+BatchStatus = Literal["done", "skipped", "failed"]
+
+
+@dataclass
+class BatchItem:
+    """One PDF's outcome in `convert_many`.
+
+    `done` was converted and saved, `skipped` already had a matching successful
+    `run.json` (§3.8), and `failed` has an error `run.json` in `out_dir` — unless
+    `out_dir` itself was refused (§3.10), when nothing was written. `result` is
+    set only for `done`; `output_bytes` is the folder's size as `run.json`
+    records it.
+    """
+
+    pdf: Path
+    out_dir: Path
+    status: BatchStatus
+    result: ConvertResult | None = None
+    error: str | None = None
+    output_bytes: int = 0
+
+
+def convert(
+    pdf: Path, options: ConvertOptions | None = None, *, wait: bool = True
+) -> ConvertResult:
     """Convert one PDF and return the results; writes nothing to disk.
 
     Refuses to start, before loading any model, when the models directory is
     missing, unstripped or disagrees with the pinned revisions — the message names
-    `gdi convert-model`, never a fallback to the Hub (§3.13 rules 1–2).
+    `gdi convert-model`, never a fallback to the Hub (§3.13 rules 1–2) — and when
+    the file is not a PDF or is over a limit (§3.10). Waits for another run to
+    finish first, or raises `RunLockedError` with `wait=False` (§3.14 rule 4).
     """
     from granite_document_intelligence.pipeline import run
+    from granite_document_intelligence.runlock import run_lock
 
-    return run(Path(pdf), options or ConvertOptions())
+    with run_lock(wait=wait):
+        return run(Path(pdf), options or ConvertOptions())
+
+
+def convert_many(
+    inputs: Iterable[Path | str],
+    out_dir: Path,
+    options: ConvertOptions | None = None,
+    *,
+    force: bool = False,
+    recursive: bool = False,
+    wait: bool = True,
+) -> Generator[BatchItem]:
+    """Convert PDFs and directories of them into `out_dir`, yielding one item per PDF.
+
+    Owns the §3.8 rules so a CLI and a UI cannot diverge on them: directory
+    expansion, one output folder per PDF by its path relative to its input,
+    resume (a PDF is skipped only when its `run.json` records success for the
+    same file and options; `force` re-runs everything), and continuing past a
+    failed PDF. Nothing happens until the first item is requested; a problem
+    with the batch as a whole — a missing input, two PDFs sharing an output
+    folder, an unready models directory, a bad schema — raises then, before any
+    model loads. The run lock is held from then until the generator finishes or
+    is closed.
+    """
+    from granite_document_intelligence.batch import run
+
+    yield from run(
+        [Path(p) for p in inputs],
+        Path(out_dir),
+        options or ConvertOptions(),
+        force=force,
+        recursive=recursive,
+        wait=wait,
+    )

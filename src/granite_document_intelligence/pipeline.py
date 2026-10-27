@@ -14,6 +14,7 @@ import hashlib
 import time
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+from typing import Any
 
 from granite_document_intelligence import (
     charts,
@@ -23,6 +24,7 @@ from granite_document_intelligence import (
     memory,
     models,
     phase_a,
+    safety,
 )
 from granite_document_intelligence.api import (
     Chunk,
@@ -72,14 +74,17 @@ def package_versions() -> dict[str, str]:
     return versions
 
 
-def pdf_page_count(pdf: Path) -> int:
-    import pypdfium2
+def recorded_options(options: ConvertOptions) -> dict[str, Any]:
+    """The options `run.json` records and resume compares (§3.8).
 
-    document = pypdfium2.PdfDocument(pdf)
-    try:
-        return len(document)
-    finally:
-        document.close()
+    The schema's content hash goes in beside its path, so an edited schema at
+    the same path re-runs. A batch computes this once and compares it with
+    every finished PDF's, so it must match what `run` records exactly.
+    """
+    recorded = options.as_dict()
+    if options.schema is not None:
+        recorded["schema_sha256"] = sha256_of(options.schema)
+    return recorded
 
 
 def run(pdf: Path, options: ConvertOptions) -> ConvertResult:
@@ -88,16 +93,13 @@ def run(pdf: Path, options: ConvertOptions) -> ConvertResult:
     # and so are a bad schema and pages the PDF does not have.
     manifest = models.verify_models_dir(models_dir)
     schema = kvp.load_schema(options.schema) if options.schema is not None else None
+    # Not a PDF, too large or too long: refused before any parser converts it (§3.10).
+    page_count = safety.check_pdf(pdf, options)
     kvp_pages = (
-        kvp.resolve_pages(options.pages, pdf_page_count(pdf))
-        if schema is not None
-        else []
+        kvp.resolve_pages(options.pages, page_count) if schema is not None else []
     )
     input_sha256 = sha256_of(pdf)
-    recorded_options = options.as_dict()
-    if options.schema is not None:
-        # Resume compares options (§3.8): an edited schema at the same path re-runs.
-        recorded_options["schema_sha256"] = sha256_of(options.schema)
+    options_record = recorded_options(options)
     memory.configure()
 
     timings_ms: dict[str, float] = {}
@@ -194,7 +196,7 @@ def run(pdf: Path, options: ConvertOptions) -> ConvertResult:
     run_info = RunInfo(
         input_sha256=input_sha256,
         page_count=len(document.pages),
-        options=recorded_options,
+        options=options_record,
         models={
             "manifest": manifest,
             "granite_vision": config.GRANITE_VISION_LOCAL_ID,

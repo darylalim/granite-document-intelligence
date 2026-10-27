@@ -13,6 +13,7 @@ acts on it beyond parsing, validating and handing it back.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 from dataclasses import dataclass
@@ -27,6 +28,8 @@ if TYPE_CHECKING:
     from PIL.Image import Image
 
     from granite_document_intelligence.charts import GraniteVision
+
+_log = logging.getLogger(__name__)
 
 _PAGES = re.compile(r"\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*")
 
@@ -269,7 +272,8 @@ def run(
     warnings: list[str] = []
     pdf = pypdfium2.PdfDocument(pdf_path)
     try:
-        for page_no in pages:
+        for position, page_no in enumerate(pages, start=1):
+            _log.info("  key-values %d/%d (page %d)", position, len(pages), page_no)
             image = render_page(pdf, page_no)
             start = time.perf_counter()
             text, tokens = model.generate_counted(

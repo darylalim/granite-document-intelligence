@@ -8,7 +8,7 @@ so the implementer can tell a load-bearing choice from a default.
 fixed). Phase 0's spike report is approved ([`pdf-pipeline-spikes.md`](pdf-pipeline-spikes.md)),
 except the scanned halves of S5 and S8, which wait on the print-and-scan step. PR 3
 (teardown), PR 4 (Phase A library, `gdi convert-model`) and PR 5 (chunks and KVP) are
-merged; PR 6 (`api` complete, batch, `gdi convert`) is next. Per-PR progress is under §10. **To resume, paste Appendix B into a new session for the next PR,
+merged; PR 6 (`api` complete, batch, `gdi convert`) is open on `feat/cli-batch`. Per-PR progress is under §10. **To resume, paste Appendix B into a new session for the next PR,
 or Appendix A for the scanned halves once the scan exists.**
 
 ## 0. At a glance
@@ -525,8 +525,29 @@ diverge on it.
   the file, and its recorded options equal the current ones. Anything else re-runs —
   every uncertainty runs, the same rule `scripts/gate.sh`'s memo follows. `--force`
   re-runs everything.
-- One `DocumentConverter` for the whole batch (models load once) when there is no
-  `--schema`. With `--schema`, **Phase B runs per PDF after its Phase A** (decided by S4,
+- **Output folders must not overlap (PR 6).** Relative paths keep one directory's
+  PDFs apart, but two inputs can still meet: `a/report.pdf b/report.pdf` named
+  explicitly, two input directories that each hold `report.pdf`, `report.pdf` beside a
+  `report/` subfolder (its swap would delete the other's tree), or `report.partial.pdf`
+  beside `report.pdf` (startup recovery would delete it). `convert_many` compares
+  every output folder, case-folded since APFS is case-insensitive, against every
+  other one, against their `.partial`/`.old` siblings and against their ancestors,
+  and refuses the whole batch before anything runs.
+- **A file named on its own is taken whatever its extension** and judged by content
+  (§3.13 rule 7); only a directory scan filters on `*.pdf`. It writes to its stem.
+- **Resource limits are not part of "done" (PR 6).** `max_pages` and `max_file_mb`
+  decide whether a PDF is converted, not what its output is, so `as_dict()` leaves
+  them out and raising one re-runs no finished PDF; a PDF refused by a limit has an
+  error `run.json` and re-runs anyway.
+- ~~One `DocumentConverter` for the whole batch (models load once) when there is no
+  `--schema`.~~ **Amended in PR 6, decided with the user (2026-10-27): the converter is
+  built and released per PDF, with or without `--schema`.** Since PR 4 moved charts out
+  of Docling (§3.1), keeping one converter for the batch would hold granite-docling and
+  the classifier resident beside Granite Vision through every chart stage (~6.68 GB →
+  roughly 8 GB, unmeasured), against §3.1's rule that each step is released before the
+  next loads. The rebuild costs ~2.6 s per PDF (S8): under 2% of a 42-page PDF and
+  about a third of a one-page form, so a batch of one-page forms is again the case that
+  would reopen it. With `--schema`, **Phase B runs per PDF after its Phase A** (decided by S4,
   2026-10-25): the converter is released before each Phase B and rebuilt after, which
   reloads all three models per PDF — ~4.6 s on a warm page cache, ~2% of a 42-page
   PDF's Phase A. All Phase A first, then all Phase B, stays the alternative if S8 finds
@@ -561,6 +582,18 @@ diverge on it.
 - A failed PDF writes `run.json` with `"status": "error"` and the traceback, and the
   batch continues; exit status is non-zero if any PDF failed. A batch summary
   (done / skipped / failed, with paths) goes to stderr at the end.
+  **Implemented in PR 6** (`batch.py`). The traceback is `safety.error_record`'s:
+  the exception type, its message, and our own frames as `file:line in function`, with
+  no source lines and no locals (§3.13 rule 5). Problems with the batch as a whole are
+  raised before any PDF runs rather than recorded per PDF: a missing input, an
+  overlap, no PDFs found, an unready models directory, a bad schema. A
+  `ModelsNotReadyError` mid-batch also stops it, since it would fail every later PDF
+  the same way. `gdi convert` exits **0** when every PDF was done or skipped, **1**
+  when any failed or the run could not start (models not ready; the lock held under
+  `--no-wait`), **2** on a usage error, and **130** on Ctrl-C, after printing the
+  summary of what finished. `convert_many` is a generator: nothing happens until the
+  first item is requested, and the run lock (§3.14 rule 4) is held until it finishes
+  or is closed.
 
 ### 3.9 Chunking
 
@@ -663,6 +696,10 @@ reaches a model. Rules, each with a test (§8):
   derived from the PDF's path relative to the input directory (§3.8), never from PDF
   metadata (title, filename fields). Resolve and check that every write lands under the
   output directory; skip symlinks that resolve outside the input directory, with a
+  warning. **PR 6:** a PDF whose output folder resolves outside the output directory
+  (through a symlink inside it) fails with nothing written, since there is nowhere safe
+  to put even an error `run.json`. Symlinked *directories* are never descended: one
+  that points inside is reached by its real path, and one that points outside gets the
   warning.
 - **HTML and Markdown outputs are files, not rendered pages.** Docling escapes them,
   but a v1.x UI must treat `table-NNN.html` and `document.md` as untrusted when
@@ -905,7 +942,10 @@ everything the program *executes or loads* is pinned and local.
    procedure.
 7. **Inputs are recognised by content.** A file is processed only if it starts with
    `%PDF-`, whatever its extension; anything else is a per-PDF error before any parser
-   sees it.
+   sees it. **PR 6:** the header must be at byte 0. PDF 1.7 §7.5.2 allows it anywhere in
+   the first 1024 bytes, but every corpus PDF starts with it, and the stricter check is
+   the one that keeps junk away from pdfium. The size limit is checked before pdfium
+   opens the file to count pages (`safety.check_pdf`).
 8. **The KVP schema is local and bounded.** Remote `$ref` resolution is disabled
    explicitly (no retrieval function registered with `jsonschema`/`referencing`, not
    relied on as a default), the schema is capped at 256 KB, and it must be a JSON
@@ -996,6 +1036,14 @@ fastest configuration" — and by quality per second through the eval (§8.1).
    exclusive `fcntl.flock` on `$GDI_CACHE_DIR/run.lock` (§3.6) for the whole run; a second run prints "waiting for another gdi run (pid N)" and waits, or
    exits non-zero with `--no-wait`. The lock is released by the OS if the process dies,
    so a crash cannot leave it stuck.
+   **Implemented in PR 6** (`runlock.py`). `convert()` takes it too, so a UI calling
+   the library beside a CLI run waits like a second `gdi` (`wait=False` raises
+   `RunLockedError`). A `flock` belongs to one open file, so a process that takes it
+   twice deadlocks itself; `convert_many` therefore takes it once and runs each PDF
+   through `pipeline.run`, never through `convert()`. The pid written into the file is
+   only for the message: a file naming an exited pid does not block. Checked live on
+   the hand run: a second `gdi convert --no-wait` during a batch exited 1 naming the
+   batch's pid, and wrote nothing.
 5. **MLX's buffer cache is bounded.** Freed buffers stay in MLX's cache and can grow
    across a long document. Set **`mx.set_cache_limit(1 << 30)`** (1 GiB, chosen in
    S4: MLX's default limit is 16.32 GB, above the working set, so it bounds nothing; a
@@ -1054,7 +1102,10 @@ fastest configuration" — and by quality per second through the eval (§8.1).
    `TestImportCost` now fails any test or library module that imports `docling`,
    `torch`, `mlx`, `mlx_vlm` or `transformers` at module level. **Re-measured on PR 5
    (2026-10-27):** 9.3–9.4 s over three forced runs; `test_chunk.py`'s in-test import
-   of `HybridChunker` (which brings transformers) is most of the +0.4 s.
+   of `HybridChunker` (which brings transformers) is most of the +0.4 s. **Re-measured on PR 6
+   (2026-10-27):** 11.1–11.4 s over three forced runs (334 tests). About 1 s is
+   pytest (8.3 → 9.3 s): the run-lock tests start real holder processes and one waits
+   out a 0.3 s hold; the rest is linting and type-checking the new modules.
 
 ## 4. Phase 0 — spikes (before any production code)
 
@@ -1300,6 +1351,16 @@ Docling objects. Notes:
 - KVP validation failure is **not** a run failure — `kvp.json` records `"valid": false`
   and the raw output.
 - Progress: per-page progress on stderr; `--quiet` silences it.
+  **Implemented in PR 6** through `logging`: the library logs under the
+  `granite_document_intelligence` logger and adds no handler, so a library user sees
+  nothing unless they configure one. `gdi` installs a stderr handler at INFO, or
+  WARNING with `--quiet`, so warnings, failures and the summary still print. Per-page
+  lines come from Docling's **public** `progress_callback` on `DocumentConverter.convert`
+  (`PageCompletedProgress`, docling 2.143.1); the chart stage and Phase B log one line
+  per chart and per KVP page. Every message carries counts, paths and errors, never page
+  text (§3.13 rule 5). **Not ours to silence:** torch, transformers and mlx-vlm write
+  their own warnings and weight-loading progress bars to stderr, and `--quiet` does not
+  reach them (seen on the PR 6 hand run).
 
 ## 8. Tests
 
@@ -1715,7 +1776,7 @@ the only record of them):
 | 3 | merged 2026-10-27 (#4, `6138255`). Moved suites 68 → 68 tests; actions SHA-pinned. After merge, with the user's confirmation: interim description and the 18 §9.2 topics set, Dependabot alerts on. The old Granite 4.2 bf16 cache entry was not present on the development Mac |
 | 4 | merged 2026-10-27 (#6, `468fa30`). Our own chart stage replaces Docling's (decided with the user 2026-10-27, §3.2); page-level resume failed its feasibility gate and is deferred (§3.14 rule 7); floors filled in (§2.2); gate 8.6–9.0 s; Pillow 13.0.0 and certifi moved past their advisories, Pillow made eval-gated (§2.2). After merge: 0 open Dependabot alerts on `main` |
 | 5 | merged 2026-10-27 (#7, `9059e74`). Phase B shares the chart stage's Granite Vision (§3.8); Docling's KVP prompt copied under MIT (`THIRD_PARTY_NOTICES.md`, §3.3); schema checks in `kvp.py` (§3.13 rule 8); `Chunk.kind` dropped (§3.9); `referencing` declared (§2.2); W-9 KVP 10/11 and GAO-07-631 cover 3/4, both matching S6; gate 9.3–9.4 s |
-| 6 | **next** — start from Appendix B |
+| 6 | **PR open** (`feat/cli-batch`). `convert_many`, `batch`, `safety`, `runlock`, `gdi convert`; Phase A's converter stays per PDF (decided with the user 2026-10-27, §3.8); output overlaps refused up front and limits kept out of resume (§3.8); progress through `logging` and Docling's public `progress_callback` (§7). Hand run on the whole public corpus (`HF_HUB_OFFLINE=1`, socket guard, 0 network attempts): 6/6 done in 425 s, peak 6.68 GB; an immediate re-run skipped 6/6 in 0.5 s; with each schema, W-9 KVP 10/11, GAO-07-631 cover 3/4 and the adversarial PO 4/5 with no injected value, all matching S6/PR 5. Warnings were the known set: three capped pages, the Census p. 2 loop and the GAO-08-14 pie summary. **For PR 7:** `adversarial.pdf` p. 2 did not loop (1,203 tokens, a clean 60-row table), so its manifest's `loop_pages: [2]` pass rule fails at the shipped settings. Gate 11.1–11.4 s |
 
 ## 11. Release
 

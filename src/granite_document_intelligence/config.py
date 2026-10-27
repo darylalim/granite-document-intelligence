@@ -77,6 +77,10 @@ KVP_MAX_SCHEMA_BYTES = 256 * 1024
 CHUNK_TOKENS_DEFAULT = 512
 CHUNK_TOKENS_MIN = 64
 CHUNK_TOKENS_MAX = 8192
+# Resource limits on an untrusted PDF, checked before conversion (§3.10); 200 MB
+# was the old app's upload cap.
+MAX_PAGES_DEFAULT = 500
+MAX_FILE_MB_DEFAULT = 200
 # MLX's default cache limit (16.32 GB) bounds nothing on 16 GB; 1 GiB was as
 # fast as the default and bounds the cache well inside the ceiling (S4).
 MLX_CACHE_LIMIT_BYTES = 1 << 30
