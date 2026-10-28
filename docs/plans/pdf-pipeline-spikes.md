@@ -17,6 +17,7 @@ Spike scripts live in the session scratchpad, never in the repo.
 | S6 | **Pass**: no measurable regression on 10 charts (69 cells) and 3 KVP pages (20 fields); identical chart values and byte-identical KVP output; bf16 alone peaks at 10.12 GB | yes: S6 settled; bf16 ruled out on memory too; multi-panel pairing needs chart boxes in the manifests; rule 4 pairs numbers with labels; the capped page loses charts; the mangled-header comma case; summaries contradicting their CSV (§2, §8.2, §12, §17) |
 | S7 | **Pass**: granite-docling is not as good, so Granite Vision keeps the chart role. Its page DocTags carried no `<chart>` table on 16 pages; on the crop it matched 12 of 69 cells against Granite Vision's 37. Summaries and CSVs reach the chunks | yes: `images_scale` stays 1.0, since any other value corrupts every box; S11 sweeps `VlmConvertOptions.scale` and our own chart-crop scale (2× crops: 37 → 43 cells); §3.9's fallback chunk dropped (§3.9, §3.10, §3.11, §3.14, §4, §12, §17) |
 | S11 | **Pass**: one change. Our own 1.5× chart crop for Granite Vision (37 → 43 of 69 cells, +2.3 s per chart). Page batch size is inert on MLX, true batching (−18%) needs an engine patch, overlap has ≤ 1.2% to gain, and page scale is a quality knob, not a speed one (2.0 stays). Neither capped-page fix pays, and the preset caps 3 of 52 corpus pages | yes: batching, scale, crop and timing settled; the in-generation stopper corrected; three capped pages; invented pages; image-only stand-in recovers at 1.5 (§3.10, §3.11, §3.14, §12, §17) |
+| PR 7 re-runs | **S6, S7 and S11 confirmed** through `eval/score.py` at the shipped settings; no verdict reversed | no reversal; the eval's own rules are amended in the plan (§3.11, §8.1, §8.2) |
 | Task C | **Public tier done except the scan** (branch `test/eval-corpus`, PR 2): 6 PDFs, 13 charts, 6 tables, 3 KVP cases; the scan and the private tier wait on the user | yes: §4.1 status and the scan's pages; the text layer can disagree with the page (§8.2 rule 2); en-dash minus, significance asterisks, row pairing (§8.2 rule 3); the expected-output format (§8.1) |
 
 **Approved by the user (2026-10-25), with the scanned halves carved out.** The design
@@ -1801,3 +1802,107 @@ accepted the +2.3 s per chart for +6 of 69 cells. Docling's crop remains the fal
   - The image-only row records page scale 1.5's partial recovery on the stand-in.
   - The mis-transcription row adds the invented pages S11 found and a check that sees
     them.
+
+## PR 7 — S6, S7 and S11 re-run through `eval/score.py` (2026-10-27)
+
+**Question.** §4 asked PR 7 to re-run S6, S7 and the S11 sweep through the scorer
+and record whether each verdict still holds. The spikes scored with scratchpad
+scripts against Docling's crops. These runs go through the shipped pipeline, with
+our 1.5× crop, as `gdi convert` does.
+
+**Environment.** The project lock at PR 7: docling 2.143.1, docling-core 2.105.0,
+mlx 0.32.4, mlx-vlm 0.7.10, transformers 5.21.0, tokenizers 0.23.3, torch 2.14.1,
+pypdfium2 5.14.0, pillow 13.0.0. Models: the production models directory. M2 Pro,
+16 GB, macOS 27.0.1, AC power. Corpus: `test/eval-corpus` at `44a5321`, every SHA-256
+checked, with `hidden_text` added to the Census manifest on a scratch copy (plan
+§8.2 rule 2). Every run used `HF_HUB_OFFLINE=1` with every connect refused, and made 0
+network attempts.
+
+**What was run.** Each variant patches one setting from a scratchpad driver, then
+hands the run to `score.py` (one run each). The baseline is the shipped
+configuration's median-of-three run, `eval/results/2026-10-27-24125f5-baseline.json`.
+Each variant's results file is committed beside it as
+`eval/results/2026-10-27-f419eb1-<variant>.json`. The crop and chart-model variants
+ran on the two PDFs with charts, GAO-07-631 and the GAO-08-14 excerpt; the rest ran
+on the whole public corpus.
+
+**Scoring differs from the spikes' in one way that moves the chart numbers.**
+GAO-07-631 Figure 9's merged picture is now scored against **both** panels (§8.2
+rule 3, as amended), so every configuration that reads it gains Figure 9's second
+panel, 3 cells. S11's 43 of 69 at the 1.5× crop is the baseline's 46.
+
+**S6 — 8-bit vs bf16: confirmed.**
+
+| | 8-bit (baseline) | bf16 |
+|---|---|---|
+| Chart cells / charts found | 46 / 69, 11 / 13 | 46 / 69, 11 / 13 |
+| KVP: W-9, GAO cover, adversarial | 10/11, 3/4, 4/5 | 10/11, 3/4, 4/5 (same misses) |
+| Summary numbers unsupported / pair errors | 12 / 108, 4 | 7 / 99, 4 |
+| Text, tables, headings, capped pages | — | identical |
+| Chart time (median) | 8.28 s | 13.98 s |
+| Peak memory | 6.68 GB | **10.26 GB** |
+
+Every scored chart and KVP value is the same, and the pie's four misattributed
+slices are in both. The summaries differ in wording: bf16 states fewer numbers
+and fewer unsupported ones. The difference is in a model-written text that rule 4
+measures as a rate, on 10 summaries, and the dominant error, the pie's pair
+errors, is identical. That is not a measurable regression under §8.2 rule 10.
+bf16 also exceeds the 10 GB ceiling and is 1.7× slower per chart. **The bf16
+source can now be deleted** (§12).
+
+**S7 — granite-docling for chart tables: confirmed, more strongly.** On our 1.5×
+crop, granite-docling's "Convert chart to table." matched **3 of 69** cells against
+Granite Vision's 46. S7 found 12 of 69 on Docling's 72 dpi crop and fewer at 2×, so
+the sharper crop does not rescue it. It was faster (2.0 s per chart, with no
+summary to write). The page arm was not re-run: Phase A is unchanged since S7, and
+the shipped pipeline never asks granite-docling for a chart table.
+
+**S11 — chart crop: confirmed.**
+
+| Granite Vision input | Chart cells | Charts found | Chart time (median) | Peak |
+|---|---|---|---|---|
+| Docling's crop (the fallback) | 38 / 69 | 10 | 7.32 s | 6.51 GB |
+| our render, 1.0 | 42 / 69 | 11 | 7.97 s | 6.51 GB |
+| **our render, 1.5 (shipped)** | **46 / 69** | 11 | **8.28 s** | 6.68 GB |
+| our render, 2.0 | 46 / 69 | 11 | 10.13 s | 6.68 GB |
+
+1.5 buys every cell 2.0 does for 1.85 s less per chart, as S11 found (37 / 43 / 43
+there for Docling / 1.5 / 2.0). The ordering holds at every point.
+
+**S11 — page scale: confirmed; 2.0 stays.**
+
+| Whole public corpus | 1.5 | **2.0 (shipped)** | 2.5 |
+|---|---|---|---|
+| Text similarity / word F1 (mean per page) | 0.788 / 0.871 | **0.814 / 0.889** | 0.803 / 0.876 |
+| Reading order | 0.744 | 0.689 | 0.670 |
+| Headings as headings / in text (of 27) | 14 / 26 | 12 / 22 | 10 / 21 |
+| Table cells by row order / found (%) | 41.3 / 43.8 | 45.0 / 44.2 | 47.1 / 46.5 |
+| Chart cells / charts found | 49 / 69, 12 | 46 / 69, 11 | 40 / 69, 9 |
+| Summary pair errors | 6 | 4 | 4 |
+| Capped pages | none | GAO-07-631 p24, GAO-08-1044 p2, W-9 | GAO-07-631 p24, Census p2 |
+| Phase A s/page | 4.61 | 5.66 | 5.94 |
+
+S11's per-page findings reproduce exactly. At 1.5, GAO-07-631 p24 comes back
+**invented**: "The Army's 2015-2016 budget for the year ended December 31, 2015, is
+$1,000 million", repeated. Figure 7 is "found" from that page, which is the whole
+of 1.5's chart lead. p16 becomes the repeated "not available" text (similarity
+0.52, against 0.999 at 2.0), and p42 loses its text (0.00 against 0.83). 2.5 caps
+Census p2 and loses three charts. Judged by §8.2 rule 1's tolerances against the
+baseline, 1.5 would fail on text similarity, word F1, table cells and summary pair
+errors, and 2.5 on charts and text. No scale dominates, and 2.0 keeps the best text.
+1.5's speed comes from its degenerate pages, not from the scale (S11). A run's
+"no capped page" is not a clean bill either, because an invented page caps nothing.
+
+**Not re-run:** page batch size, true batching and CPU–GPU overlap. They are speed
+questions with no eval score to move, and S11 found batch size inert with
+byte-identical output. Nothing in Phase A changed since then.
+
+**Verdict.** All three verdicts hold at the shipped settings: 8-bit Granite Vision
+(S6), Granite Vision for charts (S7), our 1.5× crop and page scale 2.0 (S11). Per
+§8.2 rule 10, these are statements about this corpus: 6 PDFs, 13 charts, 69 cells,
+5 tables, 3 KVP pages.
+
+**Found on the way, for the plan.** The scorer measures an invented page and a lost
+page alike: page 24's similarity is 0.32 invented and 0.02 lost. §17's per-page
+similarity warning would see both as "below 0.75". Telling them apart still needs
+the cap flag that only the lost page carries.

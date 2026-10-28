@@ -60,3 +60,6 @@ combine-as-imports = true
 
 [tool.ty.environment]
 python-version = "3.12"
+# eval/score.py imports eval/matching.py as a sibling script, the way `python
+# eval/score.py` runs it; tests/test_score.py puts eval/ on the path to match.
+extra-paths = ["eval"]
