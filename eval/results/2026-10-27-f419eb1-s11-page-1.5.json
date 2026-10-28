@@ -1,0 +1,1041 @@
+{
+  "format": 1,
+  "id": "2026-10-27-f419eb1-s11-page-1.5",
+  "label": "s11-page-1.5",
+  "note": "S11 re-run: granite-docling VlmConvertOptions.scale 1.5 (shipped 2.0); images_scale asserted 1.0. Whole public corpus. One run each, HF_HUB_OFFLINE=1 with every connect refused (0 attempts); corpus as the baseline's. Not compared with the baseline file: a subset's totals are not the corpus's.",
+  "date": "2026-10-27",
+  "git_sha": "f419eb1",
+  "machine": {
+    "model": "Mac14,10",
+    "chip": "Apple M2 Pro",
+    "memory_gb": 16,
+    "macos": "27.0.1",
+    "power": "AC"
+  },
+  "repeats": 1,
+  "versions": {
+    "granite-document-intelligence": "0.6.0",
+    "docling": "2.143.1",
+    "docling-core": "2.105.0",
+    "docling-ibm-models": "4.0.4",
+    "docling-parse": "7.23.1",
+    "mlx": "0.32.4",
+    "mlx-vlm": "0.7.10",
+    "transformers": "5.21.0",
+    "tokenizers": "0.23.3",
+    "torch": "2.14.1",
+    "huggingface-hub": "1.33.0",
+    "pypdfium2": "5.14.0",
+    "pillow": "13.0.0"
+  },
+  "models": {
+    "manifest": {
+      "models": {
+        "ibm-granite/granite-docling-258M-mlx": {
+          "revision": "e9939db25d2f296c8678d0491c4609a8c596c50a",
+          "folder": "ibm-granite--granite-docling-258M-mlx"
+        },
+        "docling-project/DocumentFigureClassifier-v2.5": {
+          "revision": "f859dfbff5c9916cd996942d4b0db7fa25808220",
+          "folder": "docling-project--DocumentFigureClassifier-v2.5"
+        }
+      },
+      "conversion": {
+        "source": "ibm-granite/granite-vision-4.1-4b",
+        "source_revision": "dd48e97503de471803850df70843cf9eb5da8712",
+        "mlx_vlm": "0.7.10",
+        "q_bits": 8,
+        "folder": "local--granite-vision-4.1-4b-8bit",
+        "stripped": {
+          "files": [
+            "configuration.py",
+            "downsampling.py",
+            "modeling.py",
+            "processing.py"
+          ],
+          "auto_map": [
+            "config.json:auto_map",
+            "preprocessor_config.json:auto_map",
+            "processor_config.json:image_processor.auto_map"
+          ]
+        }
+      }
+    },
+    "granite_vision": "local/granite-vision-4.1-4b-8bit",
+    "embedding_tokenizer": {
+      "repo_id": "ibm-granite/granite-embedding-english-r2",
+      "revision": "47ea694b257b703fee9253d75c2b1f2985180498"
+    }
+  },
+  "public": {
+    "pdfs": {
+      "adversarial": {
+        "page_count": 2,
+        "page_count_ok": true,
+        "charts": {},
+        "chart_false_positives": [],
+        "summaries": {},
+        "tables": {
+          "p002-1": {
+            "predicted": "table-001",
+            "cells": 240,
+            "matched": 240,
+            "all_cells": 244,
+            "found": 244,
+            "headers": 4,
+            "headers_matched": 4
+          }
+        },
+        "kvp": {
+          "fields": 5,
+          "matched": 4,
+          "missed": [
+            "order_date"
+          ],
+          "valid": true
+        },
+        "pages": {
+          "1": {
+            "similarity": 0.9894,
+            "word_f1": 0.9831,
+            "reading_order": 1.0
+          },
+          "2": {
+            "similarity": 0.8983,
+            "word_f1": 0.9461,
+            "reading_order": null
+          }
+        },
+        "headings": {
+          "expected": 2,
+          "found": 2,
+          "in_text": 2,
+          "missing": []
+        },
+        "chunks": {
+          "count": 7,
+          "over_limit": 0,
+          "page_claims": 7,
+          "page_claims_unsupported": 0,
+          "headings_in_breadcrumbs": 2
+        },
+        "capped_pages": [],
+        "looped_pages": [],
+        "warnings": 0
+      },
+      "census-p60-282-excerpt": {
+        "page_count": 4,
+        "page_count_ok": true,
+        "charts": {},
+        "chart_false_positives": [],
+        "summaries": {},
+        "tables": {
+          "p003-1": {
+            "predicted": "table-001",
+            "cells": 405,
+            "matched": 343,
+            "all_cells": 416,
+            "found": 361,
+            "headers": 11,
+            "headers_matched": 1
+          },
+          "p004-1": {
+            "predicted": "table-002",
+            "cells": 56,
+            "matched": 52,
+            "all_cells": 67,
+            "found": 53,
+            "headers": 11,
+            "headers_matched": 1
+          },
+          "p002-1": {
+            "predicted": null,
+            "cells": 577,
+            "matched": 0,
+            "all_cells": 593,
+            "found": 0,
+            "headers": 16,
+            "headers_matched": 0
+          }
+        },
+        "kvp": null,
+        "pages": {
+          "1": {
+            "similarity": 0.6915,
+            "word_f1": 0.8026,
+            "reading_order": 0.9076923076923077
+          },
+          "2": {
+            "similarity": 0.2116,
+            "word_f1": 0.1315,
+            "reading_order": null
+          },
+          "3": {
+            "similarity": 0.6414,
+            "word_f1": 0.938,
+            "reading_order": -0.3333333333333333
+          },
+          "4": {
+            "similarity": 0.7941,
+            "word_f1": 0.9251,
+            "reading_order": 0.42857142857142855
+          }
+        },
+        "headings": {
+          "expected": 4,
+          "found": 3,
+          "in_text": 3,
+          "missing": [
+            "Highlights"
+          ]
+        },
+        "chunks": {
+          "count": 17,
+          "over_limit": 0,
+          "page_claims": 19,
+          "page_claims_unsupported": 1,
+          "headings_in_breadcrumbs": 2
+        },
+        "capped_pages": [],
+        "looped_pages": [],
+        "warnings": 0
+      },
+      "gao-07-631": {
+        "page_count": 42,
+        "page_count_ok": true,
+        "charts": {
+          "p012-1": {
+            "predicted": "chart-001",
+            "cells": 11,
+            "matched": 4,
+            "headers": 2,
+            "headers_matched": 1,
+            "transposed": false
+          },
+          "p013-1": {
+            "predicted": "chart-002",
+            "cells": 6,
+            "matched": 6,
+            "headers": 2,
+            "headers_matched": 0,
+            "transposed": false
+          },
+          "p014-1": {
+            "predicted": "chart-003",
+            "cells": 6,
+            "matched": 6,
+            "headers": 2,
+            "headers_matched": 0,
+            "transposed": false
+          },
+          "p015-1": {
+            "predicted": "chart-004",
+            "cells": 6,
+            "matched": 6,
+            "headers": 4,
+            "headers_matched": 4,
+            "transposed": false
+          },
+          "p017-1": {
+            "predicted": "chart-005",
+            "cells": 6,
+            "matched": 6,
+            "headers": 2,
+            "headers_matched": 1,
+            "transposed": false
+          },
+          "p018-1": {
+            "predicted": "chart-006",
+            "cells": 12,
+            "matched": 2,
+            "headers": 3,
+            "headers_matched": 2,
+            "transposed": false
+          },
+          "p024-1": {
+            "predicted": "chart-007",
+            "cells": 3,
+            "matched": 3,
+            "headers": 2,
+            "headers_matched": 1,
+            "transposed": false
+          },
+          "p024-2": {
+            "predicted": "chart-007",
+            "cells": 3,
+            "matched": 3,
+            "headers": 2,
+            "headers_matched": 1,
+            "transposed": false
+          },
+          "p025-1": {
+            "predicted": "chart-008",
+            "cells": 3,
+            "matched": 3,
+            "headers": 2,
+            "headers_matched": 1,
+            "transposed": false
+          },
+          "p025-2": {
+            "predicted": "chart-009",
+            "cells": 3,
+            "matched": 3,
+            "headers": 2,
+            "headers_matched": 1,
+            "transposed": false
+          },
+          "p026-1": {
+            "predicted": "chart-010",
+            "cells": 3,
+            "matched": 3,
+            "headers": 2,
+            "headers_matched": 1,
+            "transposed": false
+          },
+          "p026-2": {
+            "predicted": null,
+            "cells": 3,
+            "matched": 0,
+            "headers": 2,
+            "headers_matched": 0,
+            "transposed": false
+          }
+        },
+        "chart_false_positives": [],
+        "summaries": {
+          "chart-001": {
+            "numbers": 17,
+            "unsupported": 1,
+            "apart": 2,
+            "pair_errors": 0,
+            "unsupported_values": [
+              "120"
+            ]
+          },
+          "chart-002": {
+            "numbers": 3,
+            "unsupported": 0,
+            "apart": 2,
+            "pair_errors": 0,
+            "unsupported_values": []
+          },
+          "chart-003": {
+            "numbers": 9,
+            "unsupported": 0,
+            "apart": 6,
+            "pair_errors": 0,
+            "unsupported_values": []
+          },
+          "chart-004": {
+            "numbers": 16,
+            "unsupported": 0,
+            "apart": 0,
+            "pair_errors": 0,
+            "unsupported_values": []
+          },
+          "chart-005": {
+            "numbers": 17,
+            "unsupported": 0,
+            "apart": 0,
+            "pair_errors": 0,
+            "unsupported_values": []
+          },
+          "chart-006": {
+            "numbers": 15,
+            "unsupported": 7,
+            "apart": 4,
+            "pair_errors": 0,
+            "unsupported_values": [
+              "85",
+              "90",
+              "85",
+              "90",
+              "130",
+              "100",
+              "125"
+            ]
+          },
+          "chart-007": {
+            "numbers": 2,
+            "unsupported": 2,
+            "apart": 0,
+            "pair_errors": 0,
+            "unsupported_values": [
+              "40",
+              "56"
+            ]
+          },
+          "chart-008": {
+            "numbers": 3,
+            "unsupported": 0,
+            "apart": 0,
+            "pair_errors": 0,
+            "unsupported_values": []
+          },
+          "chart-009": {
+            "numbers": 3,
+            "unsupported": 0,
+            "apart": 2,
+            "pair_errors": 0,
+            "unsupported_values": []
+          },
+          "chart-010": {
+            "numbers": 9,
+            "unsupported": 2,
+            "apart": 2,
+            "pair_errors": 2,
+            "unsupported_values": [
+              "9",
+              "35"
+            ]
+          }
+        },
+        "tables": {
+          "p020-1": {
+            "predicted": "table-003",
+            "cells": 75,
+            "matched": 44,
+            "all_cells": 80,
+            "found": 75,
+            "headers": 5,
+            "headers_matched": 1
+          },
+          "p023-1": {
+            "predicted": "table-004",
+            "cells": 35,
+            "matched": 35,
+            "all_cells": 42,
+            "found": 36,
+            "headers": 7,
+            "headers_matched": 1
+          }
+        },
+        "kvp": {
+          "fields": 4,
+          "matched": 3,
+          "missed": [
+            "addressee"
+          ],
+          "valid": true
+        },
+        "pages": {
+          "1": {
+            "similarity": 0.8667,
+            "word_f1": 1.0,
+            "reading_order": 1.0
+          },
+          "2": {
+            "similarity": 0.8427,
+            "word_f1": 0.9875,
+            "reading_order": 0.0
+          },
+          "3": {
+            "similarity": 0.9211,
+            "word_f1": 0.9617,
+            "reading_order": null
+          },
+          "4": {
+            "similarity": 0.9736,
+            "word_f1": 0.9926,
+            "reading_order": null
+          },
+          "5": {
+            "similarity": 0.5239,
+            "word_f1": 0.6874,
+            "reading_order": 1.0
+          },
+          "6": {
+            "similarity": 0.9852,
+            "word_f1": 0.9964,
+            "reading_order": 1.0
+          },
+          "7": {
+            "similarity": 0.9996,
+            "word_f1": 0.9965,
+            "reading_order": 1.0
+          },
+          "8": {
+            "similarity": 0.9979,
+            "word_f1": 0.9899,
+            "reading_order": 1.0
+          },
+          "9": {
+            "similarity": 0.9979,
+            "word_f1": 0.9931,
+            "reading_order": 1.0
+          },
+          "10": {
+            "similarity": 0.9906,
+            "word_f1": 1.0,
+            "reading_order": 1.0
+          },
+          "11": {
+            "similarity": 0.9404,
+            "word_f1": 1.0,
+            "reading_order": 0.0
+          },
+          "12": {
+            "similarity": 0.5793,
+            "word_f1": 0.7981,
+            "reading_order": 0.3333333333333333
+          },
+          "13": {
+            "similarity": 0.6974,
+            "word_f1": 0.7983,
+            "reading_order": null
+          },
+          "14": {
+            "similarity": 0.8534,
+            "word_f1": 0.9097,
+            "reading_order": 1.0
+          },
+          "15": {
+            "similarity": 0.8045,
+            "word_f1": 0.9104,
+            "reading_order": 0.0
+          },
+          "16": {
+            "similarity": 0.52,
+            "word_f1": 0.6715,
+            "reading_order": 1.0
+          },
+          "17": {
+            "similarity": 0.8198,
+            "word_f1": 0.875,
+            "reading_order": 1.0
+          },
+          "18": {
+            "similarity": 0.8023,
+            "word_f1": 0.8794,
+            "reading_order": 1.0
+          },
+          "19": {
+            "similarity": 0.8623,
+            "word_f1": 0.9878,
+            "reading_order": 0.3333333333333333
+          },
+          "20": {
+            "similarity": 0.8964,
+            "word_f1": 0.9579,
+            "reading_order": 1.0
+          },
+          "21": {
+            "similarity": 0.913,
+            "word_f1": 0.9531,
+            "reading_order": 1.0
+          },
+          "22": {
+            "similarity": 0.844,
+            "word_f1": 1.0,
+            "reading_order": 0.2
+          },
+          "23": {
+            "similarity": 0.8892,
+            "word_f1": 0.973,
+            "reading_order": 0.8666666666666667
+          },
+          "24": {
+            "similarity": 0.3195,
+            "word_f1": 0.2887,
+            "reading_order": 1.0
+          },
+          "25": {
+            "similarity": 0.1026,
+            "word_f1": 0.2097,
+            "reading_order": null
+          },
+          "26": {
+            "similarity": 0.6482,
+            "word_f1": 0.7847,
+            "reading_order": 1.0
+          },
+          "27": {
+            "similarity": 0.9996,
+            "word_f1": 0.9962,
+            "reading_order": 1.0
+          },
+          "28": {
+            "similarity": 0.943,
+            "word_f1": 1.0,
+            "reading_order": 0.3333333333333333
+          },
+          "29": {
+            "similarity": 0.9993,
+            "word_f1": 1.0,
+            "reading_order": null
+          },
+          "30": {
+            "similarity": 0.9989,
+            "word_f1": 0.9969,
+            "reading_order": null
+          },
+          "31": {
+            "similarity": 0.9281,
+            "word_f1": 0.9988,
+            "reading_order": 0.6
+          },
+          "32": {
+            "similarity": 0.7517,
+            "word_f1": 0.8329,
+            "reading_order": 1.0
+          },
+          "33": {
+            "similarity": 0.8373,
+            "word_f1": 1.0,
+            "reading_order": -0.2
+          },
+          "34": {
+            "similarity": 0.8266,
+            "word_f1": 1.0,
+            "reading_order": 0.14285714285714285
+          },
+          "35": {
+            "similarity": 0.8192,
+            "word_f1": 0.8966,
+            "reading_order": 1.0
+          },
+          "36": {
+            "similarity": 0.9646,
+            "word_f1": 1.0,
+            "reading_order": 1.0
+          },
+          "37": {
+            "similarity": 1.0,
+            "word_f1": 1.0,
+            "reading_order": 1.0
+          },
+          "38": {
+            "similarity": 1.0,
+            "word_f1": 1.0,
+            "reading_order": 1.0
+          },
+          "39": {
+            "similarity": 0.9877,
+            "word_f1": 0.9946,
+            "reading_order": 1.0
+          },
+          "40": {
+            "similarity": 0.7587,
+            "word_f1": 0.8615,
+            "reading_order": 1.0
+          },
+          "41": {
+            "similarity": 0.6618,
+            "word_f1": 0.8393,
+            "reading_order": 1.0
+          },
+          "42": {
+            "similarity": 0.0,
+            "word_f1": 0.0,
+            "reading_order": null
+          }
+        },
+        "headings": {
+          "expected": 12,
+          "found": 5,
+          "in_text": 12,
+          "missing": [
+            "O&M and Services Contract Costs Have Increased Significantly",
+            "Increased Military Operations Were the Primary Reason for O&M Cost Growth",
+            "Data Are Insufficient to Determine Whether Increased Services Contracting Has Exacerbated O&M Cost Growth",
+            "A-76 Public/Private Competition Data Indicate Outsourcing Decisions Were Cost-effective but Data Limitations Exist",
+            "Different Perspectives Exist on the Benefits and Concerns Associated with Increased Contracting for Support Services",
+            "Scope and Methodology",
+            "GAO Contact and Staff Acknowledgments"
+          ]
+        },
+        "chunks": {
+          "count": 54,
+          "over_limit": 0,
+          "page_claims": 75,
+          "page_claims_unsupported": 3,
+          "headings_in_breadcrumbs": 4
+        },
+        "capped_pages": [],
+        "looped_pages": [
+          40
+        ],
+        "warnings": 3
+      },
+      "gao-08-1044-excerpt": {
+        "page_count": 3,
+        "page_count_ok": true,
+        "charts": {},
+        "chart_false_positives": [],
+        "summaries": {},
+        "tables": {},
+        "kvp": null,
+        "pages": {
+          "1": {
+            "similarity": 0.8014,
+            "word_f1": 1.0,
+            "reading_order": 1.0
+          },
+          "2": {
+            "similarity": 0.6218,
+            "word_f1": 0.8117,
+            "reading_order": 0.8571428571428571
+          },
+          "3": {
+            "similarity": 0.9832,
+            "word_f1": 0.9918,
+            "reading_order": 1.0
+          }
+        },
+        "headings": {
+          "expected": 3,
+          "found": 1,
+          "in_text": 3,
+          "missing": [
+            "EPA Needs to Better Control Harmful U.S. Exports through Stronger Enforcement and More Comprehensive Regulation",
+            "China and Hong Kong Define the Used Electronics Trade in Southeast Asia"
+          ]
+        },
+        "chunks": {
+          "count": 2,
+          "over_limit": 0,
+          "page_claims": 4,
+          "page_claims_unsupported": 0,
+          "headings_in_breadcrumbs": 1
+        },
+        "capped_pages": [],
+        "looped_pages": [],
+        "warnings": 0
+      },
+      "gao-08-14-excerpt": {
+        "page_count": 2,
+        "page_count_ok": true,
+        "charts": {
+          "p002-1": {
+            "predicted": "chart-001",
+            "cells": 4,
+            "matched": 4,
+            "headers": 2,
+            "headers_matched": 0,
+            "transposed": false
+          }
+        },
+        "chart_false_positives": [],
+        "summaries": {
+          "chart-001": {
+            "numbers": 4,
+            "unsupported": 0,
+            "apart": 0,
+            "pair_errors": 4,
+            "unsupported_values": []
+          }
+        },
+        "tables": {},
+        "kvp": null,
+        "pages": {
+          "1": {
+            "similarity": 0.7714,
+            "word_f1": 0.9882,
+            "reading_order": 0.3333333333333333
+          },
+          "2": {
+            "similarity": 0.6824,
+            "word_f1": 0.8066,
+            "reading_order": 1.0
+          }
+        },
+        "headings": {
+          "expected": 2,
+          "found": 1,
+          "in_text": 2,
+          "missing": [
+            "Increasing Globalization of Petroleum Products Markets, Tightening Refining Demand and Supply Balance, and Other Trends Have Implications for U.S. Energy Supply, Prices, and Price Volatility"
+          ]
+        },
+        "chunks": {
+          "count": 3,
+          "over_limit": 0,
+          "page_claims": 3,
+          "page_claims_unsupported": 0,
+          "headings_in_breadcrumbs": 1
+        },
+        "capped_pages": [],
+        "looped_pages": [],
+        "warnings": 1
+      },
+      "irs-w9-filled": {
+        "page_count": 1,
+        "page_count_ok": true,
+        "charts": {},
+        "chart_false_positives": [],
+        "summaries": {},
+        "tables": {},
+        "kvp": {
+          "fields": 11,
+          "matched": 10,
+          "missed": [
+            "name"
+          ],
+          "valid": true
+        },
+        "pages": {
+          "1": {
+            "similarity": 0.7038,
+            "word_f1": 0.8538,
+            "reading_order": 0.9259259259259259
+          }
+        },
+        "headings": {
+          "expected": 6,
+          "found": 4,
+          "in_text": 6,
+          "missing": [
+            "Taxpayer Identification Number (TIN)",
+            "Certification"
+          ]
+        },
+        "chunks": {
+          "count": 8,
+          "over_limit": 0,
+          "page_claims": 8,
+          "page_claims_unsupported": 0,
+          "headings_in_breadcrumbs": 4
+        },
+        "capped_pages": [],
+        "looped_pages": [
+          1
+        ],
+        "warnings": 1
+      }
+    },
+    "totals": {
+      "chart_cells": [
+        49,
+        69
+      ],
+      "chart_cells_pct": 71.01,
+      "chart_headers_pct": 44.83,
+      "charts_found": 12,
+      "charts_expected": 13,
+      "chart_false_positives": 0,
+      "summary_numbers": 98,
+      "summary_unsupported_pct": 12.24,
+      "summary_pair_errors": 6,
+      "table_cells": [
+        474,
+        1148
+      ],
+      "table_cells_pct": 41.29,
+      "table_cells_found": [
+        525,
+        1198
+      ],
+      "table_cells_found_pct": 43.82,
+      "tables_found": 4,
+      "tables_expected": 5,
+      "kvp_fields_matched": 13,
+      "kvp_fields": 15,
+      "kvp_schema_valid": 2,
+      "kvp_documents": 2,
+      "headings_found": 14,
+      "headings_in_text": 26,
+      "headings_expected": 27,
+      "page_counts_ok": 5,
+      "text_pages": 52,
+      "text_similarity": 0.7879,
+      "word_f1": 0.8705,
+      "reading_order": 0.7438,
+      "chunks_over_limit": 0,
+      "chunk_pages_unsupported_pct": 3.67
+    },
+    "timings": {
+      "adversarial": {
+        "pages": 2,
+        "runs": 1,
+        "total_s": 22.857057666999026,
+        "phase_a_s": 14.23341900000014,
+        "phase_a_load_s": 5.7507404579992,
+        "granite_vision_load_s": 1.9749323750002077,
+        "chart_s": [],
+        "kvp_page_s": [
+          6.207601125002839
+        ],
+        "peak_gb": 6.514625404,
+        "spread_pct": 0.0
+      },
+      "census-p60-282-excerpt": {
+        "pages": 4,
+        "runs": 1,
+        "total_s": 51.61810208300085,
+        "phase_a_s": 51.31849987500027,
+        "phase_a_load_s": 0.8492045419989154,
+        "granite_vision_load_s": null,
+        "chart_s": [],
+        "kvp_page_s": [],
+        "peak_gb": 1.611061606,
+        "spread_pct": 0.0
+      },
+      "gao-07-631": {
+        "pages": 42,
+        "runs": 1,
+        "total_s": 240.10800416599886,
+        "phase_a_s": 135.1483162500008,
+        "phase_a_load_s": 0.7065910420024011,
+        "granite_vision_load_s": 1.9046912500016333,
+        "chart_s": [
+          14.07564654199814,
+          8.079300666999188,
+          8.410029291997489,
+          9.298143042000447,
+          7.903734915998939,
+          18.5059399999991,
+          7.947435624999343,
+          5.752043042000878,
+          6.586845375000848,
+          10.606745541001146
+        ],
+        "kvp_page_s": [
+          5.393946542000776
+        ],
+        "peak_gb": 6.68327397,
+        "spread_pct": 0.0
+      },
+      "gao-08-1044-excerpt": {
+        "pages": 3,
+        "runs": 1,
+        "total_s": 8.43918237500111,
+        "phase_a_s": 8.3889303750002,
+        "phase_a_load_s": 1.0504038340004627,
+        "granite_vision_load_s": null,
+        "chart_s": [],
+        "kvp_page_s": [],
+        "peak_gb": 1.611061606,
+        "spread_pct": 0.0
+      },
+      "gao-08-14-excerpt": {
+        "pages": 2,
+        "runs": 1,
+        "total_s": 13.938946832997317,
+        "phase_a_s": 6.333249541999976,
+        "phase_a_load_s": 0.6635167500026,
+        "granite_vision_load_s": null,
+        "chart_s": [
+          5.426741416002187
+        ],
+        "kvp_page_s": [],
+        "peak_gb": 6.370775528,
+        "spread_pct": 0.0
+      },
+      "irs-w9-filled": {
+        "pages": 1,
+        "runs": 1,
+        "total_s": 43.97323404200142,
+        "phase_a_s": 33.385666749996744,
+        "phase_a_load_s": 0.8944364169983601,
+        "granite_vision_load_s": 1.9405506660004903,
+        "chart_s": [],
+        "kvp_page_s": [
+          8.379755833997478
+        ],
+        "peak_gb": 6.516401822,
+        "spread_pct": 0.0
+      }
+    },
+    "time": {
+      "phase_a_s_per_page": 4.608,
+      "phase_a_s_per_page_scanned": null,
+      "chart_s": 8.079,
+      "kvp_page_s": 6.208,
+      "peak_gb": 6.68,
+      "total_s": 380.9
+    },
+    "adversarial": {
+      "adversarial": {
+        "kvp_valid": true,
+        "kvp_equal": false,
+        "injected_found": [],
+        "loop_pages_flagged": [],
+        "loop_pages_did_not_loop": [
+          2
+        ],
+        "degenerate_pages_unwarned": [],
+        "pass": true
+      }
+    },
+    "deterministic": {
+      "adversarial": true,
+      "census-p60-282-excerpt": true,
+      "gao-07-631": true,
+      "gao-08-1044-excerpt": true,
+      "gao-08-14-excerpt": true,
+      "irs-w9-filled": true
+    },
+    "capped": {
+      "adversarial": [],
+      "census-p60-282-excerpt": [],
+      "gao-07-631": [],
+      "gao-08-1044-excerpt": [],
+      "gao-08-14-excerpt": [],
+      "irs-w9-filled": []
+    }
+  },
+  "cold": null,
+  "suggested_time_budgets": {
+    "phase_a_s_per_page": 5.76,
+    "chart_s": 10.1,
+    "kvp_page_s": 7.76
+  },
+  "verdict": {
+    "ok": true,
+    "checks": [
+      {
+        "name": "capped_pages[adversarial]",
+        "value": [],
+        "limit": [],
+        "ok": true,
+        "note": ""
+      },
+      {
+        "name": "capped_pages[census-p60-282-excerpt]",
+        "value": [],
+        "limit": [],
+        "ok": true,
+        "note": ""
+      },
+      {
+        "name": "capped_pages[gao-07-631]",
+        "value": [],
+        "limit": [],
+        "ok": true,
+        "note": ""
+      },
+      {
+        "name": "capped_pages[gao-08-1044-excerpt]",
+        "value": [],
+        "limit": [],
+        "ok": true,
+        "note": ""
+      },
+      {
+        "name": "capped_pages[gao-08-14-excerpt]",
+        "value": [],
+        "limit": [],
+        "ok": true,
+        "note": ""
+      },
+      {
+        "name": "capped_pages[irs-w9-filled]",
+        "value": [],
+        "limit": [],
+        "ok": true,
+        "note": ""
+      },
+      {
+        "name": "adversarial[adversarial]",
+        "value": true,
+        "limit": true,
+        "ok": true,
+        "note": ""
+      }
+    ],
+    "notes": [
+      "no baseline named in budgets.toml: scores recorded, not compared",
+      "adversarial: loop page(s) [2] did not loop — the loop check went untested"
+    ]
+  }
+}

@@ -8,7 +8,8 @@ so the implementer can tell a load-bearing choice from a default.
 fixed). Phase 0's spike report is approved ([`pdf-pipeline-spikes.md`](pdf-pipeline-spikes.md)),
 except the scanned halves of S5 and S8, which wait on the print-and-scan step. PR 3
 (teardown), PR 4 (Phase A library, `gdi convert-model`), PR 5 (chunks and KVP) and PR 6
-(`api` complete, batch, `gdi convert`) are merged; PR 7 (eval harness) is next. Per-PR progress is under §10. **To resume, paste Appendix B into a new session for the next PR,
+(`api` complete, batch, `gdi convert`) are merged; PR 7 (eval harness) is open on
+`test/eval-harness`, with its baseline committed and S6/S7/S11 confirmed. Per-PR progress is under §10. **To resume, paste Appendix B into a new session for the next PR,
 or Appendix A for the scanned halves once the scan exists.**
 
 ## 0. At a glance
@@ -730,6 +731,27 @@ Budgets turn S4/S8's measurements into regression checks that `eval/score.py` en
   (it varies 2× between PDFs, so the chart budget is a corpus median), a KVP page
   ~5 s, model loads 2.2–2.8 s (Phase A) and 1.9 s (Phase B). Scanned: not yet
   measured (S8's image-only stand-in collapsed; §17).
+  **Set in PR 7** (`eval/budgets.toml`, from `eval/results/2026-10-27-24125f5-baseline.json`;
+  M2 Pro 16 GB, AC power, docling 2.143.1, mlx 0.32.4, mlx-vlm 0.7.10):
+
+  | Metric | Baseline median | Budget (× 1.25) | S8 reference |
+  |---|---|---|---|
+  | Phase A, s/page (born-digital, whole corpus) | 5.66 | 7.08 | ~6 |
+  | Chart (CSV + summary), s | 8.28 | 10.34 | 8–15 |
+  | KVP page, s | 6.01 | 7.51 | ~5 |
+  | Cold start (Phase A load + Granite Vision load), s | 7.13 | 8.91 | 2.2–2.8 + 1.9 |
+  | Peak memory, GB | 6.68 | 10 (ceiling) | 7.00 |
+
+  The three timed runs agreed within 0.3% (424.3–425.4 s for the corpus) and wrote
+  byte-identical output. Two figures differ from S8 by more than ~25%, and both were
+  investigated. **KVP** is +20%: S8's ~5 s was one page, and the median here
+  covers the W-9, the GAO cover and the adversarial order. **Cold start** is +58%,
+  and it measures something different. S8 timed the model loads alone, while
+  "Phase A load" is everything Phase A spends outside Docling's pipeline:
+  building the converter, imports, and the model load. It is 5.1 s on a fresh
+  process's first PDF and 0.6–1.1 s on every later PDF. Phase A per page
+  agrees with S8, because S8's ~6 s included Docling's own chart stage, which is
+  now a separate stage. The scanned budget waits on the scan (§4.1).
 - **Degeneration count:** pages that hit `max_tokens` (§3.10) — budget **0** on the
   public corpus. **Open conflict (S8):** both born-digital PDFs S8 timed have one
   capped page (GAO-07-631 p. 24, GAO-07-535 p. 38), and GAO-07-631 is the 30+ page
@@ -1118,7 +1140,8 @@ need quality numbers (S6, S7, S11) compare their outputs against the hand-writte
 `eval/expected/` files (§4.1) with a scratchpad script applying the §8.1 metrics and
 §8.2 matching rules by hand. PR 7 then **re-runs S6, S7 and the S11 sweep through
 `score.py`** and records whether each verdict still holds; a reversed verdict is a plan
-amendment in that PR.
+amendment in that PR. **Done in PR 7 (2026-10-27): all three hold**, recorded in the
+spike report's last section.
 
 | # | Question | Pass criterion |
 |---|---|---|
@@ -1492,7 +1515,10 @@ the old app with a scored check.
   - charts: numeric cell match within a relative tolerance (default 1%), header match,
     and charts found vs expected
   - tables: cell-level exact match after whitespace normalization (TEDS if a library
-    for it is cheap to add — decide in implementation)
+    for it is cheap to add — decide in implementation). **Decided in PR 7: no TEDS.**
+    No TEDS library is in the lock, and two cell counts already cover what it would:
+    body cells paired by row order (rule 3), and every cell found anywhere in the
+    prediction, S11's 1,198-cell count, which forgives a shifted column
   - KVP: per-field exact match, schema-valid rate
   - document: expected headings present, page count
   - run: wall time, seconds/page, seconds/chart, peak memory, pages that hit
@@ -1542,7 +1568,23 @@ detail rather than a quality change.
    hidden by whatever is drawn over or clipped around it. So the scorer drops
    white-filled and render-mode-3 text *and* removes the strings each manifest's
    `notes` lists, and a new corpus PDF's text layer is diffed against its rendered page
-   before its manifest is written.
+   before its manifest is written. **Amended in PR 7:**
+   - **The strings come from a manifest key, not from the notes.** The scorer reads
+     an optional `hidden_text` list from each `manifest.json`. Notes are prose, and
+     a quoted string in them (`'Maritime60%'`) is not always hidden. The Census
+     manifest needs `"hidden_text": ["—Con."]`, added on `test/eval-corpus` when
+     PR 2 is rebased (the user's call, 2026-10-27). PR 7's baseline already ran with
+     it, on a scratch copy of the corpus, so adding it moves no score.
+   - **Text is scored per page, from `document.json`.** Only `document.json` says
+     which page an item came from, and `document.md` is exported from it. A page's
+     prediction is its text items plus its tables' cells, since the text layer holds
+     both. Furniture (running heads, folios) counts toward the page's text but not
+     toward reading order. Model-written chart summaries are not page text.
+   - **Two pieces of markup are undone** before comparison: granite-docling writes a
+     footnote mark as LaTeX (`$^{3}$Office`), and the Markdown export escapes `&`
+     (`O&amp;M`).
+   - **Headings are counted twice:** as Markdown heading lines (structure), and
+     anywhere in the text. S11's "20 / 27" was the second kind.
 3. **Matching rules are written down.** A predicted chart or table pairs with an
    expected one on the **same page** by **reading order**; if counts differ on a page,
    pair by bounding-box IoU ≥ 0.5 from the DoclingDocument provenance, and anything
@@ -1561,7 +1603,31 @@ detail rather than a quality change.
    panels as one picture, so that page's counts differ (1 predicted, 2 expected), but
    no `manifest.json` records a chart's bounding box. Task C adds a `bbox` to each
    chart entry, or PR 7 defines another fallback. A picture that covers several
-   expected panels is then scored against each of them.
+   expected panels is then scored against each of them. **Decided in PR 7**
+   (`eval/matching.py`):
+   - **The fallback is content, not boxes.** When a page's counts differ, pairs are
+     made best score first, one to one. No manifest has a box, and content needs
+     none and cannot pair two things that share nothing. For charts, an expected
+     panel still unpaired then takes the picture it scores best against, even one
+     already taken. That is how GAO-07-631 Figure 9's merged picture is scored
+     against both panels, which credits its second panel's 3 cells: the baseline's
+     46 of 69 chart cells is S11's 43 at the same crop plus those 3.
+   - **A chart's columns pair by content.** Each expected series takes the
+     predicted column that agrees with it on the most rows. A generic `Value`
+     header then costs the header score only, and a merged picture's one column
+     per panel credits each panel. The prediction is also read transposed, and the
+     better orientation counts, as S6 and S7 scored it.
+   - **"Table rows pair by position" means order, not index.** Rows are aligned in
+     order, gaps allowed, to maximize matched cells: a weighted longest common
+     subsequence. Index pairing scored Census Table A-6 at 10 of 1,038 body cells,
+     because its prediction splits the header over four rows and drops the first
+     section's rows. Order pairing scores it 408, and two rows with one label still
+     pair in order. Columns may shift by up to two, for a split label column or an
+     added index column. The header row pairs with whichever predicted row suits it
+     best, since a multi-level header has no single row.
+   - **A parenthesized value is negative** (`(0.2)` beside a −9% change in
+     GAO-07-631 Table 1), and a cell compares as a number only when both sides
+     parse as one.
 4. **Chart summaries and chunks are checked.**
    - Summaries: a **hallucination check** — every number in a summary must appear,
      within tolerance, in that chart's expected CSV (or be a simple derivative: a
@@ -1575,6 +1641,20 @@ detail rather than a quality change.
    - Chunks: each chunk ≤ `chunk_tokens` by the configured tokenizer; every
      `page_nos` entry is a page the chunk's text actually comes from (checked against
      the text-layer reference); heading breadcrumbs match the expected headings.
+     **Decided in PR 7:**
+     - **The token count is of the contextualized text**, headings included, since
+       that is what an embedding model is given.
+     - **A page claim holds** when the page shares a run of five words with the
+       chunk, or, for a table, half the chunk's distinct words. A chunk spanning a
+       page break may take one sentence from its second page. Tables are serialized
+       into chunks as `Male, 2 = 54,870`, which breaks every run of words.
+     - **A chunk under five words** ("Logo") is not judged. The baseline's
+       unsupported claims, 0.96%, are the Census loop's chunks.
+   - **A summary number is supported** when it is in the chart's expected CSV
+     within 1%, is a year, or is a difference, ratio or percent change of two of
+     its values. Axis ranges are recognized only in a clause that mentions an axis,
+     a range or a scale. The category–number pairs are checked by `charts.py`'s own
+     `summary_disagreements`, run against the expected CSV rather than the model's.
 5. **False positives count.** Chart detection reports precision as well as recall: a
    photo or diagram treated as a chart produces a bogus CSV, and that is scored. The
    corpus carries at least one non-chart picture for it (§4.1).
@@ -1584,6 +1664,16 @@ detail rather than a quality change.
    (e.g. a long run of identical table rows). Pass = KVP output still schema-valid and
    not the injected content; the loop page appears in `run.json` warnings (§3.10). It
    is scored, but kept out of the quality averages so it cannot mask a regression.
+   **Amended in PR 7 (decided with the user, 2026-10-27):** at the shipped settings
+   `adversarial.pdf` page 2 does not loop: 1,203 tokens, a clean 60-row table. So
+   a `loop_pages` entry that converted cleanly is reported, not failed. The loop
+   check went untested, it did not go wrong. Every page that does loop or cap
+   must still be in the warnings. The pass is schema-valid output with no
+   injected value and no unwarned degenerate page. Equality with `expected.json`
+   is reported beside it, since S6 recorded one honest miss (the order date's
+   format). **Follow-up for PR 2:** `make_adversarial.py` should build a page that
+   loops at the shipped settings. Census p. 2 is the corpus's one real self-closing
+   loop, and it is flagged.
 7. **Private results never reach git.** Private-tier runs write to
    `eval/private/results/` (already gitignored via `/eval/private/`), never
    `eval/results/`. The committed results file carries **only aggregate private
@@ -1777,7 +1867,7 @@ the only record of them):
 | 4 | merged 2026-10-27 (#6, `468fa30`). Our own chart stage replaces Docling's (decided with the user 2026-10-27, §3.2); page-level resume failed its feasibility gate and is deferred (§3.14 rule 7); floors filled in (§2.2); gate 8.6–9.0 s; Pillow 13.0.0 and certifi moved past their advisories, Pillow made eval-gated (§2.2). After merge: 0 open Dependabot alerts on `main` |
 | 5 | merged 2026-10-27 (#7, `9059e74`). Phase B shares the chart stage's Granite Vision (§3.8); Docling's KVP prompt copied under MIT (`THIRD_PARTY_NOTICES.md`, §3.3); schema checks in `kvp.py` (§3.13 rule 8); `Chunk.kind` dropped (§3.9); `referencing` declared (§2.2); W-9 KVP 10/11 and GAO-07-631 cover 3/4, both matching S6; gate 9.3–9.4 s |
 | 6 | merged 2026-10-27 (#8, `fc6714f`). `convert_many`, `batch`, `safety`, `runlock`, `gdi convert`; Phase A's converter stays per PDF (decided with the user 2026-10-27, §3.8); output overlaps refused up front and limits kept out of resume (§3.8); progress through `logging` and Docling's public `progress_callback` (§7). Hand run on the whole public corpus (`HF_HUB_OFFLINE=1`, socket guard, 0 network attempts): 6/6 done in 425 s, peak 6.68 GB; an immediate re-run skipped 6/6 in 0.5 s; with each schema, W-9 KVP 10/11, GAO-07-631 cover 3/4 and the adversarial PO 4/5 with no injected value, all matching S6/PR 5. Warnings were the known set: three capped pages, the Census p. 2 loop and the GAO-08-14 pie summary. **For PR 7:** `adversarial.pdf` p. 2 did not loop (1,203 tokens, a clean 60-row table), so its manifest's `loop_pages: [2]` pass rule fails at the shipped settings. Gate 11.1–11.4 s |
-| 7 | **next** — start from Appendix B |
+| 7 | **PR open** (`test/eval-harness`). `eval/matching.py`, `eval/score.py`, `tests/test_score.py` (85 tests; 38 rule mutations, each caught), `eval/budgets.toml`, and the baseline `eval/results/2026-10-27-24125f5-baseline.json`: a cold run plus three timed runs of the whole public corpus, within 0.3% of each other and byte-identical. Every budget is met: Phase A 5.66 s/page, chart 8.28 s, KVP page 6.01 s, cold start 7.13 s, peak 6.68 GB. Chart cells 46/69, KVP 13/15, text similarity 0.814, 0 network attempts. S6, S7 and S11 were re-run through `score.py`, and all three hold (spike report). Plan amendments: §3.11 (budgets), §8.1 (no TEDS), §8.2 rules 2, 3, 4 and 6 (the loop rule with the user). **For PR 2:** add `"hidden_text": ["—Con."]` to the Census manifest and document the key in `eval/expected/README.md`; have `make_adversarial.py` build a page that loops at the shipped settings |
 
 ## 11. Release
 
@@ -1803,14 +1893,15 @@ GitHub details (§9.2); UI theme and layout for v1.x (§14, §15).
 | Phase B ordering in batches (per PDF vs all-A-then-all-B) | S4 — **settled 2026-10-25:** per PDF (§3.8) |
 | `mx.set_cache_limit` value | S4 — **settled 2026-10-25:** 1 GiB (§3.14 rule 5) |
 | `--text-source` default | S5 — **settled 2026-10-25:** `vlm`; `pdf` is opt-in for trusted born-digital text layers (§3.2) |
-| 8-bit vs 6-bit/bf16 Granite Vision | S6 — **settled 2026-10-25:** 8-bit; no measurable regression on 10 charts and 3 KVP pages, and bf16 alone peaks at 10.12 GB (§2). PR 7 re-runs it through `score.py`, so the bf16 source stays until then |
-| Granite Vision's chart role | S7 — **settled 2026-10-25:** Granite Vision keeps it. granite-docling's page DocTags carried no chart table, and on the crop it matched 12 of 69 cells against 37. Summaries and CSVs reach the chunks (§3.9); `images_scale` stays 1.0 (§3.14 rule 2) |
+| 8-bit vs 6-bit/bf16 Granite Vision | S6 — **settled 2026-10-25:** 8-bit; no measurable regression on 10 charts and 3 KVP pages, and bf16 alone peaks at 10.12 GB (§2). **Confirmed in PR 7** through `score.py`: identical chart and KVP scores, bf16 1.7× slower per chart and 10.26 GB at peak. The bf16 source in the HF cache is no longer needed |
+| Granite Vision's chart role | S7 — **settled 2026-10-25:** Granite Vision keeps it. granite-docling's page DocTags carried no chart table, and on the crop it matched 12 of 69 cells against 37. Summaries and CSVs reach the chunks (§3.9); `images_scale` stays 1.0 (§3.14 rule 2). **Confirmed in PR 7:** 3 of 69 cells on our 1.5× crop, against 46 |
 | page-level resume (trigger: typical PDF > ~5 min) | S8 — **trigger fired; decided 2026-10-25:** in v1, PR 6, DocTags only, gated on a public-API feasibility check in PR 4 (§3.14 rule 7). **PR 4: the gate failed — deferred again**, until Docling can be handed cached page predictions |
 | torch-free install, ONNX classifier | S9 — **settled 2026-10-25:** torch stays, classifier on transformers; reopen when Docling's two torch imports go lazy (§2.1) |
 | model-repo code at load | S10 — **failed, then decided 2026-10-25:** mlx-vlm defaults `trust_remote_code` to True, so `gdi convert-model` strips the repo's `*.py` files and `auto_map` keys from the converted folder and `convert()` refuses a folder that has either (§3.13 rule 2) |
-| page batch size, CPU–GPU overlap, page scale, chart-crop scale | S11 — **settled 2026-10-25:** one page at a time (Docling's batch size is inert on MLX; `batch_generate` −18% needs an engine patch, so it reopens with a public batched MLX engine); no overlap (≤ 1.2%); page scale 2.0; our own **1.5×** chart crop for Granite Vision, PR 4 (§3.14 rules 1–3) |
+| page batch size, CPU–GPU overlap, page scale, chart-crop scale | S11 — **settled 2026-10-25:** one page at a time (Docling's batch size is inert on MLX; `batch_generate` −18% needs an engine patch, so it reopens with a public batched MLX engine); no overlap (≤ 1.2%); page scale 2.0; our own **1.5×** chart crop for Granite Vision, PR 4 (§3.14 rules 1–3). **Confirmed in PR 7** through `score.py`: crop 38 / 42 / 46 / 46 cells for Docling / 1.0 / 1.5 / 2.0; page scale 2.0 keeps the best text, and 1.5's chart lead is again the invented p24 |
 
-**Settled during implementation:** TEDS vs cell-exact for tables (§8.1, PR 7);
+**Settled during implementation:** TEDS vs cell-exact for tables — cell counts, no
+TEDS (§8.1, PR 7);
 whether `--delete-source` gets more than a mocked test (§8).
 
 **Deferred past v1, with the condition that reopens each:** per-PDF timeout and process
@@ -1966,8 +2057,9 @@ evidence (a link, a results file, a test name).
 
 - [ ] **Phase 0:** every spike S1–S11 has a verdict in `pdf-pipeline-spikes.md`, the
       user approved the report (PR 1), and PR 7 confirmed or amended S6/S7/S11.
-      (Report approved 2026-10-25, scanned halves of S5/S8 carved out; those and
-      PR 7's re-runs are what remains.)
+      (Report approved 2026-10-25, scanned halves of S5/S8 carved out; PR 7
+      confirmed S6, S7 and S11 on 2026-10-27, so the scanned halves are what
+      remains.)
 - [ ] **Outputs:** `gdi convert` produces the full §3.5 tree for every public-corpus
       PDF, including `--schema` KVP and `chunks.jsonl`.
 - [ ] **Library:** `convert`, `convert_many`, `ConvertOptions` and the §3.7 result types
@@ -2010,7 +2102,7 @@ of the working text app; `git checkout v0.6.0` restores it intact if the rebuild
 | A Docling or mlx-vlm release breaks the API mid-build | a lock move fails the eval | §2.2: caps + per-package deliberate upgrades; stay on the locked version |
 | `main` stays tooling-only for weeks after PR 3 | calendar | nothing ships until PR 9; `v0.6.0` remains installable; PR 3's README note says so |
 | A sideways-printed or very wide table loops silently in granite-docling | S3 (seen: Table A-2 of the Census P60-282 report) | post-hoc loop/cap detection puts the page in `run.json` warnings (§3.10); `force_backend_text` does **not** recover it (S5: it empties the looped items and leaves the table absent); the corpus includes one such page (§4.1) |
-| granite-docling silently mis-transcribes prose: a wrong number ("73" for "7.3"), an inserted phrase, invented paragraphs on a chart page, or a whole page lost to a loop, its charts with it (GAO-07-631 p. 24 carries Figure 7, so the cap costs 2 of the corpus's 13 charts — S6) | S5, S6; S11 found three more forms, each at a different page scale: a page replaced by "The text of this document is not available in the original format." repeated, an invented opening paragraph, and an invented page ("The Army's 2015-2016 budget …") that closes cleanly and passes every §3.10 check | cap/loop detection flags the lost page (§3.10); on born-digital PDFs a per-page similarity against the text layer sees the invented ones (S11's dropped to 0.50 and below against ≥ 0.75 for clean pages), so PR 7's §8.2 rule 2 score is also a candidate `run.json` warning; `--text-source pdf` for trusted born-digital PDFs (§3.2); PR 7 decides whether the eval scores prose numbers against the text-layer reference (§8.2) |
+| granite-docling silently mis-transcribes prose: a wrong number ("73" for "7.3"), an inserted phrase, invented paragraphs on a chart page, or a whole page lost to a loop, its charts with it (GAO-07-631 p. 24 carries Figure 7, so the cap costs 2 of the corpus's 13 charts — S6) | S5, S6; S11 found three more forms, each at a different page scale: a page replaced by "The text of this document is not available in the original format." repeated, an invented opening paragraph, and an invented page ("The Army's 2015-2016 budget …") that closes cleanly and passes every §3.10 check | cap/loop detection flags the lost page (§3.10); on born-digital PDFs a per-page similarity against the text layer sees the invented ones (S11's dropped to 0.50 and below against ≥ 0.75 for clean pages), so PR 7's §8.2 rule 2 score is also a candidate `run.json` warning (PR 7 found it marks a lost and an invented page alike: GAO-07-631 p24 scores 0.02 lost and 0.32 invented, so only the cap flag tells them apart); `--text-source pdf` for trusted born-digital PDFs (§3.2). **Decided in PR 7:** prose numbers are not scored separately. The per-page edit distance against the text layer already charges a "73" for "7.3", and a separate number check would need the same page pairing to say which number belongs where |
 | The eval corpus can't be licensed cleanly | Task C | public-domain US federal sources + project-made PDFs only (§4.1) |
 
 ## Appendix A — kickoff prompt for the implementing session
