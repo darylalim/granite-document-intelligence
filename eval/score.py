@@ -1027,11 +1027,14 @@ def build_results(
     return results, private_results
 
 
-def judge(results: dict[str, Any], budgets: dict[str, Any], eval_dir: Path) -> Verdict:
+def judge(
+    results: dict[str, Any], budgets: dict[str, Any], budgets_dir: Path
+) -> Verdict:
     pub = results["public"]
     verdict = check_budgets(budgets, pub["time"], results.get("cold"), pub["capped"])
     baseline_name = budgets.get("baseline")
-    baseline_path = eval_dir / baseline_name if baseline_name else None
+    # Relative to budgets.toml, which names it: the corpus may be read from elsewhere.
+    baseline_path = budgets_dir / baseline_name if baseline_name else None
     if baseline_path is None:
         verdict.notes.append(
             "no baseline named in budgets.toml: scores recorded, not compared"
@@ -1159,7 +1162,7 @@ def main(argv: list[str] | None = None) -> int:
 
     results, private_results = build_results(args, run_id)
     results["suggested_time_budgets"] = suggested_budgets(results)
-    verdict = judge(results, budgets, eval_dir)
+    verdict = judge(results, budgets, budgets_path.parent)
     results["verdict"] = {
         "ok": verdict.ok,
         "checks": [asdict(c) for c in verdict.checks],

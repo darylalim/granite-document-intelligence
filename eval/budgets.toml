@@ -8,7 +8,7 @@
 # The results file every later run is compared with: the shipped configuration's
 # first full run (PR 7). Re-baselining replaces this line and says why per moved
 # metric (§8.2 rule 1).
-baseline = "results/BASELINE.json"
+baseline = "results/2026-10-27-24125f5-baseline.json"
 
 [memory]
 # A ceiling from the Metal working set on a 16 GB Mac, not a measurement (§3.11).
@@ -20,12 +20,12 @@ peak_gb = 10.0
 # included; a chart is one chart's CSV + summary; a KVP page is one page's answer.
 # phase_a_s_per_page_scanned waits on the print-and-scan step (§4.1): no scanned
 # PDF has been measured yet, so it has no budget.
-phase_a_s_per_page = 0
-chart_s = 0
-kvp_page_s = 0
+phase_a_s_per_page = 7.08
+chart_s = 10.34
+kvp_page_s = 7.51
 # Phase A's converter and model load plus Granite Vision's load, on the first
 # PDF of a fresh process (§8.2 rule 8's one cold run).
-cold_start_s = 0
+cold_start_s = 8.91
 
 [capped_pages]
 # Pages that hit granite-docling's 8192-token cap at the shipped settings: named
