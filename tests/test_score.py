@@ -754,3 +754,23 @@ class TestPrivateTier:
         write_corpus(eval_dir / "private", "secret-contract")
         markers = score.private_markers(eval_dir)
         assert "secret-contract" in markers and "secret-contract.pdf" in markers
+
+
+class TestBaselineFile:
+    def test_a_missing_named_baseline_fails(self, eval_dir: Path) -> None:
+        (eval_dir / "budgets.toml").write_text(
+            'baseline = "results/gone.json"\n', encoding="utf-8"
+        )
+        code, results = run_score(eval_dir)
+        assert code == 1
+        assert [c["name"] for c in results["verdict"]["checks"] if not c["ok"]] == [
+            "baseline"
+        ]
+
+    def test_the_baseline_run_is_not_compared_with_itself(self, eval_dir: Path) -> None:
+        (eval_dir / "budgets.toml").write_text(
+            'baseline = "results/run.json"\n', encoding="utf-8"
+        )
+        code, results = run_score(eval_dir)
+        assert code == 0
+        assert any("this run is the baseline" in n for n in results["verdict"]["notes"])

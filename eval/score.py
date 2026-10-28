@@ -1031,14 +1031,20 @@ def judge(results: dict[str, Any], budgets: dict[str, Any], eval_dir: Path) -> V
     pub = results["public"]
     verdict = check_budgets(budgets, pub["time"], results.get("cold"), pub["capped"])
     baseline_name = budgets.get("baseline")
-    if baseline_name and not results.get("baseline_of_itself"):
-        baseline = json.loads((eval_dir / baseline_name).read_text(encoding="utf-8"))
-        verdict.checks += check_baseline(
-            pub["totals"], baseline["public"]["totals"], budgets.get("tolerance", {})
-        )
-    elif not baseline_name:
+    baseline_path = eval_dir / baseline_name if baseline_name else None
+    if baseline_path is None:
         verdict.notes.append(
             "no baseline named in budgets.toml: scores recorded, not compared"
+        )
+    elif baseline_path.stem == results["id"]:
+        verdict.notes.append("this run is the baseline: nothing to compare it with")
+    elif not baseline_path.is_file():
+        # A named baseline that cannot be read must not pass as "no regression".
+        verdict.checks.append(Check("baseline", str(baseline_name), "a file", False))
+    else:
+        baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+        verdict.checks += check_baseline(
+            pub["totals"], baseline["public"]["totals"], budgets.get("tolerance", {})
         )
     for name, adv in pub["adversarial"].items():
         verdict.checks.append(

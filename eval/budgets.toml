@@ -1,0 +1,47 @@
+# Budgets and regression tolerances that eval/score.py enforces (plan §3.11, §8.2 rule 1).
+#
+# A run fails when it exceeds any budget below, or when any score in `baseline`
+# drops by more than its tolerance. Lowering a baseline score, or raising a time
+# budget, needs a committed eval/results/ file showing why, in its own PR — the
+# memory ceiling is never raised.
+
+# The results file every later run is compared with: the shipped configuration's
+# first full run (PR 7). Re-baselining replaces this line and says why per moved
+# metric (§8.2 rule 1).
+baseline = "results/BASELINE.json"
+
+[memory]
+# A ceiling from the Metal working set on a 16 GB Mac, not a measurement (§3.11).
+peak_gb = 10.0
+
+[time]
+# The baseline's medians of three × 1.25 (§3.11), in seconds. Phase A per page is
+# the corpus's Phase A time over its pages, model loads and degenerate pages
+# included; a chart is one chart's CSV + summary; a KVP page is one page's answer.
+# phase_a_s_per_page_scanned waits on the print-and-scan step (§4.1): no scanned
+# PDF has been measured yet, so it has no budget.
+phase_a_s_per_page = 0
+chart_s = 0
+kvp_page_s = 0
+# Phase A's converter and model load plus Granite Vision's load, on the first
+# PDF of a fresh process (§8.2 rule 8's one cold run).
+cold_start_s = 0
+
+[capped_pages]
+# Pages that hit granite-docling's 8192-token cap at the shipped settings: named
+# exceptions decided with the user on 2026-10-25 (§3.11, S11). A capped page not
+# listed here fails the run; a listed page that stops capping is reported as a fix.
+"gao-07-631" = [24]
+"gao-08-1044-excerpt" = [2]
+"irs-w9-filled" = [1]
+
+[tolerance]
+# How far a score may fall below the baseline before the run fails (§8.2 rule 1).
+# Counts — charts and tables found, false positives, headings, KVP fields,
+# oversized chunks, summary pair errors — may not move at all.
+count = 0
+kvp = 0
+# Cell-match and other rates, in percentage points.
+rate_pct = 1.0
+# Text similarity, word F1 and reading order, as fractions.
+text = 0.01
