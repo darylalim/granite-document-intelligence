@@ -425,10 +425,8 @@ def score_pdf(entry: Entry, tree: Tree, tokenizer: Any | None) -> dict[str, Any]
     limit = int(tree.run.get("options", {}).get("chunk_tokens", 512))
     over = None
     if tokenizer is not None:
-        over = sum(
-            1
-            for c in tree.chunks
-            if tokenizer.count_tokens(c["contextualized"]) > limit
+        over = matching.chunks_over_limit(
+            [c["contextualized"] for c in tree.chunks], tokenizer.count_tokens, limit
         )
     # A chunk's pages are checked against the text layer, so not on a scan.
     page_claims = page_refs = 0
@@ -926,14 +924,13 @@ def score_tier(
         pdfs[entry.name] = scores
         timings[entry.name] = combine_runs([run_metrics(t.run) for t in trees])
         deterministic[entry.name] = len({t.markdown for t in trees}) == 1
+    by_name = {e.name: e for e in entries}
+    # The adversarial PDF is scored, but kept out of the averages (rule 6).
     averaged = {
         n: s
         for n, s in pdfs.items()
-        if not (next(e for e in entries if e.name == n).adversarial or {}).get(
-            "exclude_from_averages"
-        )
+        if not (by_name[n].adversarial or {}).get("exclude_from_averages")
     }
-    by_name = {e.name: e for e in entries}
     return {
         "pdfs": pdfs,
         "totals": totals(averaged),

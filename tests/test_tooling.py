@@ -985,7 +985,9 @@ class TestImportCost:
                 names.add(node.module.split(".")[0])
         return names
 
-    @pytest.mark.parametrize("folder", ["tests", "src/granite_document_intelligence"])
+    @pytest.mark.parametrize(
+        "folder", ["tests", "src/granite_document_intelligence", "eval"]
+    )
     def test_no_module_imports_a_heavy_library_at_top_level(self, folder: str) -> None:
         offenders = {
             str(path.relative_to(self.ROOT)): sorted(

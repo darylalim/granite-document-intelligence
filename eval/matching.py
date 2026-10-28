@@ -149,9 +149,9 @@ def _chart_orientation(
     the header score and nothing else, and a merged multi-panel picture holding
     one column per panel (S7) credits each panel's own column.
     """
-    if not expected or not predicted:
-        return 0, 0
     predicted = _rectangular(predicted)
+    if not expected or not predicted or not predicted[0]:
+        return 0, 0
     by_label: dict[str, list[str]] = {}
     for row in predicted[1:]:
         if row:
@@ -525,6 +525,16 @@ def headings_in_text(expected: Iterable[str], markdown: str) -> list[bool]:
     the text survived even where granite-docling did not mark it a heading."""
     text = normalize_text(markdown).casefold()
     return [normalize_text(h).casefold() in text for h in expected]
+
+
+def chunks_over_limit(
+    texts: Iterable[str], count_tokens: Callable[[str], int], limit: int
+) -> int:
+    """Chunks longer than `chunk_tokens` by the configured tokenizer (rule 4).
+
+    The text counted is the contextualized one, headings included: that is
+    what an embedding model would be given."""
+    return sum(1 for text in texts if count_tokens(text) > limit)
 
 
 # A chunk's page claim holds when the page shares a run of words with the
