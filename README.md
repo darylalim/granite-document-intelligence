@@ -44,7 +44,7 @@ curl -L -o gao-07-631.pdf https://www.govinfo.gov/content/pkg/GAOREPORTS-GAO-07-
 uv run gdi convert gao-07-631.pdf -o out
 ```
 
-It writes `out/gao-07-631/` and finishes in about MEASURE_EXAMPLE_TIME. Progress goes to stderr, and a summary of what was done, skipped and failed comes last.
+It writes `out/gao-07-631/` and took 4.5 minutes when it was measured. Its `run.json` warns that page 24 hit the token cap, a known loss on this PDF. Progress goes to stderr, and a summary of what was done, skipped and failed comes last.
 
 To pull named fields out of a page, pass a JSON Schema. This one reads the report's cover (page 1, the default for `--pages`):
 
