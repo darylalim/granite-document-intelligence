@@ -4,12 +4,12 @@ Drafted 2026-10-18. Written to be executed in a **fresh session** with no memory
 conversation that produced it — every decision below carries its reason and its evidence,
 so the implementer can tell a load-bearing choice from a default.
 
-**Status (2026-10-27):** complete draft, reviewed cold on 2026-10-18 (18 findings
+**Status (2026-10-29):** complete draft, reviewed cold on 2026-10-18 (18 findings
 fixed). Phase 0's spike report is approved ([`pdf-pipeline-spikes.md`](pdf-pipeline-spikes.md)),
 except the scanned halves of S5 and S8, which wait on the print-and-scan step. PR 3
 (teardown), PR 4 (Phase A library, `gdi convert-model`), PR 5 (chunks and KVP) and PR 6
 (`api` complete, batch, `gdi convert`) and PR 7 (eval harness, baseline and budgets;
-S6/S7/S11 confirmed) are merged; PR 8 (docs rewrite) is next. Per-PR progress is under §10. **To resume, paste Appendix B into a new session for the next PR,
+S6/S7/S11 confirmed) are merged; PR 8 (docs rewrite) is open on `docs/rewrite`. Per-PR progress is under §10. **To resume, paste Appendix B into a new session for the next PR,
 or Appendix A for the scanned halves once the scan exists.**
 
 ## 0. At a glance
@@ -835,6 +835,13 @@ Five rules:
    layout (JSON, Markdown, picture crops) and **160–187 KB/page** with
    `--save-page-images`, before tables and chunks. Output is negligible beside the
    models.
+   **Measured in PR 8 (2026-10-29),** from a fresh `gdi convert-model` into an empty
+   `GDI_CACHE_DIR`: the environment is 1.90 GB, the models directory 5.61 GB
+   (granite-docling 0.64, the classifier 0.03 and the 8-bit Granite Vision 4.94 GB),
+   and the bf16 source 8.0 GB. The tokenizer is a few MB. So setup needs **~16 GB**,
+   and **~7.5 GB** remains after the source is deleted. The README carries these figures.
+   The run took 197 s, including the download. Every `gdi convert-model` converts again, so a
+   re-run after `--delete-source` downloads the 8 GB source again.
 
 #### 3.12.1 Persistence — no database in v1 (decided 2026-10-18)
 
@@ -959,8 +966,10 @@ everything the program *executes or loads* is pinned and local.
 6. **Dependency vulnerabilities are watched.** Turn on **GitHub Dependabot alerts**
    (they read `uv.lock`) — a repository setting, so applied after PR 3 merges, **with
    the user's confirmation at that moment** (as §9.2). Add a vulnerability audit of the
-   locked environment (`uvx pip-audit` against `uv export` output — verify the exact
-   invocation when it is first run) to CLAUDE.md's "Verifying a dependency upgrade"
+   locked environment (`uvx pip-audit` against `uv export` output — **verified in PR 8,
+   2026-10-29:** `uv export --frozen --no-emit-project --format requirements.txt`, then
+   `uvx pip-audit --strict --disable-pip --require-hashes -r` on the export; pip-audit
+   2.10.1 found no known vulnerabilities in 170 packages) to CLAUDE.md's "Verifying a dependency upgrade"
    procedure.
 7. **Inputs are recognised by content.** A file is processed only if it starts with
    `%PDF-`, whatever its extension; anything else is a per-PDF error before any parser
@@ -1868,7 +1877,7 @@ the only record of them):
 | 5 | merged 2026-10-27 (#7, `9059e74`). Phase B shares the chart stage's Granite Vision (§3.8); Docling's KVP prompt copied under MIT (`THIRD_PARTY_NOTICES.md`, §3.3); schema checks in `kvp.py` (§3.13 rule 8); `Chunk.kind` dropped (§3.9); `referencing` declared (§2.2); W-9 KVP 10/11 and GAO-07-631 cover 3/4, both matching S6; gate 9.3–9.4 s |
 | 6 | merged 2026-10-27 (#8, `fc6714f`). `convert_many`, `batch`, `safety`, `runlock`, `gdi convert`; Phase A's converter stays per PDF (decided with the user 2026-10-27, §3.8); output overlaps refused up front and limits kept out of resume (§3.8); progress through `logging` and Docling's public `progress_callback` (§7). Hand run on the whole public corpus (`HF_HUB_OFFLINE=1`, socket guard, 0 network attempts): 6/6 done in 425 s, peak 6.68 GB; an immediate re-run skipped 6/6 in 0.5 s; with each schema, W-9 KVP 10/11, GAO-07-631 cover 3/4 and the adversarial PO 4/5 with no injected value, all matching S6/PR 5. Warnings were the known set: three capped pages, the Census p. 2 loop and the GAO-08-14 pie summary. **For PR 7:** `adversarial.pdf` p. 2 did not loop (1,203 tokens, a clean 60-row table), so its manifest's `loop_pages: [2]` pass rule fails at the shipped settings. Gate 11.1–11.4 s |
 | 7 | merged 2026-10-27 (#9, `a9e42e6`). `eval/matching.py`, `eval/score.py`, `tests/test_score.py` (85 tests; 38 rule mutations, each caught), `eval/budgets.toml`, and the baseline `eval/results/2026-10-27-24125f5-baseline.json`: a cold run plus three timed runs of the whole public corpus, within 0.3% of each other and byte-identical. Every budget is met: Phase A 5.66 s/page, chart 8.28 s, KVP page 6.01 s, cold start 7.13 s, peak 6.68 GB. Chart cells 46/69, KVP 13/15, text similarity 0.814, 0 network attempts. S6, S7 and S11 were re-run through `score.py`, and all three hold (spike report). Plan amendments: §3.11 (budgets), §8.1 (no TEDS), §8.2 rules 2, 3, 4 and 6 (the loop rule with the user). **For PR 2:** add `"hidden_text": ["—Con."]` to the Census manifest and document the key in `eval/expected/README.md`; have `make_adversarial.py` build a page that loops at the shipped settings. Gate 11.1–12.6 s |
-| 8 | **next** — start from Appendix B |
+| 8 | **PR open** (`docs/rewrite`). `CLAUDE.md` rewritten (tooling rules kept, the text app removed; adds the model lineup and pins, memory phases, a Security section and an eval-based "Verifying a dependency upgrade"), `README.md` rewritten (§9), `SECURITY.md` added, `.env.example` updated (`GDI_CACHE_DIR` replaces the old `MAX_INPUT_TOKENS`). README commands run as written on 2026-10-29: a fresh `gdi convert-model` into an empty `GDI_CACHE_DIR` in 197 s (sizes in §3.12 rule 5); `gdi convert` on GAO-07-631 in 272 s, then with the cover schema `--force` in 272 s (KVP 3/3, valid), and the Python API example in 272 s, each at a 6.68 GB peak, with the known page 24 cap; `hf cache rm` checked with `--dry-run` only (8.0 GB). Plan amendments: §3.12 rule 5 (measured disk), §3.13 rule 6 (the pip-audit invocation, verified: no known vulnerabilities in 170 packages). The README's figures are PR 7's baseline rather than S4/S8, since §3.11 says the README states measured numbers from the shipped code. **After merge, with the user's confirmation:** enable private vulnerability reporting, which `SECURITY.md` points to and which is off. Gate 11.7–12.8 s |
 
 ## 11. Release
 
