@@ -12,6 +12,10 @@ the same day). PR 3
 (`api` complete, batch, `gdi convert`), PR 7 (eval harness, baseline and budgets;
 S6/S7/S11 confirmed) and PR 8 (docs rewrite) are merged; PR 9 (release 1.0.0) is next, and merges only when every §16 item holds. Per-PR progress is under §10. **To resume, paste Appendix B into a new session for the next PR.**
 
+**Status (2026-10-30):** v1 is complete. PR 9 merged and CI published `v1.0.0`
+(§10). §18 proposes the v1.x UI as PRs 10–16, with a v1.0.0 fix (PR 11) first. It awaits the user's approval, and its
+U-spikes come before any code.
+
 ## 0. At a glance
 
 **What:** a Python library + `gdi` CLI that turns multi-page PDFs into Markdown/JSON,
@@ -37,7 +41,8 @@ chart CSV + summaries, tables, schema-driven key-values and RAG chunks — local
 derail it) → §4 (Phase 0, where work starts) → the rest as each PR needs it.
 
 **v1 vs later:** §1–§13 and §16–§17 are v1. §14 (UI theme) and §15 (UI layout) are
-designed and verified for **v1.x** and must not shape v1 code.
+designed and verified for **v1.x** and must not shape v1 code. §18 is the v1.x build
+plan (proposed 2026-10-30).
 
 ## 1. Goal
 
@@ -61,7 +66,9 @@ Inputs: one or more PDFs, **or a directory** of them, with resume (§3.8).
   §3.7 library API; nothing in v1 may assume one, and the library must stay usable
   without Streamlit installed. If it needs fast listings, it gets a rebuildable SQLite
   cache (§3.12.1), never a second source of truth. Its theme (§14) and responsive
-  layout (§15) are already designed and verified.
+  layout (§15) are already designed and verified. Its build plan is §18, which
+  proposes running conversions as a `gdi convert` child process rather than calling
+  the library in-process (§18.2).
 - No embeddings, vector store or database — v1 stops at `chunks.jsonl`; files are the
   source of truth, and any later store is a derived index (§3.12.1).
 - No output localization. **English only** — Granite Vision 4.1 accepts English
@@ -512,7 +519,9 @@ result.save(Path("out/report"))  # writes the §3.5 tree
 ```
 
 Rules: `convert()` **returns** data and writes nothing; `save()` is the only writer —
-so a UI can show results without touching disk. Dataclasses, fully typed (`ty` gates
+so a UI can show results without touching disk. (§18.2 proposes that the v1.x UI
+run `gdi convert` as a child process and read the tree instead; the rule that
+`convert()` writes nothing is unchanged.) Dataclasses, fully typed (`ty` gates
 it). A batch helper `convert_many(inputs, out_dir, options, force=False)` yields one
 result-or-error per PDF and owns the §3.8 resume logic, so the CLI and a UI cannot
 diverge on it.
@@ -1953,7 +1962,7 @@ whether `--delete-source` gets more than a mocked test (§8).
 isolation (§3.10 — if a PDF ever hangs); parser sandboxing (§3.13 rule 4 — if the tool
 processes strangers' PDFs at volume); KVP prompt caching (§3.14 rule 8); a database or
 vector index (§3.12.1 — on its named triggers); the chunk-size default (when an
-embedding model is chosen); the v1.x UI (§14, §15).
+embedding model is chosen); the v1.x UI (§14, §15; build plan proposed in §18).
 
 ## 13. References (as of 2026-10-18)
 
@@ -2148,6 +2157,474 @@ of the working text app; `git checkout v0.6.0` restores it intact if the rebuild
 | A sideways-printed or very wide table loops silently in granite-docling | S3 (seen: Table A-2 of the Census P60-282 report) | post-hoc loop/cap detection puts the page in `run.json` warnings (§3.10); `force_backend_text` does **not** recover it (S5: it empties the looped items and leaves the table absent); the corpus includes one such page (§4.1) |
 | granite-docling silently mis-transcribes prose: a wrong number ("73" for "7.3"), an inserted phrase, invented paragraphs on a chart page, or a whole page lost to a loop, its charts with it (GAO-07-631 p. 24 carries Figure 7, so the cap costs 2 of the corpus's 13 charts — S6) | S5, S6; S11 found three more forms, each at a different page scale: a page replaced by "The text of this document is not available in the original format." repeated, an invented opening paragraph, and an invented page ("The Army's 2015-2016 budget …") that closes cleanly and passes every §3.10 check | cap/loop detection flags the lost page (§3.10); on born-digital PDFs a per-page similarity against the text layer sees the invented ones (S11's dropped to 0.50 and below against ≥ 0.75 for clean pages), so PR 7's §8.2 rule 2 score is also a candidate `run.json` warning (PR 7 found it marks a lost and an invented page alike: GAO-07-631 p24 scores 0.02 lost and 0.32 invented, so only the cap flag tells them apart); `--text-source pdf` for trusted born-digital PDFs (§3.2). **Decided in PR 7:** prose numbers are not scored separately. The per-page edit distance against the text layer already charges a "73" for "7.3", and a separate number check would need the same page pairing to say which number belongs where |
 | The eval corpus can't be licensed cleanly | Task C | public-domain US federal sources + project-made PDFs only (§4.1) |
+
+## 18. v1.x — the UI (proposed 2026-10-30)
+
+**Status: proposed, not approved.** v1.0.0 shipped on 2026-10-30 (§10, PR 9). This
+section turns §14 (theme) and §15 (layout) into a build plan. It is PR 10's content,
+and the design freezes when the user approves it and the U-spikes (§18.6) report. Like
+§1–§13, every decision carries its reason. Decisions marked **(proposed)** are this
+section's recommendations and await that approval. **Reviewed cold on 2026-10-30:**
+19 findings, each checked against the code or Streamlit 1.66.1's source and folded in
+below. One was a v1.0.0 bug, which PR 11 fixes before any UI work (§18.7).
+**Decided with the user (2026-10-30):** the subprocess design (§18.2), row positions
+in chart warnings (§18.4 rule 3), the gate split (§18.5), and the defaults: `~/gdi-out`,
+30-day cleanup that never touches the output root, and a closed tab not stopping a run
+(§18.2, §18.3). Each is marked **(decided)** where it is made.
+
+### 18.1 Goal and non-goals
+
+**Goal:** a local Streamlit app, started with `gdi ui`, that does what `gdi convert`
+does for someone who would rather not use a terminal:
+
+1. pick PDFs (and optionally a KVP schema) and the §3.6 options;
+2. convert them, with progress, cancel, and the run lock's wait made visible;
+3. browse the results of any output tree: this run's or an earlier one's.
+
+**Non-goals for v1.x:**
+
+- **No change to what a conversion produces.** The UI runs the same pipeline with the
+  same options, so the eval (§8) still covers every output, and no UI PR is
+  model-touching under CLAUDE.md's rule unless it changes the pipeline too. Changes to
+  `run.json`'s *bookkeeping* (§18.3: a timestamp, the warnings' fixed prefix) are not
+  output changes in this sense, and each is named where it is made.
+- **No network serving, no multi-user use.** §3.13's threat model is unchanged: the UI
+  listens on loopback for the person at the Mac. A browser adds attackers §3.13 never
+  had to consider (other web pages and other local web apps), and §18.4 deals with them.
+- **No database.** Listing earlier runs scans for `run.json` files; §3.12.1's rebuildable
+  SQLite cache is built only if that scan is measured too slow (§18.3).
+- **No editing of outputs**, no re-running a single chart or page, no comparing two
+  runs. Each is a reasonable item for a later release; none is needed to replace the
+  terminal.
+- **The library stays usable without Streamlit** (§1). Streamlit is an optional extra,
+  and nothing under `src/granite_document_intelligence/` outside `ui/app.py` imports it.
+
+### 18.2 How the UI runs a conversion (decided: a `gdi convert` subprocess)
+
+§1 and §3.7 anticipated a UI calling the library in-process ("built *on top of* the
+§3.7 library API"; `convert()` returns data "so a UI can show results without touching
+disk"). **(Decided with the user, 2026-10-30.)** Instead, the UI starts
+**`gdi convert` as a child process** and reads its results from the output tree, and
+PR 10 amends both passages. The library is still the product: the child is the library, behind the CLI's
+exit codes and resume, which `convert_many` owns (§3.7).
+
+**Why:**
+
+- **Memory goes back when the child exits.** The release helper returns MLX's active
+  memory to 0 between phases (S4), but torch (~0.3 GB), the Python heap and allocator
+  caches stay with the process. In-process, the Streamlit server would carry them from
+  the first conversion until it is stopped, beside the next run's 6.68 GB peak (U4
+  measures the server's share).
+- **A crash stays in the child.** A Metal out-of-memory abort or a pdfium fault takes
+  down `gdi convert`, not the app the user is looking at. The UI reports the exit status
+  and what the events file recorded (§18.2's events).
+- **Cancel is a signal, not a cooperation protocol.** SIGINT to the child takes the CLI's
+  Ctrl-C path (exit 130, the summary of what finished, §3.8). That path is tested only
+  with a mocked `KeyboardInterrupt` in-process (`tests/test_cli.py`), so U3 delivers a
+  real SIGINT mid-page, mid-chart and mid-KVP. In-process cancel would need a flag
+  checked in our `stream_generate` loop (`charts.py`, `kvp.py`) and in Docling's page
+  loop, which we do not own. Streamlit stops a script only cooperatively, at its next
+  `st.*` call, so the session cannot cancel the work either.
+- **It is the first step of §3.13 rule 4's upgrade path** (conversion in a separate
+  process), and of §12's deferred per-PDF timeout, which a parent process can enforce.
+- **Files are the source of truth** (§3.12), so the viewer reads the §3.5 tree and shows
+  the same thing for this run and for one from last month.
+
+Not reasons: the run lock serialises two in-process callers on different threads
+correctly (checked in review: two threads each taking `run_lock(wait=True)` queued,
+no deadlock). CLAUDE.md's deadlock is nested acquisition on one call path.
+
+**What it costs:** one interpreter start and the library's imports per run, not per PDF,
+**unmeasured** (U3 measures it; the 7.13 s cold start, §3.11, is model load, which both
+designs pay); and a machine-readable progress channel the CLI lacks today. Progress goes
+to stderr through `logging` as prose (`[2/6] report.pdf`, `  page 3/24`), and parsing
+our own prose is the degenerate-check mistake §8.1 warns about in another form.
+
+**Proposed: `gdi convert --events PATH`** appends one JSON object per line to a file,
+flushed after each line, keeping stderr's prose as it is. **A file, not stdout:** a pipe
+whose reader goes away (a closed tab, a restarted server) either fills its ~64 KB
+buffer and blocks the child while it holds the run lock, or raises `BrokenPipeError`,
+which inside `pipeline.run` would reach `batch._one`'s per-PDF `except Exception` and
+record every remaining PDF as failed, replacing good trees under `--force`. A file has
+neither failure, survives the server, and is what lets a reopened tab find a running
+conversion (U3).
+
+Rules for the writer:
+
+- **A failed event write never fails a PDF.** The writer catches its own `OSError`,
+  logs one warning, and turns itself off; conversion continues. A test makes the file
+  unwritable mid-batch and asserts every PDF still converts.
+- **Every line carries `"v": 1`**, because this is a public CLI contract; a reader
+  skips lines it cannot parse or whose `v` it does not know.
+- **Counts, our own paths and our own error classes only**, never PDF text or model
+  output, so §3.13 rule 5 holds for the channel. The `error` event's message is
+  `safety.error_record`'s type plus our own message for the batch-level errors we raise
+  (`BatchError`, `SchemaError`, `ModelsNotReadyError`, `RunLockedError`), not `str()` of
+  an arbitrary exception, which can quote a PDF.
+
+```text
+{"v": 1, "event": "waiting", "holder_pid": 4711}           # the run lock is held
+{"v": 1, "event": "batch", "total": 6}
+{"v": 1, "event": "pdf", "position": 2, "total": 6, "pdf": "…", "out_dir": "…"}
+{"v": 1, "event": "page", "completed": 3, "total": 24}
+{"v": 1, "event": "chart", "position": 1, "total": 9, "page_no": 12}
+{"v": 1, "event": "kvp", "position": 1, "total": 1, "page_no": 1}
+{"v": 1, "event": "result", "pdf": "…", "status": "done" | "skipped" | "failed"}
+{"v": 1, "event": "error", "kind": "usage" | "models" | "locked", "message": "…"}
+{"v": 1, "event": "interrupted"}
+{"v": 1, "event": "summary", "done": 5, "skipped": 0, "failed": 1}
+```
+
+`error.kind` follows the exit codes (§3.8): `usage` is exit 2 (`BatchError`,
+`SchemaError`, a bad flag), `models` and `locked` are exit 1. **A crash writes nothing:**
+a Metal abort or a SIGKILL bypasses every handler, so no error `run.json` and no
+`result` event exist. The UI infers it from a `pdf` event with no `result` and a
+negative return code, and shows "crashed during <pdf>"; that PDF's folder holds whatever
+the previous run left, plus `.partial` residue (§18.3).
+
+The UI branches on `event` and `kind`, which our code wrote, never on a value a model
+produced (CLAUDE.md's rule). The same file is useful to any script that drives `gdi`,
+which is why this is a CLI feature rather than a private UI protocol.
+
+**The runner** starts `sys.executable -m granite_document_intelligence.cli convert …`
+(the same interpreter and install as the server, and the seam where tests substitute a
+`$STUB_*`-driven stub) with `start_new_session=True`, so a Ctrl-C to the server's
+terminal does not also hit the child unasked. Each run gets
+`$GDI_CACHE_DIR/ui/runs/<run-id>/` holding `events.jsonl`, `stdout.txt`, `stderr.txt`,
+`argv.json` and `pid`; the child's stdout and stderr go to those files, never a pipe.
+The Run view shows `stderr.txt` as text (§18.4 rule 3). Run folders older than 30 days
+are deleted when the UI starts **(decided)**. Cleanup covers `ui/runs/` and `ui/inputs/`
+only, both copies the UI made, and **never touches the output root**: those results are
+the user's, and nothing deletes them on a timer (the lesson of PR 11's bug).
+
+**The rejected alternative, kept for the record:** in-process `convert_many` in a
+background thread with a progress callback. It is simpler to start (no event schema,
+no second interpreter), but it keeps the pipeline's residual memory in the server, puts
+a model crash in the user's window, and has no cancel without patching Docling's page
+loop. Streamlit 1.66's `st.fragment(parallel=True)` runs work concurrently but still
+stops it only cooperatively, so it does not change this. Reopen it only if Streamlit
+gains a supported way to stop background work tied to a session.
+
+### 18.3 What the UI shows
+
+The layout is §15's, unchanged: settings in the sidebar, a Convert row, four count
+tiles, one notice slot, a pill switcher over six views. Each view reads files from one
+PDF's output folder (§3.5):
+
+| View | Reads | Shows |
+|---|---|---|
+| Document | `document.md`, `pictures/` | the Markdown through `render.py` (§18.4 rule 2), in the 760 px column |
+| Tables | `tables/*.csv`, `document.json` | `st.dataframe(width="content")` per table; its page from `document.json`, since the CSV carries none |
+| Charts | `charts/*.png`, `*.csv`, `*.raw.txt`, `*.summary.txt`, `*.py`, `run.json` | §15's card grid: crop (`st.image`), CSV (dataframe), summary (`st.text`), the card's own warnings (below), raw text when no CSV came back, and code only under `--chart-code` (§18.4 rule 4) |
+| Key-values | `kvp.json` | merged values, conflicts, `valid` and `errors`, all as `st.json` or dataframe (hidden when there was no schema) |
+| Chunks | `chunks.jsonl` | text, headings and pages as dataframe rows, paged rather than all at once |
+| Run | `run.json`, the run folder (§18.2) | status, timings, peak memory, warnings, the four model pins, the command line |
+
+**Warnings on the card they belong to.** `run.json`'s warnings are prose today
+(`chart-001 (page 3): …`, `charts.py`). Matching that is parsing our own prose, unless
+the prefix is a contract. **(Proposed)** PR 12 pins it: every chart warning starts
+`chart-NNN (page N): `, a test in `test_charts.py` asserts the format for each warning
+kind, and the reader matches only that prefix. A structured `warnings_detail` field in
+`run.json` is the alternative; it is cleaner but changes `run.json`'s shape, which every
+existing tree lacks.
+
+**Which results are shown.** A selector lists every folder under the chosen output root
+that holds a `run.json`, by its modification time, newest first (`run.json` records no
+timestamp, and adding one would make every existing tree differ). It skips names ending
+`.partial` or `.old`, which can hold a `run.json` after a crash (export writes `run.json`
+into the staging folder before the swap), and stops descending into a folder once it
+holds a `run.json`. An error `run.json` opens on the Run view with its error record.
+**The trigger for §3.12.1's SQLite cache** is this scan measuring over 1 s on the user's
+real output root, not a guess about size.
+
+**The viewer reads the §3.5 layout as a contract.** Until now only `export.save` and the
+eval depended on it. A test round-trips a mocked `ConvertResult` through `save()` into
+the viewer's reader, so a layout change that breaks the UI fails the gate rather than
+showing an empty view.
+
+**Counts and notices.** The four tiles are pages, tables, charts and chunks for the
+selected PDF, read from `run.json` and the tree. The notice slot carries exactly one of:
+waiting for the run lock (with the holder's pid), a run in progress (from the events
+file), done, failed, crashed, or a batch refused before it started (`error` event; for
+`usage`, the message names the conflicting inputs). `run.json`'s warnings belong to the
+Run view and to their cards, not to the notice slot, so a capped page does not read like
+a failed run.
+
+**Inputs.** Two ways in, both ending in an ordinary path on disk the CLI is given:
+
+- **A folder path** **(proposed as the primary way)**: a text field naming a PDF or a
+  directory of them, passed to `gdi convert` as is. Directory structure is kept, which
+  is the collision §3.8's relative paths exist to prevent, and nothing is copied.
+- **Uploads**, through `st.file_uploader(accept_multiple_files=True)`, for files not yet
+  on disk. Each is written to `$GDI_CACHE_DIR/ui/inputs/<sha256>/<name>`, where `<name>`
+  is the uploaded name passed through `safety`'s containment (it is the raw multipart
+  filename and can be empty or hold separators), and then removed from the uploader:
+  Streamlit holds uploads in the server's memory (`MemoryUploadedFileManager`), so U4
+  measures a 200 MB upload. Uploads flatten into one folder, so **before starting**, the
+  UI refuses two uploads whose names case-fold to the same stem, naming both, rather
+  than letting the CLI exit 2. A different file uploaded later under an earlier one's
+  name replaces that earlier result, as the CLI does; the UI says so before it starts.
+  Input folders unused for 30 days are deleted at UI start **(decided)**; see §18.2 on
+  what cleanup never touches.
+- **The schema** is uploaded or named by path, and an uploaded one is written to
+  `inputs/<sha256>/` too, so its path is stable. That matters for resume: "done"
+  compares the recorded options, which include the schema's **path** as a string
+  (`ConvertOptions.as_dict`), as well as its content hash. The PDF's path does not
+  matter to resume at all. Only the input's SHA-256 and the options do (`batch.is_done`).
+  A UI run and a CLI run with the same schema at different paths therefore re-convert
+  each other's output. That is v1 behaviour and is stated in the UI's help text, not
+  changed here.
+
+The output root is a text field, defaulting to `~/gdi-out` **(decided)**. It is not
+`~/Documents/…`, because that is TCC-protected on macOS: the first write prompts, or
+fails with `EPERM`, depending on what launched the server. The upload limit is set to
+`max_file_mb` (200, the same 1024² unit `safety` uses), so the browser refuses what the
+pipeline would.
+
+**Settings map one to one onto `gdi convert` flags**, so a run from the UI is a run from
+the terminal: `--no-charts`, `--chart-code`, `--no-chunks`, `--chunk-tokens`,
+`--text-source`, `--pages`, `--save-page-images`, `--force`, `--schema`. The Run view
+shows the exact command line from the run folder's `argv.json` for runs this server
+started, and one rebuilt from `run.json`'s `options` for older trees, labelled as rebuilt.
+
+### 18.4 Security (§3.13 applied to a browser)
+
+The threat model is §3.13's: the adversary is the PDF's author, and the user is trusted.
+A browser adds two surfaces the CLI never had, **a listening socket and an HTML
+renderer**. Model output now reaches the second. Two further parties can reach the
+first: any web page the user visits (through DNS rebinding) and any other web app on
+localhost.
+
+1. **The launcher forces every security key, not only the address.** Streamlit resolves
+   config per key: defaults < `~/.streamlit/config.toml` < `$CWD/.streamlit/config.toml`
+   < the script's own `.streamlit/config.toml` < environment < command-line flags
+   (`streamlit/config.py`). A flag therefore wins for the key it names, and only that
+   key. Review showed a global config's `allowedHosts = ["*"]` and
+   `enableXsrfProtection = false` surviving when only the address was forced. `gdi ui`
+   passes all of these as flags:
+
+   | Key | Value | Why |
+   |---|---|---|
+   | `server.address` | `127.0.0.1` | loopback only; also skips Streamlit's external-IP lookup at start |
+   | `server.allowedHosts` | `localhost`, `127.0.0.1` | the default `[]` accepts any Host header, which is what DNS rebinding needs (Streamlit's own option text) |
+   | `server.enableXsrfProtection` | `true` | cannot be turned off by a user config |
+   | `server.enableCORS` | `true` | same |
+   | `server.headless` | `true` | the launcher opens the browser itself, once |
+   | `server.fileWatcherType` | `none` | the watcher would scan the app's folder and site-packages for module changes; there is nothing to reload |
+   | `server.enableStaticServing` | `true` | the fonts (§14) |
+   | `server.maxUploadSize` | `200` | `max_file_mb` (§18.3) |
+   | `browser.gatherUsageStats` | `false` | no telemetry: §3.10 allows the Hugging Face Hub as the only network contact |
+   | `browser.serverAddress` | `localhost` | the URL printed and opened |
+
+   A test asserts the launcher's argv holds every row. U1 confirms each against a
+   hostile `~/.streamlit/config.toml` that sets every row's opposite, and confirms that
+   a WebSocket with `Host: evil.example` is refused.
+
+   **Residual risk, stated in `SECURITY.md`:** Streamlit's origin check accepts any
+   `localhost` origin on any port (it compares the hostname only), so **another web app
+   running on localhost can drive the UI**. That is within "a compromised Mac" only if
+   that app is malicious. A vulnerable dev server on another port is the realistic case.
+   It is accepted for v1.x and named. Also, when a non-local origin knocks, Streamlit's
+   origin check may call `get_external_ip`, which fetches `checkip.amazonaws.com`; with
+   `allowedHosts` set the Host check should refuse first. U1 verifies the order, and if
+   the fetch can still happen, it is stated as a network contact the user did not ask for.
+
+2. **Rendered Markdown fetches nothing, and nothing in it is a link.** `document.md` is
+   model output. Docling escapes raw HTML in its Markdown export but passes Markdown
+   images and links through. Review exported `![x](https://evil.example/a.png)` and
+   `[y](javascript:alert)` and both survived, and a rendered remote image is a request
+   the PDF's author chose: a tracking beacon, and a network contact §3.10 does not allow.
+   `render.py` therefore:
+   - splits `document.md` at image references and renders each one whose target is a
+     relative path **contained in the PDF's output folder** with `st.image` (Streamlit
+     serves it through its media manager). It drops every other image, keeping the alt
+     text as plain text. Relative URLs in `st.markdown` resolve against the app, and app
+     static serving reaches only the script's own `static/` folder, so "serve it from the
+     output folder" is not available.
+   - replaces every link, inline, reference-style, reference definition or autolink, by
+     its text. Even a relative link only navigates inside the app.
+   - escapes `$` (Streamlit renders `$…$` as LaTeX, which would garble "$5 and $3") and
+     Streamlit's directives (`:red[…]`, `:material/…:`, emoji shortcodes).
+   - renders with `unsafe_allow_html=False`, Streamlit's default, never changed.
+
+   A test feeds a hostile `document.md` (remote inline and reference images, a
+   `javascript:` link, an autolink, a reference definition, raw `<img>`, `$5 and $3`,
+   `:red[x]`) and asserts that none survives as markup. U2 checks the real app with the
+   browser's network log. **Fallback:** if the neutraliser is ever in doubt, the
+   Document view renders `st.text`. It is ugly, but it fetches nothing.
+
+3. **Every other string from the output tree is shown as text, never as markup.** Model
+   text reaches more than `document.md`. `run.json`'s warnings quote model-written chart
+   labels (`charts.py`'s summary check writes `"{label} {claimed} (CSV: …)"`, and a label
+   only has to avoid digits). `kvp.json`'s `errors` are jsonschema messages that quote
+   model values, chunk headings are model text, and file and folder names come from the
+   input. Streamlit renders Markdown, images included, in widget labels, `st.pills`
+   options, `st.error`/`st.warning`/`st.info`/`st.success` bodies, expander labels,
+   captions, `st.metric` labels and `st.toast`. So **any string read from the output tree,
+   the events file or a file name** is shown only through `st.text`, `st.code`, `st.json`
+   or dataframe cells, or through `render.py`'s neutraliser. It is never a label, an
+   alert body, a pill option, a caption, a toast or a metric label. The notice slot's
+   messages are our own fixed strings, with any tree-derived part shown beneath them as
+   `st.text`. The hostile-input test covers `run.json` warnings, `kvp.json` errors, chunk
+   headings and a file name.
+
+   **A pre-existing gap this exposes:** §3.13 rule 5 says no document content goes into
+   `run.json`, yet the chart warnings quote CSV labels, which are document content as the
+   model read it. The sentinel test (`test_safety.py`) covers a controlled failure
+   message only. **Decided with the user (2026-10-30): the warnings change, rule 5
+   does not.** PR 12 names the row by its position, e.g.
+   `chart-003 (page 5): row 4: summary 12, CSV 9` in place of `Navy 12 (CSV: 9)`. The
+   warning stays usable, since row 4 is one click away in the CSV, and an exception to
+   rule 5 would weaken the rule that makes `run.json` safe to paste into a bug report.
+   The eval is unaffected: `eval/score.py` matches only the `page N:` prefix and counts
+   warnings. `test_charts.py`'s expected text changes with it, and the sentinel test
+   gains a chart label. The UI still treats warnings as untrusted text (rule 3), now as
+   a second line of defence.
+
+4. **Generated chart code is shown, never run.** `chart-NNN.py` appears in `st.code` under
+   its "Untrusted: review before running" header (§3.10). The UI has no "run" button for
+   it, and no PR may add one.
+5. **Uploaded names never become paths unchecked.** The upload path is built from the
+   content hash and a contained name (§18.3). The output folder comes from the CLI's own
+   rule (§3.10), not the UI.
+6. **No secrets or document content in the UI's own logs.** The server logs nothing about
+   documents beyond what `gdi convert` already logs. The §3.13 rule 5 sentinel test
+   extends to the events file and to the launcher.
+
+`SECURITY.md` gains a paragraph: the UI listens on loopback only, exposing it to a network
+is unsupported, and the localhost-origin residual risk (rule 1).
+
+### 18.5 Packaging and code layout
+
+- **An optional extra, `granite-document-intelligence[ui]`**, holding
+  `streamlit>=<U-spikes' version>,<2`. The cap follows §2.2's "caps guard API drift".
+  §15 also depends on behaviour that a Streamlit *minor* can move (`bind=`, integer
+  `width=`), so any Streamlit move in `uv.lock` re-runs §15's width check, as a model
+  package move re-runs the eval. The existing `ui` dependency group stays for the
+  prototypes and depends on the extra.
+- **`gdi ui`** checks that Streamlit imports, and if not, prints the install command and
+  exits 1 (no traceback). Otherwise it starts Streamlit **in its own process** through
+  `streamlit.web.bootstrap` with §18.4 rule 1's flags (U1 confirms the API applies them
+  as flags do), so there is no `gdi` → `streamlit` → script chain of three processes to
+  forward signals through. It does not check the models directory, because browsing
+  needs no model, and `gdi convert` already refuses an unready one with a message the UI
+  shows.
+- **Code** under `src/granite_document_intelligence/ui/`:
+  - `app.py` is the Streamlit script, layout only, and the only module that imports
+    Streamlit.
+  - `reader.py` holds the §3.5 reader and the run listing.
+  - `runner.py` holds the subprocess, the run folders and the events parser.
+  - `render.py` holds the neutraliser of §18.4 rule 2.
+
+  The `--events` writer lives in the library (`batch.py` and the phases' progress
+  points), not under `ui/`, because it is a CLI feature.
+- **Theme and fonts.** §14's "When the UI is built" steps 1–2 apply, adapted to a
+  package:
+  - The config ships as `ui/.streamlit/config.toml`. Streamlit 1.66 reads a
+    `.streamlit/config.toml` beside the main script, ahead of the working directory's
+    and the global one, and `uv_build` ships dot-directories in the wheel (both checked
+    in review). U1 confirms this on an installed wheel.
+  - The Plex fonts come back from `v0.6.0` to `ui/static/fonts/`.
+  - `license-files` gains `src/granite_document_intelligence/ui/static/fonts/LICENSE.txt`.
+  - The theme guard returns with §14's new invariants.
+- **Tests.**
+  - `reader`, `runner` and `render` are tested like the rest of the library, with the
+    child replaced by a `$STUB_*`-driven stub through the `sys.executable -m …` seam.
+    Per CLAUDE.md, that means a new environment variable, never a file per test.
+  - `app.py` is tested with `streamlit.testing.v1.AppTest` against a fixture tree, for
+    §15's behaviours (pill restore, lazy views, `?view=`), the six views' content and
+    uploads (`file_uploader.set_value`).
+  - **The gate budget is tight, and planned for.** Review measured importing
+    `streamlit.testing.v1` at 0.15–0.4 s, and `layout.py`'s first `AppTest` run at
+    0.79 s, then ~0.14 s per run, against ~2.8 s of headroom (11.6–12.2 s today, ≤ 15 s,
+    §3.14 rule 9). PR 12 shares one session-scoped fixture tree and measures the gate.
+    If the UI tests still push it past 15 s, **(decided with the user, 2026-10-30)** only
+    the `AppTest` tests (layout and the six views) move behind a marker that CI runs and
+    the Stop hook skips. The security tests stay in the Stop-hook gate, because they are
+    plain Python and cheap: the renderer, the hostile inputs, the launcher's flags and
+    the no-Streamlit check. A layout regression caught by CI minutes later costs little.
+- **"Works without Streamlit" is tested, not assumed.** `default-groups` includes `ui`,
+  so the gate always has Streamlit installed. A test runs `cli.main(["convert", …])`
+  against stubs in a subprocess with `streamlit` blocked from import
+  (`sys.modules["streamlit"] = None` before the package loads). `TestImportCost` gains
+  `streamlit` for every module outside `ui/app.py`.
+
+### 18.6 Spikes (in PR 12, before its code)
+
+Each has a question and a decision rule, like §4. Results go into
+`pdf-pipeline-spikes.md` under a v1.x heading. Review answered parts of U1 and U2 from
+Streamlit's source, and the spikes confirm those parts on the running app.
+
+| Spike | Question | Decides |
+|---|---|---|
+| **U1** config and socket | On an installed wheel: does `ui/.streamlit/config.toml` apply the theme from any working directory? Does every §18.4 rule 1 flag beat a hostile `~/.streamlit/config.toml` that sets its opposite? Is a WebSocket with `Host: evil.example` refused before any external-IP lookup? Does `streamlit.web.bootstrap` take the flags as `streamlit run` does? | §18.4 rule 1 and §18.5's packaging. If a flag does not win, `gdi ui` refuses to start while that key is set elsewhere and names the file |
+| **U2** rendering | With the neutraliser off, which constructs make `st.markdown` (HTML off) issue a request? With it on, does the hostile `document.md` make any request in the browser's network log? Do `st.image` crops render at the card width? | §18.4 rule 2, as specified or with the plain-text fallback |
+| **U3** lifecycle | What happens to a child `gdi convert` when its session reruns, its tab closes, a second tab opens, and the server stops? Does a real SIGINT mid-page, mid-chart and mid-KVP give exit 130 and a free lock? What do interpreter start and imports cost per run? | §18.2's runner. Decided: a closed tab does not stop the child; reopening the UI finds it through `ui/runs/*/pid` and its events file |
+| **U4** memory | Server RSS idle, while showing GAO-07-631's results (9 charts, its tables, its chunks), and while holding a 200 MB upload, each beside a conversion's 6.68 GB peak | whether the Mac stays inside §3.11's 10 GB ceiling with the UI open; paging of the Charts and Chunks views if it does not |
+
+### 18.7 Delivery
+
+The rules are §10's: one PR per step from a fresh branch, linear `main`, the full gate
+before push, and plan amendments in the PR that finds them.
+
+| PR | Branch | Contents | Commit type | Merge gate (besides CI) |
+|---|---|---|---|---|
+| 10 | `docs/ui-plan` | this section; §0, §1, §3.7 and §12 amended to point to it | `docs:` | user approval |
+| 11 | `fix/swap-guard` | **a v1.0.0 bug, found in review:** `export.swap_into_place` renames whatever folder sits at the output path to `.old` and deletes it, gdi's or not, and `save_error` goes through the same swap. `gdi convert ~/Downloads/Documents.pdf -o ~` would delete `~/Documents`, and the overlap check (§3.8) compares only jobs within one batch. Fix: refuse to replace an existing folder that holds no gdi `run.json` (and is not empty), recorded as that PDF's failure without touching the folder; a test for the success and the error path; `version = "1.0.1"` + `uv lock` | `fix:` | the reproduction in a test; eval not required (no output changes); released as 1.0.1 |
+| 12 | `feat/ui-viewer` | U1–U4 in the spike report; the `[ui]` extra, `gdi ui`, theme, fonts and theme guard (§14), `reader`, `render`, the warnings prefix contract and the §18.4 rule 3 gap's resolution (§18.3, §18.4), the six views read-only over an existing tree, `AppTest` tests | `feat:` | user approves U1–U4; §15's widths re-measured on GAO-07-631's real output at 768, 1024, 1280, 1440, 1920 and 2560 px with page overflow 0 at each (phones cannot reach a loopback-only app; 768 stands in for a half-screen window); the hostile inputs render nothing remote; gate ≤ 15 s |
+| 13 | `feat/progress-events` | `gdi convert --events PATH` (§18.2) with its schema in the README and a test per event, the unwritable-file test, the sentinel test extended | `feat:` | a hand run on the public corpus with `--events`, its event file in the PR description; README updated in this PR (CLAUDE.md: CLI changes are mirrored there) |
+| 14 | `feat/ui-convert` | inputs (path and uploads), the sidebar settings, `runner` (§18.2): run folders, progress, cancel, lock wait, errors, crash | `feat:` | the equivalence check below on the whole public corpus; cancel mid-page, mid-chart and mid-KVP; U4 re-run on the real app |
+| 15 | `docs/ui` | README (a UI section with both screenshots and `gdi ui`), CLAUDE.md, `SECURITY.md` (§18.4) | `docs:` | every new README command run as written |
+| 16 | `chore/release-1.1.0` | `version = "1.1.0"` + `uv lock`, both files | `chore:` | every §18.8 item checked; eval on the release commit meets baseline and budgets |
+
+**Why the viewer comes before `--events`:** the viewer needs no conversion and carries
+U1 and U2, the riskiest unknowns. Building it first means the security model is settled
+before the UI can start a run.
+
+**The equivalence check** (PR 14 and §18.8) runs on one commit with one set of options:
+convert the public corpus with `gdi convert` into one root and from the UI into another,
+then `diff -r` the trees. In each `run.json`, timings, peak memory, `output_bytes` and the
+PDF's absolute path are excluded. Any other difference fails. This replaces a comparison
+with earlier PRs' results, which were measured on a different corpus (the scan and the
+changed adversarial page joined later, §10 PR 2).
+
+**1.1.0, not 2.0.0:** the UI adds to the CLI and the API and removes nothing.
+
+### 18.8 Definition of done for v1.x (1.1.0)
+
+- [ ] 1.0.1 is released with the swap guard (PR 11).
+- [ ] U1–U4 have verdicts, and the user approved them.
+- [ ] `gdi ui` starts with every §18.4 rule 1 key forced: the argv test, plus U1's
+      hostile `~/.streamlit/config.toml` setting each key's opposite, re-run on the
+      release commit, and a `Host: evil.example` WebSocket refused.
+- [ ] The equivalence check (§18.7) passes on the whole public corpus, and the six
+      views show each PDF's results.
+- [ ] Cancel works mid-page, mid-chart and mid-KVP: the child exits 130 and the lock is
+      free. Any `.partial` it leaves is removed by the next `gdi convert` of that PDF,
+      and the run listing never shows one.
+- [ ] Nothing in a PDF or the output tree makes the browser issue a request: the
+      hostile-input test (rules 2 and 3) and U2's network-log check on the release commit.
+- [ ] The library imports and `gdi convert` runs with Streamlit blocked from import
+      (§18.5's test).
+- [ ] §15's layout holds on real content at the six widths in PR 12's gate, both themes
+      re-rendered (§14 step 5).
+- [ ] Gate green and ≤ 15 s; the eval meets baseline and budgets on the release commit.
+- [ ] README, CLAUDE.md and `SECURITY.md` describe the UI; every README command run as
+      written.
+
+### 18.9 Risks
+
+| Risk | Earliest signal | Fallback |
+|---|---|---|
+| A web page drives the UI through DNS rebinding, or a user config reopens a security key | U1; the launcher's argv test | every key forced by flag (§18.4 rule 1); if a Streamlit release stops honouring one, `gdi ui` refuses to start and names the key |
+| Another localhost web app drives the UI | (accepted) | named in `SECURITY.md`; reopen if Streamlit can check the origin's port |
+| Model text renders as markup, so a remote image loads or a link is planted | U2; the hostile-input test | rule 3's text-only rendering everywhere but the Document view, and its `st.text` fallback |
+| A conversion deletes a folder the user owns | PR 11's test | the swap guard; until 1.0.1, avoid naming an output root whose children share PDF stems |
+| The events channel fails the conversion it reports on | PR 13's unwritable-file test | the writer turns itself off; conversion never depends on it |
+| The UI tests push the gate past 15 s | PR 12's gate timing | a session-scoped fixture; else a marker CI runs and the Stop hook skips, with the user |
+| Server memory with large results or uploads pushes the Mac past 10 GB during a conversion | U4 | page the Charts and Chunks views; prefer the path input over uploads for large files |
+| A closed tab orphans a child that holds the lock for hours | U3 | the child keeps running by design and is found again through `ui/runs/`; a "stop the running conversion" control covers the rest |
+| A Streamlit minor changes `st.pills(bind=…)` or integer `width=` behaviour that §15 relies on | a Streamlit move in `uv.lock` | the floor pins what §15 measured; §15's width check re-runs on any Streamlit move |
 
 ## Appendix A — kickoff prompt for the implementing session
 
