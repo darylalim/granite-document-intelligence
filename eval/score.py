@@ -192,6 +192,22 @@ def text_layer(pdf: Path, hidden: list[str]) -> dict[int, str]:
     return pages
 
 
+def reference_text(entry: Entry) -> dict[int, str]:
+    """Rule 2's reference per page: the PDF's own visible text layer, or for a
+    print-and-scan (`scan_of`) its born-digital original's scanned pages,
+    renumbered to the scan's. A scan with no `scan_of` has no reference."""
+    manifest = entry.manifest
+    hidden = manifest.get("hidden_text", [])
+    if manifest.get("text_layer", True):
+        return text_layer(entry.pdf, hidden)
+    scan_of = manifest.get("scan_of")
+    if scan_of is None:
+        return {}
+    first, last = scan_of["pages"]
+    original = text_layer(entry.pdf.parent / scan_of["pdf"], hidden)
+    return {page - first + 1: original[page] for page in range(first, last + 1)}
+
+
 # --- Reading a converted tree ---------------------------------------------------
 
 
@@ -400,17 +416,16 @@ def score_pdf(entry: Entry, tree: Tree, tokenizer: Any | None) -> dict[str, Any]
         }
 
     # Document text and headings (rule 2).
-    reference = text_layer(entry.pdf, manifest.get("hidden_text", []))
+    reference = reference_text(entry)
     predicted, paragraphs = page_texts(tree)
     pages = {}
-    if manifest.get("text_layer", True):
-        for page, ref in reference.items():
-            pred = predicted.get(page, "")
-            pages[page] = {
-                "similarity": round(matching.text_similarity(pred, ref), 4),
-                "word_f1": round(matching.word_f1(pred, ref), 4),
-                "reading_order": matching.reading_order(paragraphs.get(page, []), ref),
-            }
+    for page, ref in reference.items():
+        pred = predicted.get(page, "")
+        pages[page] = {
+            "similarity": round(matching.text_similarity(pred, ref), 4),
+            "word_f1": round(matching.word_f1(pred, ref), 4),
+            "reading_order": matching.reading_order(paragraphs.get(page, []), ref),
+        }
     headings = [
         line.strip()
         for line in (entry.expected / manifest["headings"])
@@ -428,9 +443,10 @@ def score_pdf(entry: Entry, tree: Tree, tokenizer: Any | None) -> dict[str, Any]
         over = matching.chunks_over_limit(
             [c["contextualized"] for c in tree.chunks], tokenizer.count_tokens, limit
         )
-    # A chunk's pages are checked against the text layer, so not on a scan.
+    # A chunk's pages are checked against the reference text, so not on a scan
+    # that has none.
     page_claims = page_refs = 0
-    if manifest.get("text_layer", True):
+    if reference:
         for c in tree.chunks:
             for page in c["page_nos"]:
                 claim = matching.page_claim(c["text"], reference.get(page, ""))

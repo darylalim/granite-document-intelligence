@@ -329,6 +329,40 @@ class TestText:
         assert matching.headings_in_text(expected, md) == [True, True, True, False]
 
 
+class TestReferenceText:
+    LAYERS: ClassVar[dict[str, dict[int, str]]] = {
+        "orig.pdf": {1: "cover", 2: "two", 3: "three", 4: "four"},
+        "scan.pdf": {1: "", 2: ""},
+    }
+
+    @pytest.mark.parametrize(
+        ("manifest", "expected"),
+        [
+            pytest.param(
+                {"text_layer": True},
+                {1: "", 2: ""},
+                id="born-digital-reads-its-own-layer",
+            ),
+            pytest.param(
+                {"text_layer": False, "scan_of": {"pdf": "orig.pdf", "pages": [2, 3]}},
+                {1: "two", 2: "three"},
+                id="scan-reads-its-original-renumbered",
+            ),
+            pytest.param({"text_layer": False}, {}, id="scan-without-original"),
+        ],
+    )
+    def test_reference(
+        self,
+        manifest: dict[str, Any],
+        expected: dict[int, str],
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(score, "text_layer", lambda pdf, _: self.LAYERS[pdf.name])
+        entry = score.Entry("scan", "public", tmp_path / "scan.pdf", tmp_path, manifest)
+        assert score.reference_text(entry) == expected
+
+
 # --- Summaries ------------------------------------------------------------------
 
 
@@ -713,6 +747,21 @@ class TestScoreEndToEnd:
         assert results["public"]["adversarial"]["adv"]["degenerate_pages_unwarned"] == [
             1
         ]
+
+    def test_a_scan_is_text_scored_only_through_its_original(
+        self, eval_dir: Path
+    ) -> None:
+        """Rule 2: a scan has no text layer, so its original is the reference."""
+        path = eval_dir / "expected" / "doc" / "manifest.json"
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        manifest["text_layer"] = False
+        write_json(path, manifest)
+        _, results = run_score(eval_dir)
+        assert results["public"]["pdfs"]["doc"]["pages"] == {}
+        manifest["scan_of"] = {"pdf": "doc.pdf", "pages": [1, 1]}
+        write_json(path, manifest)
+        _, results = run_score(eval_dir)
+        assert list(results["public"]["pdfs"]["doc"]["pages"]) == ["1"]
 
     def test_a_changed_pdf_is_refused(self, eval_dir: Path) -> None:
         (eval_dir / "corpus" / "doc.pdf").write_bytes(make_pdf_bytes(pages=2))
