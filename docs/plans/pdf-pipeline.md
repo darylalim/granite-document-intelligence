@@ -2410,8 +2410,14 @@ a failed run.
 The output root is a text field, defaulting to `~/gdi-out` **(decided)**. It is not
 `~/Documents/…`, because that is TCC-protected on macOS: the first write prompts, or
 fails with `EPERM`, depending on what launched the server. The upload limit is set to
-`max_file_mb` (200, the same 1024² unit `safety` uses), so the browser refuses what the
-pipeline would.
+`max_file_mb` (200). **U4 found that the units differ:** Streamlit's server counts
+1024² bytes, as `safety` does, but its browser-side uploader counts decimal megabytes.
+It refused a 200,000,001-byte file with "File must be 200.0MB or smaller." So uploads stop
+at 200,000,000 bytes, about 9.7 MB short of the pipeline's 200 MiB. A PDF in that gap is
+given by path instead. Raising the flag to close the gap would make the uploader's hint
+read "210MB", so the flag stays at 200 and the gap is stated in the README. A held upload
+costs the server about twice its size (U4: +0.38 GiB for 200 MB), which is why it is
+written to disk and cleared from the uploader before the run starts.
 
 **Settings map one to one onto `gdi convert` flags**, so a run from the UI is a run from
 the terminal: `--no-charts`, `--chart-code`, `--no-chunks`, `--chunk-tokens`,
@@ -2444,7 +2450,7 @@ localhost.
    | `server.headless` | `true` | the launcher opens the browser itself, once |
    | `server.fileWatcherType` | `none` | the watcher would scan the app's folder and site-packages for module changes; there is nothing to reload |
    | `server.enableStaticServing` | `true` | the fonts (§14) |
-   | `server.maxUploadSize` | `200` | `max_file_mb` (§18.3) |
+   | `server.maxUploadSize` | `200` | `max_file_mb` (§18.3); the browser reads it as decimal MB (U4) |
    | `browser.gatherUsageStats` | `false` | no telemetry: §3.10 allows the Hugging Face Hub as the only network contact |
    | `browser.serverAddress` | `localhost` | the URL printed and opened |
    | `server.corsAllowedOrigins` | `http://localhost` | **added by U1.** A config's `["http://evil.example"]` let that origin open the WebSocket. A flag cannot force an empty list (1.66.1 drops it as "not given"), and localhost is always allowed, so this value adds nothing |
@@ -2672,7 +2678,7 @@ before push, and plan amendments in the PR that finds them.
 |---|---|
 | 10 | merged 2026-10-30 (#14, `a350956`); §18 approved by the user |
 | 11 | merged 2026-10-30 (#15, `5fe06e1`); CI published `v1.0.1` |
-| 12 | in progress on `feat/ui-viewer`: U1 and U2 approved (four keys added and the external-IP lookup disabled; rule 2 rewritten as fail-closed escaping, `render.py` landed); U3 done (pass; the runner's liveness and cancel amended in §18.2); U4 next |
+| 12 | in progress on `feat/ui-viewer`: U1–U3 approved (four keys added and the external-IP lookup disabled; rule 2 rewritten as fail-closed escaping, `render.py` landed; the runner's liveness and cancel amended); U4 done (pass; no paging needed; the upload limit's units recorded); the viewer next |
 
 **Why the viewer comes before `--events`:** the viewer needs no conversion and carries
 U1 and U2, the riskiest unknowns. Building it first means the security model is settled

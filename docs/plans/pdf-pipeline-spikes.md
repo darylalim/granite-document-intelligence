@@ -2035,7 +2035,7 @@ session scratchpad, never in the repo.
 | U1 | **Pass, with four keys added and one launcher fix.** The table's ten flags win over a hostile global and working-directory config, under `streamlit run` and under `bootstrap`; the packaged theme applies from any working directory; `Host: evil.example` is refused before any lookup. But a hostile `server.corsAllowedOrigins` admitted an `evil.example` WebSocket, `bootstrap.run` alone applies no flag at all, and any foreign-origin knock fetched `checkip.amazonaws.com` | yes: four keys join §18.4 rule 1; the launcher loads config itself and disables Streamlit's external-IP lookup (with the user); the HTTP routes' missing Host check is a stated residual (§18.4, §18.5) |
 | U2 | **Pass, with a different neutraliser.** Unneutralised, eight Markdown image forms fetched from the PDF author's host; raw HTML and KaTeX fetched nothing. With `render.py` on, the hostile document made no request and rendered no image, link, LaTeX or icon, and GAO-07-631's real document made no request beyond the app. A backslash cannot stop GFM's bare links or Streamlit's `:streamlit:`/`:material/…:` swaps; a U+2060 joiner does. Crops render at the card width or narrower with `width="content"`. A framing page can drive the app only from an allowed origin, but it can always frame it and read what the app posts | yes: rule 2 rewritten as fail-closed escaping (§18.4); only fixed view names in the query string and a fixed page title (rule 3); framing is a stated residual |
 | U3 | **Pass, with two runner amendments.** A real SIGINT mid-load, mid-page, mid-chart and mid-KVP gave exit 130 and a free lock every time (0.07–4.4 s after the signal), with no process left over, no `.partial`, and the previous tree untouched. The child survives reruns, a closed tab and Ctrl-C in the server's terminal (`start_new_session` is load-bearing: the control without it was interrupted). Per run, the interpreter and CLI import cost 0.05 s and the heavy imports ~4.5 s. But a finished child sits as a zombie that `kill(pid, 0)` reports alive, and only the server that started it can read its exit status | yes: the runner keeps every `Popen` in a process-wide registry and polls it; liveness comes from the events file, the registry and the recorded start time, never from the pid alone; cancel is `killpg(SIGINT)`; the start cost is recorded (§18.2) |
-| U4 | pending | |
+| U4 | **Pass: no paging needed.** Beside a conversion at its chart-stage peak (MLX 6.15 GiB), the server held 0.12 GiB idle, 0.14 GiB with all of GAO-07-631's views rendered, and 0.50 GiB holding a 200 MB upload. There was no swap and no slowdown (median chart time 9.79 s alone, 9.77–10.03 s with the UI). Found on the way: the browser's upload limit counts decimal MB | yes: the Charts and Chunks views stay unpaged; the upload limit's units and a held upload's 2× cost recorded (§18.3, §18.4) |
 
 ## U1 — config and socket (2026-10-30)
 
@@ -2373,3 +2373,82 @@ child from a query parameter and listed the run folders, checking each pid with
 - Cancel is `os.killpg(pid, SIGINT)`.
 - The 4.5 s per-run import cost is recorded and accepted, with the reasons §18.2 already
   gives.
+
+## U4 — memory (2026-10-30)
+
+**Question** (§18.6). Server RSS idle, while showing GAO-07-631's results (9 charts, its
+tables, its chunks) and while holding a 200 MB upload, each beside a conversion's
+6.68 GB peak. **Decision:** whether the Mac stays inside §3.11's 10 GB ceiling with the
+UI open, and whether the Charts and Chunks views need paging.
+
+**Environment.** U1–U3's launcher (shipped flags) on the project's `.venv`, Streamlit
+1.66.1, the real models, M2 Pro, 16 GB, on AC power. My own session and your desktop apps
+(Chrome, the Claude app) were open but idle, about 7 GiB in use before each run. Each
+scenario ran one conversion of the 15-page `gao-07-631-scan.pdf` (`--force`; 9 charts
+found), started the way §18.2's runner starts it. `sample.py` recorded, every 0.5 s:
+- `psutil` RSS of the server, of the child, and of the headless Chrome's process tree
+  (Chrome's processes share memory, so that sum overstates);
+- system available memory and swap use;
+- `vm_stat` swapouts.
+
+The MLX peaks come from each run's `run.json` (`peak_memory_bytes`).
+
+**Scenarios.**
+- **ref:** no server, no browser.
+- **idle:** the UI open on an empty page.
+- **results:** one page holding everything the viewer will show for GAO-07-631 at once:
+  - `document.md` through `render.py`, with 15 pictures in `st.image`;
+  - 3 tables as dataframes;
+  - 9 chart cards, each with its crop, CSV dataframe and summary;
+  - 56 chunks as a dataframe;
+  - `kvp.json` in `st.json`.
+
+  The conversion started 10 s after the page finished rendering.
+- **upload:** `st.file_uploader` holding one upload of 199,999,999 bytes (below).
+
+**Results** (GiB; RSS peaks over the whole run; Chrome is the headless instance only):
+
+| | ref | idle | results | upload |
+|---|---|---|---|---|
+| server RSS before the conversion | — | 0.12 | 0.14 | **0.50** |
+| server RSS peak during it | — | 0.12 | 0.14 | 0.50 |
+| Chrome RSS peak (shared memory counted in each process) | — | 1.54 | 1.63 | 1.40 |
+| child RSS peak | 4.17 | 3.99 | 4.06 | 3.74 |
+| MLX peak, Phase A / charts (`run.json`) | 1.50 / 6.15 | 1.50 / 6.15 | 1.50 / 6.15 | 1.50 / 6.15 |
+| available before → minimum | 9.25 → 2.08 | 9.23 → 1.99 | 9.18 → 1.86 | 8.16 → 1.68 |
+| swap growth, swapouts | 0, 0 | 0, 0 | 0, 0 | 0, 0 |
+| chart time, median of 9 (s) | 9.79 | 9.79 | 9.86 | 10.03 |
+| Phase A, s/page | 7.53 | 7.68 | 7.58 | 7.62 |
+| total (s) | 235.5 | 236.2 | 239.1 | 236.7 |
+
+The MLX chart peak of 6.15 GiB is §3.11's 6.68 GB in binary units. Child RSS is below
+the MLX peak because macOS RSS does not count all of a process's Metal allocations, so
+the MLX figure is the one the ceiling applies to.
+
+**Findings.**
+
+1. **The server's share is small.** Rendering every GAO-07-631 view at once added
+   20 MB. Streamlit sends the images to the browser and keeps references, not pixels.
+   The Charts and Chunks views need **no paging** for a report of this size, and
+   §15's lazy views keep the unselected ones unrendered anyway. Chunks stay "paged
+   rather than all at once" (§18.3) for corpora far larger than 56 chunks, but U4 does
+   not require it.
+2. **A held upload costs about twice its size** (+0.38 GiB for 200 MB; Streamlit's
+   `MemoryUploadedFileManager`). §18.3 already writes uploads to disk and clears the
+   uploader before starting. U4 shows that is worth doing, not that it is urgent.
+3. **The conversion did not notice the UI.** There was no swap in any run, and chart and
+   page times stayed within 2.5% of the reference. The worst minimum available was
+   1.68 GiB, with the user's desktop apps open.
+4. **The browser's upload limit counts decimal megabytes.** The first upload run used
+   199 MiB (208,666,624 bytes) and never left the browser. Bisected with single
+   uploads: 199,999,999 bytes uploaded (`204`), and 200,000,001 bytes was refused in the
+   page with "File must be 200.0MB or smaller." Streamlit's server enforces
+   `maxUploadSize × 1024²`, as `safety.max_file_mb` does. So uploads stop about 9.7 MB
+   short of the pipeline's limit. The upload run above is the re-run at
+   199,999,999 bytes.
+
+**Verdict: pass.** With the UI open, idle, showing a full report, or holding a maximum
+upload, the conversion keeps its 6.15 GiB MLX peak. The server adds at most 0.5 GiB,
+nothing swaps and nothing slows. The ceiling is not at risk, and no view needs paging
+for U4's reasons. The upload limit's units and the upload's 2× cost are recorded in
+§18.3 and §18.4's table.
