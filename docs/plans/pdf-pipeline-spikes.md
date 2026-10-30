@@ -2034,7 +2034,7 @@ session scratchpad, never in the repo.
 |---|---|---|
 | U1 | **Pass, with four keys added and one launcher fix.** The table's ten flags win over a hostile global and working-directory config, under `streamlit run` and under `bootstrap`; the packaged theme applies from any working directory; `Host: evil.example` is refused before any lookup. But a hostile `server.corsAllowedOrigins` admitted an `evil.example` WebSocket, `bootstrap.run` alone applies no flag at all, and any foreign-origin knock fetched `checkip.amazonaws.com` | yes: four keys join §18.4 rule 1; the launcher loads config itself and disables Streamlit's external-IP lookup (with the user); the HTTP routes' missing Host check is a stated residual (§18.4, §18.5) |
 | U2 | **Pass, with a different neutraliser.** Unneutralised, eight Markdown image forms fetched from the PDF author's host; raw HTML and KaTeX fetched nothing. With `render.py` on, the hostile document made no request and rendered no image, link, LaTeX or icon, and GAO-07-631's real document made no request beyond the app. A backslash cannot stop GFM's bare links or Streamlit's `:streamlit:`/`:material/…:` swaps; a U+2060 joiner does. Crops render at the card width or narrower with `width="content"`. A framing page can drive the app only from an allowed origin, but it can always frame it and read what the app posts | yes: rule 2 rewritten as fail-closed escaping (§18.4); only fixed view names in the query string and a fixed page title (rule 3); framing is a stated residual |
-| U3 | pending | |
+| U3 | **Pass, with two runner amendments.** A real SIGINT mid-load, mid-page, mid-chart and mid-KVP gave exit 130 and a free lock every time (0.07–4.4 s after the signal), with no process left over, no `.partial`, and the previous tree untouched. The child survives reruns, a closed tab and Ctrl-C in the server's terminal (`start_new_session` is load-bearing: the control without it was interrupted). Per run, the interpreter and CLI import cost 0.05 s and the heavy imports ~4.5 s. But a finished child sits as a zombie that `kill(pid, 0)` reports alive, and only the server that started it can read its exit status | yes: the runner keeps every `Popen` in a process-wide registry and polls it; liveness comes from the events file, the registry and the recorded start time, never from the pid alone; cancel is `killpg(SIGINT)`; the start cost is recorded (§18.2) |
 | U4 | pending | |
 
 ## U1 — config and socket (2026-10-30)
@@ -2268,3 +2268,108 @@ the rest safe. The plain-text fallback is not needed. Rule 3 gains two consequen
 is a stated residual for `SECURITY.md`. `tests/test_render.py` pins the output, and a
 mutation check of the neutraliser was caught at every point but the URL-scheme guard,
 which is defence in depth (resolving the path already rejects every case it covers).
+
+## U3 — lifecycle (2026-10-30)
+
+**Question** (§18.6). What happens to a child `gdi convert` when its session reruns, its
+tab closes, a second tab opens and the server stops? Does a real SIGINT mid-page,
+mid-chart and mid-KVP give exit 130 and a free lock? What do interpreter start and
+imports cost per run? **Decision:** §18.2's runner. Decided already: a closed tab does
+not stop the child, and reopening the UI finds it through `ui/runs/*/pid` and its events
+file.
+
+**Environment.** This branch at `d3ae319`, the project's `.venv` (docling 2.143.1,
+mlx-vlm 0.7.10, Streamlit 1.66.1), the real models directory, M2 Pro, 16 GB, on AC
+power. Children were started as §18.2 specifies:
+`sys.executable -m granite_document_intelligence.cli convert …`, with
+`start_new_session=True`, stdin from `/dev/null`, and stdout and stderr to files in a
+run folder holding `argv.json` and `pid`. Signals were sent as soon as a stage's own log
+line appeared in `stderr.txt`, plus a short delay.
+
+**(a) SIGINT at each stage** (`sigint.py`). The chart and KVP targets were converted to
+completion first, so each interrupted `--force` run had a good tree to destroy:
+
+| Case | PDF | Signal | Exit | After signal | Lock | Left over | Previous tree |
+|---|---|---|---|---|---|---|---|
+| mid-load | GAO-07-631 | `[1/1]` + 2 s, during imports and model load | **130** | 0.07 s | free | nothing | — (none) |
+| mid-page | GAO-07-631 | `page 3/42` + 1 s | **130** | 0.68 s | free | nothing | — (none) |
+| mid-chart | GAO-08-14 excerpt | `chart 1/1` + 2 s | **130** | 0.89 s | free | nothing | 9 of 9 files byte-identical |
+| mid-KVP | W-9 with its schema | `key-values 1/1` + 2 s | **130** | **4.39 s** | free | nothing | 5 of 5 files byte-identical |
+
+"Left over" counts processes still in the child's group (`ps -g`), which was always
+empty, and new entries in the output root (no `.partial`, no `.old`). The stderr tail
+was `gdi convert: interrupted; finished PDFs are kept` every time. The KVP delay is one
+generation step that cannot be interrupted, most likely the image prefill. The signal is
+handled when it returns. Nothing is written before the pipeline finishes in memory
+(§3.12), so a cancel at any of these stages leaves no residue at all. A `.partial` can
+only come from a crash during the final write itself, which these runs did not hit;
+startup recovery of that residue is covered by `test_export.py`.
+
+**(b) Start cost per run.** Fresh processes, four runs each, warm disk cache. The first
+run was 5.13 s; the table gives the median of the other three:
+
+| Step | Seconds |
+|---|---|
+| interpreter (`python -c pass`) | 0.02 |
+| `import granite_document_intelligence.cli` | 0.04–0.05 |
+| plus Docling's converter and VLM pipeline, mlx-vlm, the chunker, transformers and torch | **4.46** |
+
+An in-process server would pay the 4.5 s once, at its first conversion. The child pays
+it once per run, not per PDF. Model loading is per PDF in both designs (§3.1), so this
+is the whole difference. It is most of §3.11's 7.13 s cold start.
+
+**(c) The lifecycle in the browser** (`drive.py`, `app.py`). The spike app started a
+child from a query parameter and listed the run folders, checking each pid with
+`os.kill(pid, 0)` and `ps`. The server ran in its own process group, so
+`killpg(server, SIGINT)` reproduced Ctrl-C in its terminal. Chrome was driven over CDP.
+
+- **Control, with no `start_new_session`.** The child shares the server's group, and
+  Ctrl-C to the server interrupted the child too (`interrupted; finished PDFs are
+  kept`).
+- **Shipped**, with the 15-page scan as the long child:
+
+  | Step | Child |
+  |---|---|
+  | 3 reruns of tab 1 | running (`Rs`, its own group) |
+  | tab 1 closed, 10 s later | running |
+  | tab 2 opened | listed from its `pid` file |
+  | child finished, server still up | **`Z`, a zombie** |
+  | tab 2 rerun | **`kill(pid, 0)` succeeded**, then `ps` found nothing |
+  | a short child started from tab 2, then Ctrl-C to the server's group | survived, reparented to PID 1, finished |
+
+  Both conversions wrote `run.json` with status `ok`, and the lock was free at the end.
+
+**Findings.**
+
+1. **`start_new_session` is load-bearing.** Without it, Ctrl-C in the server's terminal
+   cancels the conversion.
+2. **A finished child is a zombie until someone waits on it, and a zombie answers
+   `kill(pid, 0)`.** The `Popen` was dropped at the end of the script run that made it.
+   Python reaps dropped children only when the *next* `Popen` is created, so the
+   zombie went only because the app ran `ps` (`subprocess._cleanup`). That made the
+   app report a finished run as alive. Once reaped, the pid is free for reuse by any
+   process, so `kill(pid, 0)` can also answer for a stranger.
+3. **Only the process that started a child gets its exit status.** §18.2 infers a
+   crash from "a `pdf` event with no `result` and a negative return code". After a
+   server restart the child belongs to PID 1, and its return code is gone.
+4. **Cancel needs nothing beyond SIGINT.** The child spawned no processes of its own,
+   so `os.kill(pid, …)` reaches all the work. `killpg` is equivalent today and keeps
+   Ctrl-C's semantics if that changes.
+5. **The child's stderr carries library noise:** torch's "Redirects are currently not
+   supported in MacOs", a `use_fast` notice, `Loading weights` progress bars and
+   docling-core's bbox-clamp `UserWarning`s. The Run view shows `stderr.txt` as text
+   (rule 3), so this noise is safe but cluttered. The events file is the channel the UI
+   reads.
+
+**Verdict: pass, with §18.2 amended.**
+- The runner keeps every `Popen` it starts in a process-wide registry (one per server,
+  e.g. `st.cache_resource`), polls it on each rerun to reap finished children and keep
+  their return codes, and records each child's start time beside its `pid`.
+- A run counts as finished when its events file holds `summary` or `interrupted`, or the
+  registry holds its return code. It counts as running only if the pid exists, is not a
+  zombie and has the recorded start time.
+- Anything else is "ended without a summary": crashed, killed, or orphaned by a server
+  restart, with the return code unknown.
+- Cancel is `os.killpg(pid, SIGINT)`.
+- The 4.5 s per-run import cost is recorded and accepted, with the reasons §18.2 already
+  gives.

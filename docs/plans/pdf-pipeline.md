@@ -2237,9 +2237,11 @@ Not reasons: the run lock serialises two in-process callers on different threads
 correctly (checked in review: two threads each taking `run_lock(wait=True)` queued,
 no deadlock). CLAUDE.md's deadlock is nested acquisition on one call path.
 
-**What it costs:** one interpreter start and the library's imports per run, not per PDF,
-**unmeasured** (U3 measures it; the 7.13 s cold start, §3.11, is model load, which both
-designs pay); and a machine-readable progress channel the CLI lacks today. Progress goes
+**What it costs:** one interpreter start and the library's imports per run, not per PDF.
+**U3 measured ~4.5 s:** 0.05 s for the interpreter and the CLI, and the rest for Docling,
+mlx-vlm, transformers and torch. An in-process server would pay that once. Model load is
+per PDF in both designs. Accepted for the reasons above. The other cost is a
+machine-readable progress channel the CLI lacks today. Progress goes
 to stderr through `logging` as prose (`[2/6] report.pdf`, `  page 3/24`), and parsing
 our own prose is the degenerate-check mistake §8.1 warns about in another form.
 
@@ -2295,7 +2297,34 @@ which is why this is a CLI feature rather than a private UI protocol.
 terminal does not also hit the child unasked. Each run gets
 `$GDI_CACHE_DIR/ui/runs/<run-id>/` holding `events.jsonl`, `stdout.txt`, `stderr.txt`,
 `argv.json` and `pid`; the child's stdout and stderr go to those files, never a pipe.
-The Run view shows `stderr.txt` as text (§18.4 rule 3). Run folders older than 30 days
+The Run view shows `stderr.txt` as text (§18.4 rule 3), and it carries library noise
+(torch, transformers and docling-core warnings, progress bars; U3), so the UI's progress
+comes from the events file.
+
+**Liveness and cancel (amended by U3).** `start_new_session` is load-bearing: without
+it, U3's control lost the conversion to a Ctrl-C in the server's terminal. U3 also found
+two things the pid alone cannot tell the runner:
+- A finished child stays a zombie until its parent waits on it, and `kill(pid, 0)`
+  succeeds on a zombie. Once the zombie is reaped, the pid can belong to anyone.
+- Only the process that started a child receives its exit status.
+
+So the runner:
+- keeps every `Popen` it starts in a process-wide registry (`st.cache_resource`), polls
+  it on every rerun, and so reaps finished children and keeps their return codes;
+- writes the child's start time (`ps -o lstart`) beside `pid`.
+
+A run is **finished** when its events file holds `summary` or `interrupted`, or the
+registry holds its return code. A negative return code with no `result` for the current
+PDF is "crashed during <pdf>". A run is **running** only if its pid exists, is not a
+zombie and has the recorded start time. Anything else is **ended without a summary**:
+crashed, killed, or orphaned by a server restart (the child then belongs to PID 1, and
+its return code is gone). The UI says exactly that. **Cancel** is
+`os.killpg(pid, SIGINT)`, which is Ctrl-C's path. U3 measured exit 130, a free lock, no
+process left over, no `.partial` and the previous tree untouched mid-load, mid-page,
+mid-chart and mid-KVP. The child exits 0.07–0.9 s after the signal, and 4.4 s mid-KVP,
+where one generation step finishes first.
+
+Run folders older than 30 days
 are deleted when the UI starts **(decided)**. Cleanup covers `ui/runs/` and `ui/inputs/`
 only, both copies the UI made, and **never touches the output root**: those results are
 the user's, and nothing deletes them on a timer (the lesson of PR 11's bug).
@@ -2643,7 +2672,7 @@ before push, and plan amendments in the PR that finds them.
 |---|---|
 | 10 | merged 2026-10-30 (#14, `a350956`); §18 approved by the user |
 | 11 | merged 2026-10-30 (#15, `5fe06e1`); CI published `v1.0.1` |
-| 12 | in progress on `feat/ui-viewer`: U1 approved (four keys added, the external-IP lookup disabled with the user); U2 done (pass; rule 2 rewritten as fail-closed escaping, `render.py` and its tests landed); U3–U4 next |
+| 12 | in progress on `feat/ui-viewer`: U1 and U2 approved (four keys added and the external-IP lookup disabled; rule 2 rewritten as fail-closed escaping, `render.py` landed); U3 done (pass; the runner's liveness and cancel amended in §18.2); U4 next |
 
 **Why the viewer comes before `--events`:** the viewer needs no conversion and carries
 U1 and U2, the riskiest unknowns. Building it first means the security model is settled
