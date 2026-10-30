@@ -61,13 +61,15 @@ uv run python eval/score.py                      # cold run + 3 timed runs, abou
 uv run python eval/score.py --repeats 1 --no-cold --label try-x   # a quick look
 ```
 
+**Run it on an idle Mac, on AC power, with nothing else running** — not a test, a `uvx` install or a second model. The timings are the budgets' input, and the cold start is a single measurement with no median to absorb noise: on 2026-10-30 a pip-audit install and a pytest run overlapping the release run's cold run took cold start from 8.01 s to 10.48 s, past its 8.91 s budget, with the code unchanged. A budget failure from a run that overlapped other work is re-measured, not treated as a regression.
+
 It reads the corpus in `eval/corpus/` and `eval/expected/`. It runs offline (`HF_HUB_OFFLINE=1` unless already set), converts into the gitignored `eval/runs/`, prints a Markdown report and writes `eval/results/<date>-<sha>[-<label>].json`.
 
 **Pass** means `score.py` exits 0. That happens when no score drops below the committed baseline (`eval/results/2026-10-29-3025669-baseline.json`, re-baselined when the scan joined the corpus) by more than that metric's tolerance, every time budget in `eval/budgets.toml` is met, peak memory is ≤ 10 GB, no page hits the token cap outside the named exceptions, and the adversarial PDF passes. **Read the report as well as the exit status.** The old app learned that a script check passes degenerate output, which is why the scorer compares values and never only whether something parsed (§8.1). Commit a results file when it backs a decision. Raising a time budget needs a committed results file that shows why (§3.11).
 
 The same procedure has two more checks:
 
-- **S10's no-repo-code check** (§3.13 rule 2). It watches executed code objects and the modules cache in every process, and it must find no model-repo code executed and no `*.py` or `auto_map` in the models directory.
+- **S10's no-repo-code check** (§3.13 rule 2): `uv run python eval/s10_check.py`, about 2 min, offline; add `--convert-model` after a model or `mlx-vlm` change to cover `gdi convert-model` too (it rebuilds the models directory and may download the 8 GB bf16 source). `eval/s10_hook/sitecustomize.py` is loaded into every process it starts and records code executed from the HF home, a fresh modules cache and the models directory. It runs a positive control first, then `gdi convert` (charts, KVP, chunks) and a default-trust `mlx_vlm.load`, and scans the models directory. **Pass** means it exits 0: the control was caught, no model-repo code executed, no `transformers_modules` were left loaded, and there is no `*.py` or `auto_map` in the models directory outside `manifest.json`'s record of what was stripped.
 - **A vulnerability audit of the locked environment** (§3.13 rule 6). Verified on 2026-10-29 with pip-audit 2.10.1 (170 packages, no known vulnerabilities):
 
 ```bash
@@ -305,6 +307,7 @@ Both hooks parse their payload with **`jq`**, an undeclared dependency that macO
 `tests/` — unit tests, all mocked: no model download, no real inference. One file per module (`test_api.py`, `test_batch.py`, `test_charts.py`, `test_chunk.py`, `test_cli.py`, `test_export.py`, `test_kvp.py`, `test_models.py`, `test_phase_a.py`, `test_pipeline.py`, `test_safety.py`), plus:
 
 - `test_score.py` — the eval's scoring rules (`eval/matching.py`, `eval/score.py`), with every bad-prediction case mutation-checked (38 rule mutations, each caught; PR 7).
+- `test_s10_check.py` — S10's detector, executed in a real subprocess so a hook that stopped seeing executed code fails here, plus the check's verdict and its models-directory scan.
 - `test_tooling.py` — the silent-degradation guards for the repository's own machinery:
   - `TestCIWorkflow`: the Apple Silicon allow-list, delegation to `gate.sh`, `uv sync --locked`, the triggers and SHA-pinned actions.
   - `TestReleaseWorkflow`: `release.sh` executed in a temporary git repo with `gh`/`uv` stubbed, its argv logged and asserted.
@@ -319,4 +322,4 @@ Data-driven cases use `@pytest.mark.parametrize` with an `id=` on each `pytest.p
 
 **Behaviour is asserted by executing, not by grepping.** Several contracts appear in source under every arrangement of the code: the format hook's command order, gate.sh's exit code (`2` also occurs in its `cd`-failure branch), and release.sh's `--draft` (written twice). Substring checks stayed green when these were mutated. The suites that execute shell scripts (`TestReleaseWorkflow`, `TestHooksConfig`) share a **session-scoped `stub_bin` fixture**, and that is a performance contract. macOS scans every newly created executable the first time it runs: 241 ms against 4 ms for a re-run or a fresh symlink, since the scan is keyed to the inode. Writing stubs per test cost ~17 s of a 21 s gate. So the stubs are written once and varied through **`$STUB_*` environment variables**, and the scripts are **symlinked** into each throwaway repo. If a future stub needs per-test behaviour, add an environment variable. Do not go back to writing a file per test.
 
-`eval/` — the quality eval (plan §8): `score.py`, `matching.py`, `budgets.toml` and committed `results/`. It runs by hand, never in CI. See *Verifying a dependency upgrade*.
+`eval/` — the quality eval (plan §8): `score.py`, `matching.py`, `budgets.toml` and committed `results/`, plus S10's check (`s10_check.py`, `s10_hook/`). It runs by hand, never in CI. See *Verifying a dependency upgrade*.
