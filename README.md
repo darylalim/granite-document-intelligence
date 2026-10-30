@@ -12,7 +12,7 @@
 - **key-values** filled in against a JSON Schema you supply (optional)
 - **RAG-ready chunks** that follow the headings and carry page numbers, as JSON Lines
 
-> **Unreleased.** `main` holds the PDF pipeline, which has not been released yet. Version 1.0.0 will be its first release. The last release, [v0.6.0](https://github.com/darylalim/granite-document-intelligence/releases/tag/v0.6.0), is the earlier Streamlit text-analysis app, which this project replaces.
+> Version 1.0.0 is the PDF pipeline's first release. Releases before it, up to [v0.6.0](https://github.com/darylalim/granite-document-intelligence/releases/tag/v0.6.0), are the earlier Streamlit text-analysis app, which this project replaces.
 
 ## Requirements
 
