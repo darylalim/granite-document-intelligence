@@ -10,19 +10,20 @@ Spike scripts live in the session scratchpad, never in the repo.
 | S2 | **Pass**, through `artifacts_path` | yes — every Docling model loads from one models directory; pins enforced at fetch; 4.92 GB; command form (§2, §3.2, §3.12, §3.13, §4, §4.2, §6, §8, §12, §17) |
 | S3 | **Pass**, with findings | yes — `VlmConvertOptions` preset, 8192-token cap, loop and cap detection are our code (§2, §2.1, §3.2, §3.10, §3.13, §3.14, §4, §8, §17) |
 | S4 | **Pass** | yes — `mx.set_cache_limit` 1 GiB; Phase B per PDF; working set 12.71 GB (§2, §3.1, §3.8, §3.11, §3.14, §12, §17) |
-| S5 | **Pass**, born-digital half (scanned half pending the scan) | yes — default `vlm`; the flag is `VlmConvertOptions`'s; detection reads DocTags; S4's capped page is 24 (§3.2, §3.10, §8, §12, §17) |
-| S8 | **Pass**, born-digital half (scanned half pending the scan; an image-only stand-in collapses) | yes — the page-level-resume trigger fired; S8's numbers recorded as the budgets' reference; output size per page; a new image-only risk (§3.8, §3.11, §3.12, §3.14, §12, §17) |
+| S5 | **Pass**, both halves: on the scan, `pdf` empties the text of 11 of 15 pages (similarity 0.061 against `vlm`'s 0.763) | yes — default `vlm`; the flag is `VlmConvertOptions`'s; detection reads DocTags; S4's capped page is 24 (§3.2, §3.10, §8, §12, §17) |
+| S8 | **Pass**, both halves: the real scan does not collapse (9 real pictures, clean pages 2.76 s against 2.74 s born-digital); 7.04 s/page with its two degenerate pages; page scale stays 2.0 (with the user) | yes — the page-level-resume trigger fired; S8's numbers recorded as the budgets' reference; output size per page; a new image-only risk (§3.8, §3.11, §3.12, §3.14, §12, §17) |
 | S9 | **Pass** — (a) no, (b) the ONNX engine matches but torch is imported anyway, (c) no | yes — torch stays, the classifier stays on transformers; torch's cost corrected; DocTags labels skip the classifier (§0, §2.1, §3.2, §9.2, §12, §17) |
 | S10 | **Fail, resolved by option 1**: Granite Vision's repo `configuration.py` ran on every load of the 8-bit folder, through mlx-vlm's `trust_remote_code=True` default; stripping the repo's code from the converted folder leaves none (tested). Revisions reach every loader | yes: the repo's code is stripped at conversion, `convert()` refuses a folder that has any, Phase B passes `trust_remote_code=False`, and the tokenizer is pinned to `47ea694…` (§3.6, §3.12, §3.13, §4.2, §6, §8, §12, §16, §17) |
 | S6 | **Pass**: no measurable regression on 10 charts (69 cells) and 3 KVP pages (20 fields); identical chart values and byte-identical KVP output; bf16 alone peaks at 10.12 GB | yes: S6 settled; bf16 ruled out on memory too; multi-panel pairing needs chart boxes in the manifests; rule 4 pairs numbers with labels; the capped page loses charts; the mangled-header comma case; summaries contradicting their CSV (§2, §8.2, §12, §17) |
 | S7 | **Pass**: granite-docling is not as good, so Granite Vision keeps the chart role. Its page DocTags carried no `<chart>` table on 16 pages; on the crop it matched 12 of 69 cells against Granite Vision's 37. Summaries and CSVs reach the chunks | yes: `images_scale` stays 1.0, since any other value corrupts every box; S11 sweeps `VlmConvertOptions.scale` and our own chart-crop scale (2× crops: 37 → 43 cells); §3.9's fallback chunk dropped (§3.9, §3.10, §3.11, §3.14, §4, §12, §17) |
 | S11 | **Pass**: one change. Our own 1.5× chart crop for Granite Vision (37 → 43 of 69 cells, +2.3 s per chart). Page batch size is inert on MLX, true batching (−18%) needs an engine patch, overlap has ≤ 1.2% to gain, and page scale is a quality knob, not a speed one (2.0 stays). Neither capped-page fix pays, and the preset caps 3 of 52 corpus pages | yes: batching, scale, crop and timing settled; the in-generation stopper corrected; three capped pages; invented pages; image-only stand-in recovers at 1.5 (§3.10, §3.11, §3.14, §12, §17) |
 | PR 7 re-runs | **S6, S7 and S11 confirmed** through `eval/score.py` at the shipped settings; no verdict reversed | no reversal; the eval's own rules are amended in the plan (§3.11, §8.1, §8.2) |
-| Task C | **Public tier done except the scan** (branch `test/eval-corpus`, PR 2): 6 PDFs, 13 charts, 6 tables, 3 KVP cases; the scan and the private tier wait on the user | yes: §4.1 status and the scan's pages; the text layer can disagree with the page (§8.2 rule 2); en-dash minus, significance asterisks, row pairing (§8.2 rule 3); the expected-output format (§8.1) |
+| Task C | **Public tier done** (PR 2, merged 2026-10-29): 7 PDFs including the print-and-scan, 25 charts, 8 tables, 3 KVP cases; the private tier waits on the user | yes: §4.1 status and the scan's pages; the text layer can disagree with the page (§8.2 rule 2); en-dash minus, significance asterisks, row pairing (§8.2 rule 3); the expected-output format (§8.1) |
 
 **Approved by the user (2026-10-25), with the scanned halves carved out.** The design
 is frozen from here (§10, PR 1). The carve-out covers the scanned halves of S5 and S8,
-which wait on Task C's print-and-scan step. Their results land as ordinary plan
+which waited on Task C's print-and-scan step and ran on 2026-10-29 (below): neither
+changes the image-only path. Their results land as ordinary plan
 amendments when the scan exists, and nothing that depends on them is code before PR 4.
 They can change only the image-only path: the page scale or render path for pages with
 no text layer (S11's 1.5 lead, §17), a cap on pictures per page, and §3.10's
@@ -666,6 +667,47 @@ user trusts.
   covers silent VLM transcription errors in prose: a wrong number, invented text, a
   whole page lost to a loop.
 
+## S5 — `force_backend_text` on vs off: scanned half (2026-10-29)
+
+**Question.** S5's second half: what each `--text-source` does to a real scan. The
+born-digital half predicted from the code that `pdf` empties every text item of a
+page with no text layer.
+
+**Environment.** The project lock at PR 8: docling 2.143.1, docling-core 2.105.0,
+docling-parse 7.23.1, mlx 0.32.4, **mlx-vlm 0.7.10**, transformers 5.21.0, torch
+2.14.1, pypdfium2 5.14.0, pillow 13.0.0. The production models directory, granite-docling
+`e9939db…`. M2 Pro, 16 GB, macOS 27.0.1, on AC power with the battery full. Every run
+used `HF_HUB_OFFLINE=1`.
+
+**Test PDF.** `eval/corpus/gao-07-631-scan.pdf` (PR 2): GAO-07-631's PDF pages 12–26,
+printed and scanned at 300 DPI in grayscale with no OCR. It is image-only, with 0
+text-layer characters on every page. Those pages hold all 12 plots and both tables.
+
+**What was run.** `gdi convert` on the scan, once as shipped (`vlm`) and once with
+`--text-source pdf --no-charts`. Each was scored with `score.py`'s own functions,
+with each page's text compared against the born-digital original's page N + 11
+(§8.2 rule 2; `score.py` gained this in the same PR).
+
+**Results.**
+
+| Scan, 15 pages | `vlm` (shipped) | `pdf` |
+|---|---|---|
+| DocTags tokens, page by page | — | identical to `vlm` |
+| Text similarity / word F1 (mean per page) | **0.763 / 0.836** | 0.061 / 0.119 |
+| Headings in the text (of 4) | 4 | 0 |
+| Pages left with ≤ 47 characters | 0 | 11 of 15 |
+| Tables, cells by row order | 74/75, 35/35 | 74/75, 35/35 |
+
+The prediction holds. Under `pdf` every text item on the scan comes back empty, and
+only tables and a few stray items survive. Generation is identical, so it is a pure
+loss. Docling has no per-page fallback, so a mixed PDF loses the text of every
+scanned page.
+
+**Verdict: pass. The default stays `vlm`.** This adds a second reason to the
+born-digital half's: `pdf` is safe only for a born-digital PDF whose text layer the
+user trusts, which the CLI's help and the README already say. No amendment beyond
+recording it.
+
 ## S8 — throughput: born-digital half (2026-10-25)
 
 **Question.** Seconds per page for Phase A (born-digital and scanned separately),
@@ -849,6 +891,82 @@ applied to the plan:
 - **Phase B ordering:** per PDF stays. PR 5 tries to share Docling's Granite Vision
   instance through public API to remove the reload. All-A-then-all-B is the fallback
   only for a forms-heavy private tier (§3.8).
+
+## S8 — throughput: scanned half (2026-10-29)
+
+**Question.** S8's second half: seconds per page for Phase A on a scan, and whether
+the stand-in's image-only collapse (S8, S11) happens on a real one. §17's mitigation
+list starts with granite-docling's page scale 1.5.
+
+**Environment and PDF.** As in S5's scanned half above.
+
+**What was run.**
+
+- The scan through `gdi convert`, as shipped.
+- The **same 15 pages born-digital**, cut from GAO-07-631 by `pypdfium2`, through the
+  same command. That is the like-for-like reference: identical pages, identical
+  settings, and only the scan differs.
+- The scan at granite-docling page scale **1.5**, patched from a scratchpad driver
+  (`VlmConvertOptions.scale`; `images_scale` stays 1.0, S7).
+
+Each was scored as in S5's scanned half. Then the whole public corpus, scan included,
+went through `eval/score.py` (cold run plus three timed runs) as the new baseline.
+Its numbers are in §3.11: the scan's Phase A median over three runs is **7.04 s/page**, every run byte-identical, with the same degenerate pages.
+
+**Results.**
+
+| 15 pages | Born-digital | **Scan, 2.0 (shipped)** | Scan, 1.5 |
+|---|---|---|---|
+| Phase A | 82.5 s (5.5 s/page) | **111.1 s (7.4 s/page)** | 49.9 s (3.3 s/page) |
+| Clean pages: median generation | 2.74 s | **2.76 s** | — |
+| Degenerate pages | p13 capped (the original's p24) | **p2 looped, p15 capped** | none |
+| Pictures (all real charts) | 9 | **9** | 8 |
+| Text similarity / word F1 | 0.786 / 0.846 | **0.763 / 0.836** | 0.840 / 0.915 |
+| Chart cells / charts found | 42 / 65, 10 / 12 | **39 / 65, 10 / 12** | 35 / 65, 9 / 12 |
+| Summary pair errors | 0 | **3** | 7 |
+| Tables, cells by row order | 74/75, 35/35 | **74/75, 35/35** | 74/75, 35/35 |
+| Charts: total / median | 88.0 s / 8.6 s | **117.8 s / 9.7 s** | 97.1 s / 10.2 s |
+| Peak memory | 6.68 GB | **6.61 GB** | 6.61 GB |
+
+- **The real scan does not collapse.** granite-docling found 9 pictures, every one a
+  real chart, against the stand-in's 441. No page lost its text. S8 traced the
+  stand-in's collapse to Docling's softer render of a clean synthetic raster. A
+  300 DPI grayscale scan carries its own grain, and granite-docling reads it like
+  print.
+- **A scanned page costs what a born-digital one does.** Clean pages generate in a
+  median 2.76 s against 2.74 s, and Phase A's other costs are 6.7 s against 6.6 s.
+  The scan's 7.4 s/page is all degenerate pages: it has two, each ~33 s, against the
+  born-digital cut's one.
+- **The degenerate pages move.** The original's capped p24 converts once scanned
+  (0.70 similarity, both Figure 7 panels read). Instead, p2 (Figure 2) loops on its
+  source line ("Source: GAO analysis of DOD data.", 191 times) and p15 (Figure 9)
+  caps on an axis label ("200", 327 times). Both loops start after the page's chart
+  and prose, so both charts are still found and scored. Both are flagged in
+  `run.json`.
+- **The charts move with them.** The scan reads Figure 7 but loses Figure 4 (scan p4,
+  the broken axis) and Figure 5 (scan p6, whose axis labels came back as loose text
+  instead of a picture): 39 against 42 cells.
+- **Page scale 1.5 trades charts for text.** At 1.5 the scan has no degenerate page,
+  2.2× faster Phase A and better text, but loses a chart, 4 cells and 4 summary
+  pairings, and both Figure 9 summaries contradict their CSVs. That is S11's
+  finding again (no scale dominates) on the input it was meant to rescue.
+- **`pdf` text is no faster:** identical generation (S5's scanned half).
+
+**Verdict: pass.** The scanned path needs no change. **Decided with the user
+(2026-10-29): page scale stays 2.0 for scans.** Charts are the pipeline's distinctive
+output, 1.5's gains are text and speed on one scanned document, and choosing a scale
+per page would be new code. The mitigations §17 listed (a picture cap, near-empty-page
+detection) answer a collapse the real scan does not show, so none is built.
+
+**What it costs the design (amendments, applied to the plan).**
+
+- **§3.11:** the scanned Phase A budget, from the new baseline's median × 1.25. The
+  scan's p15 is a named capped-page exception in `eval/budgets.toml`, decided with the
+  user.
+- **§4.1:** the scan's eval entries are settled, and `score.py` scores a scan's text
+  against its original through the manifest's `scan_of` (§8.2 rule 2).
+- **§17:** the image-only row closes for real scans: it stays a risk only for synthetic
+  rasters.
 
 ## S9 — how far toward torch-free the stack can go (2026-10-25)
 
