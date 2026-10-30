@@ -32,6 +32,10 @@ cold_start_s = 8.91
 # exceptions decided with the user on 2026-10-25 (§3.11, S11). A capped page not
 # listed here fails the run; a listed page that stops capping is reported as a fix.
 "gao-07-631" = [24]
+# The scan's page 15 (Figure 9) caps on a repeated axis label after its charts and
+# prose came through; the original's page 24 does not cap once scanned (its page
+# 13). Decided with the user on 2026-10-29, keeping page scale 2.0 (S8 scanned).
+"gao-07-631-scan" = [15]
 "gao-08-1044-excerpt" = [2]
 "irs-w9-filled" = [1]
 
