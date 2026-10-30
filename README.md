@@ -111,7 +111,7 @@ out/<pdf-stem>/
   run.json
 ```
 
-**`run.json`** records how the output was made: the model revisions, package versions, timings for each phase and page, peak memory, the output's size and any warnings. It is written last, and it is what marks a PDF as done. Each PDF's folder is built beside the output and swapped into place in one step. So a re-run never leaves files from an earlier run behind, and an interrupted run leaves the previous output intact.
+**`run.json`** records how the output was made: the model revisions, package versions, timings for each phase and page, peak memory, the output's size and any warnings. It is written last, and it is what marks a PDF as done. Each PDF's folder is built beside the output and swapped into place in one step. So a re-run never leaves files from an earlier run behind, and an interrupted run leaves the previous output intact. gdi only ever replaces a folder it wrote itself. If a folder already sits where a PDF's output would go and holds anything else (your own files, or a note you added to an output folder), that PDF fails with `ForeignFolderError` and the folder is left untouched. Versions before 1.0.1 replaced it.
 
 **Warnings worth reading:**
 - A page that hit the model's 8192-token limit, or that repeated itself, is listed by page number. Such a page is usually lost or garbled.

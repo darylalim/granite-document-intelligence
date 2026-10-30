@@ -176,13 +176,13 @@ def recover(out_dir: Path) -> None:
 
     A `.partial/` is an unfinished tree: deleted. An `.old/` beside no folder
     is a crash between the swap's two renames: renamed back. An `.old/` beside
-    a folder is a crash after both: deleted.
+    a folder is a crash after both: deleted. A sibling gdi did not write is
+    left alone (PR 11); `_one` then refuses the PDF rather than touch it.
     """
-    partial = out_dir.with_name(out_dir.name + export.PARTIAL_SUFFIX)
-    old = out_dir.with_name(out_dir.name + export.OLD_SUFFIX)
-    if partial.is_dir() and not partial.is_symlink():
+    partial, old = export.siblings(out_dir)
+    if export.is_ours(partial):
         shutil.rmtree(partial)
-    if old.is_dir() and not old.is_symlink():
+    if export.is_ours(old):
         if out_dir.exists() or out_dir.is_symlink():
             shutil.rmtree(old)
         else:
@@ -227,6 +227,13 @@ def _one(
             "skipped",
             output_bytes=int(record.get("output_bytes") or 0),
         )
+
+    try:
+        export.check_replaceable(job.out_dir)
+    except export.ForeignFolderError as exc:
+        # Refused before any model loads, and with nothing written: an error
+        # run.json would need the same swap (PR 11).
+        return BatchItem(job.pdf, job.out_dir, "failed", error=_describe(exc))
 
     started = time.perf_counter()
     try:

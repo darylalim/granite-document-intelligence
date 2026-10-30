@@ -1,6 +1,7 @@
 """`save()` and the §3.5 tree, from a DoclingDocument built in code (no models)."""
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -267,10 +268,123 @@ class TestAtomicSwap:
         assert not (tmp_path / "report.partial" / "run.json").exists()
 
     def test_a_leftover_partial_is_replaced(self, tmp_path: Path) -> None:
-        (tmp_path / "report.partial").mkdir()
-        (tmp_path / "report.partial" / "chart-009.csv").write_text("stale")
+        (tmp_path / "report.partial" / "charts").mkdir(parents=True)
+        (tmp_path / "report.partial" / "charts" / "chart-009.csv").write_text("stale")
         make_result().save(tmp_path / "report")
-        assert not (tmp_path / "report" / "chart-009.csv").exists()
+        assert not (tmp_path / "report" / "charts" / "chart-009.csv").exists()
+
+
+def _foreign_folder(path: Path) -> None:
+    path.mkdir(parents=True)
+    (path / "thesis.docx").write_text("the user's work")
+
+
+class TestOwnership:
+    """v1.0.0 replaced whatever sat at the output path (PR 11): `gdi convert
+    Documents.pdf -o ~` renamed `~/Documents` aside and deleted it."""
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            pytest.param(dict, id="default"),
+            pytest.param(
+                lambda: {"charts": 3, "code": "import matplotlib"}, id="chart-code"
+            ),
+            pytest.param(lambda: {"csv": None, "raw_csv": "no table"}, id="raw-text"),
+            # KVP and CHUNK are defined below this class, so they are read late.
+            pytest.param(lambda: {"kvp": KVP, "chunks": [CHUNK]}, id="kvp-chunks"),
+            pytest.param(
+                lambda: {"options": ConvertOptions(save_page_images=True)},
+                id="page-images",
+            ),
+        ],
+    )
+    def test_every_tree_gdi_writes_is_its_own(
+        self, tmp_path: Path, kwargs: Callable[[], dict[str, Any]]
+    ) -> None:
+        from granite_document_intelligence import export
+
+        out = tmp_path / "report"
+        make_result(**kwargs()).save(out)
+        assert export.is_ours(out)
+        make_result(**kwargs()).save(out)  # and so a re-run may replace it
+
+    @pytest.mark.parametrize(
+        "make",
+        [
+            pytest.param(lambda p: p.mkdir(), id="empty"),
+            pytest.param(
+                lambda p: (p / "charts").mkdir(parents=True), id="empty-subfolder"
+            ),
+        ],
+    )
+    def test_an_empty_folder_is_replaceable(self, tmp_path: Path, make: Any) -> None:
+        from granite_document_intelligence import export
+
+        make(tmp_path / "report")
+        assert export.is_ours(tmp_path / "report")
+
+    @pytest.mark.parametrize(
+        "make",
+        [
+            pytest.param(_foreign_folder, id="user-file"),
+            pytest.param(
+                lambda p: (
+                    (p / "charts").mkdir(parents=True),
+                    (p / "charts" / "holiday.png").write_bytes(b"png"),
+                ),
+                id="unknown-name-in-a-layout-folder",
+            ),
+            pytest.param(
+                lambda p: (p.mkdir(), (p / "notes").mkdir()), id="unknown-subfolder"
+            ),
+            pytest.param(
+                lambda p: (p.mkdir(), (p / "tables").write_text("x")),
+                id="file-named-like-a-layout-folder",
+            ),
+            pytest.param(lambda p: p.write_text("a file"), id="a-file"),
+            pytest.param(
+                lambda p: (
+                    _foreign_folder(p.with_name("elsewhere")),
+                    p.symlink_to(p.with_name("elsewhere")),
+                ),
+                id="symlink",
+            ),
+        ],
+    )
+    def test_anything_else_is_refused_and_left_intact(
+        self, tmp_path: Path, make: Any
+    ) -> None:
+        from granite_document_intelligence import export
+
+        out = tmp_path / "report"
+        make(out)
+        before = _tree(tmp_path)
+        with pytest.raises(export.ForeignFolderError, match="not written by gdi"):
+            make_result().save(out)
+        assert _tree(tmp_path) == before
+        assert not (tmp_path / "report.partial").exists()
+
+    @pytest.mark.parametrize("suffix", [".partial", ".old"])
+    def test_a_foreign_sibling_is_refused_and_left_intact(
+        self, tmp_path: Path, suffix: str
+    ) -> None:
+        from granite_document_intelligence import export
+
+        _foreign_folder(tmp_path / f"report{suffix}")
+        with pytest.raises(export.ForeignFolderError, match=f"report{suffix}"):
+            make_result().save(tmp_path / "report")
+        assert (tmp_path / f"report{suffix}" / "thesis.docx").is_file()
+        assert not (tmp_path / "report").exists()
+
+    def test_an_error_record_is_refused_too(self, tmp_path: Path) -> None:
+        from granite_document_intelligence import export
+
+        _foreign_folder(tmp_path / "report")
+        with pytest.raises(export.ForeignFolderError):
+            export.save_error(tmp_path / "report", Path("report.pdf"), {}, None, {})
+        assert (tmp_path / "report" / "thesis.docx").is_file()
+        assert not (tmp_path / "report" / "run.json").exists()
 
 
 KVP = KvpResult(

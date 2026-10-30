@@ -816,7 +816,15 @@ Five rules:
    `<pdf>.old/` with no `<pdf>/`, renames it back (a crash mid-swap). Errors write
    `run.json` with `"status": "error"` through the same swap, so a failed re-run
    replaces a stale success rather than sitting beside it. Both renames stay within
-   `OUT_DIR`, so they are same-filesystem and atomic on APFS.
+   `OUT_DIR`, so they are same-filesystem and atomic on APFS. **Amended in PR 11
+   (1.0.1):** the swap, the staging folder and startup recovery replace, rename or
+   delete only a folder **gdi wrote**: a real directory holding nothing but §3.5
+   names (`export.is_ours`). v1.0.0 did this to whatever sat there, so
+   `gdi convert ~/Downloads/Documents.pdf -o ~` would have deleted `~/Documents`;
+   a `~/Documents.old` backup was at risk the same way. A folder that holds anything
+   else, a user's file in an output tree included, fails that PDF with
+   `ForeignFolderError` before any model loads, and nothing is written. Found by
+   §18's cold review.
 2. **Images are files, not base64.** `document.json` is saved with referenced images
    (`ImageRefMode.REFERENCED` — verify the exact export call in S3) so the JSON stays
    small and diffable. **Picture crops on** (`charts/chart-NNN.png`, and

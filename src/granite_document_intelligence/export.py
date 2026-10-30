@@ -4,6 +4,10 @@ The tree is built in `<out>.partial/`, `run.json` last, then swapped into place
 (§3.12 rule 1): an earlier run's extra `chart-NNN` files can never sit beside a
 new `run.json`, and a crash mid-write leaves no `run.json` to trust.
 
+Nothing is replaced or deleted unless gdi wrote it (PR 11): a folder that shares
+a PDF's name, or its `.partial`/`.old` sibling's, and holds anything else is
+refused with `ForeignFolderError`, never renamed aside.
+
 `document.json` references the image files in the tree rather than embedding
 them as base64 (§3.12 rule 2); chart pictures point at the crop Granite Vision
 saw, other pictures at Docling's crop, and page images exist only on request.
@@ -14,6 +18,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import re
 import shutil
 from dataclasses import asdict
 from pathlib import Path
@@ -32,6 +37,20 @@ OLD_SUFFIX = ".old"
 RUN_JSON = "run.json"
 KVP_JSON = "kvp.json"
 CHUNKS_JSONL = "chunks.jsonl"
+# Every name the §3.5 tree can hold, by folder; `is_ours` matches against them.
+_TOP_FILES = frozenset(
+    {"document.md", "document.json", KVP_JSON, CHUNKS_JSONL, RUN_JSON}
+)
+_SUBDIR_FILES = {
+    "charts": re.compile(r"chart-\d{3,}\.(png|csv|raw\.txt|summary\.txt|py)"),
+    "tables": re.compile(r"table-\d{3,}\.(csv|html)"),
+    "pictures": re.compile(r"picture-\d{3,}\.png"),
+    "pages": re.compile(r"page-\d{3,}\.png"),
+}
+
+
+class ForeignFolderError(OSError):
+    """A folder gdi would replace or delete holds something gdi did not write."""
 
 
 def chart_code_header(source: str, page_no: int) -> str:
@@ -195,9 +214,60 @@ def run_record(result: ConvertResult, output_bytes: int) -> dict[str, Any]:
     }
 
 
+def is_ours(folder: Path) -> bool:
+    """Whether gdi may replace or delete `folder` (PR 11).
+
+    It may when `folder` is a real directory holding nothing but names from the
+    §3.5 layout, which covers an empty folder, crash residue with no `run.json`
+    yet, and a tree whose `run.json` was lost. v1.0.0 renamed aside and deleted
+    whatever sat at the output path, so `gdi convert Documents.pdf -o ~` would
+    have deleted `~/Documents`. Anything else, a user's file, a symlink, a
+    folder that cannot be read, is "not ours".
+    """
+    if folder.is_symlink() or not folder.is_dir():
+        return False
+    try:
+        return all(_is_layout_entry(entry) for entry in folder.iterdir())
+    except OSError:
+        return False
+
+
+def _is_layout_entry(entry: Path) -> bool:
+    pattern = _SUBDIR_FILES.get(entry.name)
+    if pattern is None:
+        return entry.name in _TOP_FILES and _is_file(entry)
+    if entry.is_symlink() or not entry.is_dir():
+        return False
+    return all(
+        _is_file(child) and pattern.fullmatch(child.name) for child in entry.iterdir()
+    )
+
+
+def _is_file(path: Path) -> bool:
+    return path.is_file() and not path.is_symlink()
+
+
+def siblings(out_dir: Path) -> tuple[Path, Path]:
+    """`out_dir`'s staging and swap folders: `<out>.partial` and `<out>.old`."""
+    return (
+        out_dir.with_name(out_dir.name + PARTIAL_SUFFIX),
+        out_dir.with_name(out_dir.name + OLD_SUFFIX),
+    )
+
+
+def check_replaceable(out_dir: Path) -> None:
+    """Refuse, before anything is written, a folder the swap would destroy (PR 11)."""
+    for folder in (out_dir, *siblings(out_dir)):
+        if (folder.exists() or folder.is_symlink()) and not is_ours(folder):
+            raise ForeignFolderError(
+                f"{folder} exists and was not written by gdi; move it or convert "
+                "into another output directory"
+            )
+
+
 def swap_into_place(staging: Path, out_dir: Path) -> None:
     """Replace `out_dir` with `staging`: two renames within one directory (§3.12 rule 1)."""
-    old = out_dir.with_name(out_dir.name + OLD_SUFFIX)
+    _, old = siblings(out_dir)
     if old.exists():
         shutil.rmtree(old)
     if out_dir.exists():
@@ -208,8 +278,9 @@ def swap_into_place(staging: Path, out_dir: Path) -> None:
 
 
 def _staging(out_dir: Path) -> Path:
+    check_replaceable(out_dir)
     out_dir.parent.mkdir(parents=True, exist_ok=True)
-    staging = out_dir.with_name(out_dir.name + PARTIAL_SUFFIX)
+    staging, _ = siblings(out_dir)
     if staging.exists():
         shutil.rmtree(staging)
     staging.mkdir()

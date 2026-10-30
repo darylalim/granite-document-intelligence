@@ -354,8 +354,8 @@ class TestStorage:
         out = tmp_path / "out"
         run([pdf], out)
         partial = out / "report.partial"
-        partial.mkdir()
-        (partial / "chart-009.csv").write_text("crash residue")
+        (partial / "charts").mkdir(parents=True)
+        (partial / "charts" / "chart-009.csv").write_text("crash residue")
         assert run([pdf], out) == {"report.pdf": "skipped"}
         assert not partial.exists()
 
@@ -386,3 +386,64 @@ class TestStorage:
         assert f"{done / 1024:.1f} KB in {out}" in text
         assert f"done    {src / 'a.pdf'} → {out / 'a'}" in text
         assert "failed  " in text and "RuntimeError: cannot convert b.pdf" in text
+
+
+class TestForeignFolders:
+    """A folder gdi did not write is never renamed, restored or deleted (PR 11)."""
+
+    def test_a_pdf_named_like_a_user_folder_is_refused_before_any_model_runs(
+        self, tmp_path: Path, pdf_bytes: bytes, fake: FakePipeline
+    ) -> None:
+        # The v1.0.0 reproduction: `gdi convert Documents.pdf -o ~`.
+        home = tmp_path / "home"
+        (home / "Documents").mkdir(parents=True)
+        (home / "Documents" / "thesis.docx").write_text("the user's work")
+        pdf = write_pdf(tmp_path / "Downloads" / "Documents.pdf", pdf_bytes)
+        items = list(convert_many([pdf], home))
+        assert [item.status for item in items] == ["failed"]
+        assert "ForeignFolderError" in (items[0].error or "")
+        assert fake.ran == []
+        assert sorted(p.name for p in (home / "Documents").iterdir()) == ["thesis.docx"]
+        assert sorted(p.name for p in home.iterdir()) == ["Documents"]
+
+    def test_the_rest_of_the_batch_still_converts(
+        self, tmp_path: Path, pdf_bytes: bytes, fake: FakePipeline
+    ) -> None:
+        src = tmp_path / "in"
+        for name in ("a.pdf", "b.pdf"):
+            write_pdf(src / name, pdf_bytes)
+        out = tmp_path / "out"
+        (out / "a").mkdir(parents=True)
+        (out / "a" / "notes.txt").write_text("mine")
+        assert run([src], out) == {"a.pdf": "failed", "b.pdf": "done"}
+        assert (out / "a" / "notes.txt").read_text() == "mine"
+
+    @pytest.mark.parametrize(
+        "suffix",
+        [
+            pytest.param(".partial", id="partial"),
+            pytest.param(".old", id="old"),
+        ],
+    )
+    def test_recovery_leaves_a_foreign_sibling_alone(
+        self, tmp_path: Path, pdf_bytes: bytes, fake: FakePipeline, suffix: str
+    ) -> None:
+        # With no `report/`, v1.0.0 renamed a `report.old/` into place and
+        # deleted a `report.partial/`, whatever either held.
+        pdf = write_pdf(tmp_path / "report.pdf", pdf_bytes)
+        out = tmp_path / "out"
+        sibling = out / f"report{suffix}"
+        sibling.mkdir(parents=True)
+        (sibling / "backup.tar").write_text("mine")
+        assert run([pdf], out) == {"report.pdf": "failed"}
+        assert (sibling / "backup.tar").read_text() == "mine"
+        assert not (out / "report").exists()
+        assert fake.ran == []
+
+    def test_a_tree_from_an_earlier_run_is_still_replaced(
+        self, tmp_path: Path, pdf_bytes: bytes, fake: FakePipeline
+    ) -> None:
+        pdf = write_pdf(tmp_path / "report.pdf", pdf_bytes)
+        out = tmp_path / "out"
+        run([pdf], out)
+        assert run([pdf], out, force=True) == {"report.pdf": "done"}

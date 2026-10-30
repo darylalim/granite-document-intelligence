@@ -1,6 +1,6 @@
 [project]
 name = "granite-document-intelligence"
-version = "1.0.0"
+version = "1.0.1"
 description = "Local PDF document intelligence on Apple Silicon: converts multi-page PDFs to Markdown and JSON and extracts charts, tables and schema-driven key-values with IBM Granite Docling and Granite Vision on MLX."
 license = "Apache-2.0"
 license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]

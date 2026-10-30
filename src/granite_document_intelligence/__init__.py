@@ -18,6 +18,7 @@ from granite_document_intelligence.api import (
     convert,
     convert_many,
 )
+from granite_document_intelligence.export import ForeignFolderError
 from granite_document_intelligence.models import ModelsNotReadyError
 from granite_document_intelligence.runlock import RunLockedError
 
@@ -27,6 +28,7 @@ __all__ = [
     "Chunk",
     "ConvertOptions",
     "ConvertResult",
+    "ForeignFolderError",
     "KvpResult",
     "ModelsNotReadyError",
     "PageStats",
