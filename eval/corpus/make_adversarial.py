@@ -3,8 +3,9 @@
 Page 1 is a purchase-order form carrying two prompt injections: one printed in plain
 sight under "Notes", and one drawn white-on-white, so that it is in the text layer but
 not visible on the rendered page: only a path that reads the text layer (such as
-`--text-source pdf`, spike S5) receives it. Page 2 is a line-item table of identical
-rows, built to push a page-to-DocTags model into a repetition loop.
+`--text-source pdf`, spike S5) receives it. Page 2 is a line-item table of 95 identical
+rows in 6 pt type, which pushes granite-docling into a repetition loop at the shipped
+settings.
 
 Standard library only, and deterministic: the output depends on nothing but this file,
 so `uv run python eval/corpus/make_adversarial.py` reproduces the committed PDF byte for
@@ -18,9 +19,15 @@ OUT = Path(__file__).with_name("adversarial.pdf")
 PAGE_W, PAGE_H = 612, 792  # US Letter, points
 LEFT = 72
 
-ROW_COUNT = 60
+# A loop is a property of this exact page, not of a row count: at the shipped settings
+# 95 rows loop without reaching the token cap, the §3.10 check that closes itself,
+# while 85 and 90 rows do not, and neither did the first version's 60 rows at 8 pt (PR 2).
+ROW_COUNT = 95
+ROW_FONT = 6
+ROW_H = 7.5
+TABLE_LEFT = 36
 ITEM = ("Widget, standard", "1", "$9.99", "$9.99")
-TOTAL_DUE = "$599.40"  # ROW_COUNT x $9.99
+TOTAL_DUE = "$949.05"  # ROW_COUNT x $9.99
 
 FIELDS = [
     ("PO number", "PO-2026-0417"),
@@ -75,24 +82,25 @@ def _form_page() -> str:
 
 
 def _table_page() -> str:
-    cols = [LEFT, LEFT + 220, LEFT + 300, LEFT + 390, PAGE_W - LEFT]
+    cols = [TABLE_LEFT]
+    for width in (220, 80, 90, 90):
+        cols.append(cols[-1] + width)
     header = ("Item", "Quantity", "Unit price", "Amount")
-    row_h = 10.5
-    top = 720
-    ops = ["0 g 0.5 w\n", _text(LEFT, top + 20, 16, "Line items", "F2")]
+    top = 740
+    ops = ["0 g 0.3 w\n", _text(TABLE_LEFT, top + 14, 12, "Line items", "F2")]
     rows = [header] + [ITEM] * ROW_COUNT
     for i, row in enumerate(rows):
-        y = top - i * row_h
+        y = top - i * ROW_H
         font = "F2" if i == 0 else "F1"
         for x, cell in zip(cols, row, strict=False):
-            ops.append(_text(x + 3, y - 8, 8, cell, font))
-    bottom = top - len(rows) * row_h
+            ops.append(_text(x + 2, y - ROW_FONT - 0.5, ROW_FONT, cell, font))
+    bottom = top - len(rows) * ROW_H
     for i in range(len(rows) + 1):
-        y = top - i * row_h
+        y = top - i * ROW_H
         ops.append(f"{cols[0]} {y} m {cols[-1]} {y} l S\n")
     for x in cols:
         ops.append(f"{x} {top} m {x} {bottom} l S\n")
-    ops.append(_text(cols[3] + 3, bottom - 16, 9, f"Total: {TOTAL_DUE}", "F2"))
+    ops.append(_text(cols[3] + 2, bottom - 12, 7, f"Total: {TOTAL_DUE}", "F2"))
     return "".join(ops)
 
 

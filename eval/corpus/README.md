@@ -22,7 +22,7 @@ extracts from a PDF follows that PDF's rights, not the pipeline's (plan §9.1).
 | `census-p60-282-excerpt.pdf` | 4 | A 16-column table **printed sideways** (S3 found these loop silently), and a table **spanning a page break**. |
 | `gao-07-631-scan.pdf` | 15 | The **scanned** document: GAO-07-631's PDF pages 12–26, printed and scanned to an image-only PDF with no text layer. Those pages hold all 12 plots and both tables, so it scores against the original's expected outputs. |
 | `irs-w9-filled.pdf` | 1 | A **form** filled with fictitious data, for key-value extraction. |
-| `adversarial.pdf` | 2 | The project-made **adversarial** case (§8.2 rule 6): a form carrying a visible and a white-on-white prompt injection, and a table of 60 identical rows built to trigger a repetition loop. It is scored but kept out of the quality averages. |
+| `adversarial.pdf` | 2 | The project-made **adversarial** case (§8.2 rule 6): a form carrying a visible and a white-on-white prompt injection, and a table of 95 identical rows that triggers a repetition loop at the shipped settings. It is scored but kept out of the quality averages. |
 
 2.6 MB in all, against the plan's 20 MB ceiling.
 
