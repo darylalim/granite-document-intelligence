@@ -63,7 +63,7 @@ uv run python eval/score.py --repeats 1 --no-cold --label try-x   # a quick look
 
 It reads the corpus in `eval/corpus/` and `eval/expected/`. It runs offline (`HF_HUB_OFFLINE=1` unless already set), converts into the gitignored `eval/runs/`, prints a Markdown report and writes `eval/results/<date>-<sha>[-<label>].json`.
 
-**Pass** means `score.py` exits 0. That happens when no score drops below the committed baseline (`eval/results/2026-10-27-24125f5-baseline.json`) by more than that metric's tolerance, every time budget in `eval/budgets.toml` is met, peak memory is ≤ 10 GB, no page hits the token cap outside the named exceptions, and the adversarial PDF passes. **Read the report as well as the exit status.** The old app learned that a script check passes degenerate output, which is why the scorer compares values and never only whether something parsed (§8.1). Commit a results file when it backs a decision. Raising a time budget needs a committed results file that shows why (§3.11).
+**Pass** means `score.py` exits 0. That happens when no score drops below the committed baseline (`eval/results/2026-10-29-3025669-baseline.json`, re-baselined when the scan joined the corpus) by more than that metric's tolerance, every time budget in `eval/budgets.toml` is met, peak memory is ≤ 10 GB, no page hits the token cap outside the named exceptions, and the adversarial PDF passes. **Read the report as well as the exit status.** The old app learned that a script check passes degenerate output, which is why the scorer compares values and never only whether something parsed (§8.1). Commit a results file when it backs a decision. Raising a time budget needs a committed results file that shows why (§3.11).
 
 The same procedure has two more checks:
 
@@ -179,17 +179,18 @@ The converter is built and released per PDF, even in a batch: holding it would k
 
 ### Performance
 
-These are the baseline medians from 2026-10-27, measured on an M2 Pro with 16 GB on AC power, with docling 2.143.1, mlx 0.32.4 and mlx-vlm 0.7.10 (§3.11). The budgets in `eval/budgets.toml` are these figures × 1.25:
+These are the baseline medians from 2026-10-27, measured on an M2 Pro with 16 GB on AC power, with docling 2.143.1, mlx 0.32.4 and mlx-vlm 0.7.10 (§3.11). The budgets in `eval/budgets.toml` are these figures × 1.25; the scanned row is the 2026-10-29 re-baseline's, which met every other budget:
 
 | Metric | Median |
 |---|---|
 | Phase A | 5.66 s/page |
+| Phase A, scanned | 7.04 s/page (2026-10-29) |
 | Chart | 8.28 s |
 | KVP page | 6.01 s |
 | Cold start | 7.13 s |
 | Peak memory | 6.68 GB |
 
-Sustained throughput is ~10 pages/min, with no throttling over ~10 min (S8). A degenerate page costs ~32–37 s. Scanned PDFs are not measured yet: the scan is in the corpus (`gao-07-631-scan.pdf`, PR 2), and its numbers come from the scanned halves of S5 and S8.
+Sustained throughput is ~10 pages/min, with no throttling over ~10 min (S8). A degenerate page costs ~32–37 s. A scanned page costs what a born-digital one does when it converts cleanly (2.76 s against 2.74 s median generation, S8's scanned half); the scan's 7.04 s/page is its two degenerate pages. The real scan did not show the stand-in's image-only collapse, and page scale stays 2.0 for scans (decided with the user, §12).
 
 No public speed lever exists today (S11). Docling's page batch size is inert on MLX, and the VLM pipeline has no overlap. `mlx_vlm.batch_generate` at batch 4 is 18% faster, but it is not bit-identical and ships only by replacing a Docling engine method. Reopen it when Docling exposes batched MLX generation.
 

@@ -171,7 +171,7 @@ These figures are from a 16 GB M2 Pro on AC power, measured on 2026-10-27 with d
 | Loading the models | ~7 s for the first PDF of a run |
 | Peak model memory | 6.68 GB |
 
-A page where the model falls into a repetition loop costs 30–40 s, and its text is usually lost. Such a page shows up in `run.json`'s warnings. These figures are for born-digital PDFs. Scanned PDFs are in scope, but they have not been measured yet.
+A page where the model falls into a repetition loop costs 30–40 s, and its text is usually lost. Such a page shows up in `run.json`'s warnings. These figures are for born-digital PDFs. A scanned page reads as fast as a born-digital one when it converts cleanly. On the 15-page scan in the evaluation corpus (300 DPI, grayscale), reading averaged 7.0 s per page on 2026-10-29, because two of its pages looped.
 
 ## Disk space
 
