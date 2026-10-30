@@ -61,7 +61,7 @@ uv run python eval/score.py                      # cold run + 3 timed runs, abou
 uv run python eval/score.py --repeats 1 --no-cold --label try-x   # a quick look
 ```
 
-It needs the corpus in `eval/corpus/` and `eval/expected/`. Until PR 2 (`test/eval-corpus`) merges they live only on that branch, so extract them into the working tree first without staging anything (`git archive test/eval-corpus eval/corpus eval/expected | tar -x`), and remove them again before committing. It runs offline (`HF_HUB_OFFLINE=1` unless already set), converts into the gitignored `eval/runs/`, prints a Markdown report and writes `eval/results/<date>-<sha>[-<label>].json`.
+It reads the corpus in `eval/corpus/` and `eval/expected/`. It runs offline (`HF_HUB_OFFLINE=1` unless already set), converts into the gitignored `eval/runs/`, prints a Markdown report and writes `eval/results/<date>-<sha>[-<label>].json`.
 
 **Pass** means `score.py` exits 0. That happens when no score drops below the committed baseline (`eval/results/2026-10-27-24125f5-baseline.json`) by more than that metric's tolerance, every time budget in `eval/budgets.toml` is met, peak memory is ≤ 10 GB, no page hits the token cap outside the named exceptions, and the adversarial PDF passes. **Read the report as well as the exit status.** The old app learned that a script check passes degenerate output, which is why the scorer compares values and never only whether something parsed (§8.1). Commit a results file when it backs a decision. Raising a time budget needs a committed results file that shows why (§3.11).
 
@@ -189,7 +189,7 @@ These are the baseline medians from 2026-10-27, measured on an M2 Pro with 16 GB
 | Cold start | 7.13 s |
 | Peak memory | 6.68 GB |
 
-Sustained throughput is ~10 pages/min, with no throttling over ~10 min (S8). A degenerate page costs ~32–37 s. Scanned PDFs are not measured yet: they wait on the print-and-scan step, as do the scanned halves of S5 and S8.
+Sustained throughput is ~10 pages/min, with no throttling over ~10 min (S8). A degenerate page costs ~32–37 s. Scanned PDFs are not measured yet: the scan is in the corpus (`gao-07-631-scan.pdf`, PR 2), and its numbers come from the scanned halves of S5 and S8.
 
 No public speed lever exists today (S11). Docling's page batch size is inert on MLX, and the VLM pipeline has no overlap. `mlx_vlm.batch_generate` at batch 4 is 18% faster, but it is not bit-identical and ships only by replacing a Docling engine method. Reopen it when Docling exposes batched MLX generation.
 
