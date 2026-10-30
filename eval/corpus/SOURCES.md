@@ -117,4 +117,4 @@ keeps each page's content stream and text layer as published.
   standard fonts, which are not embedded.
 - **Changes:** n/a. The generator is deterministic. `uv run python
   eval/corpus/make_adversarial.py` rewrites it byte for byte: SHA-256
-  `3d2a5f53ca34169fb3cedfcb99b74a13af485c2d67808b903b477f6156baad51`.
+  `b61984c6f14388a296c0f7db9136b5b15557df44fb7e312b3ac1450fb0d0bcf5`.
