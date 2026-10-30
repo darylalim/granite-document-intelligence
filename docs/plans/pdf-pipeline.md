@@ -12,9 +12,12 @@ the same day). PR 3
 (`api` complete, batch, `gdi convert`), PR 7 (eval harness, baseline and budgets;
 S6/S7/S11 confirmed) and PR 8 (docs rewrite) are merged; PR 9 (release 1.0.0) is next, and merges only when every §16 item holds. Per-PR progress is under §10. **To resume, paste Appendix B into a new session for the next PR.**
 
-**Status (2026-10-30):** v1 is complete. PR 9 merged and CI published `v1.0.0`
-(§10). §18 proposes the v1.x UI as PRs 10–16, with a v1.0.0 fix (PR 11) first. It awaits the user's approval, and its
-U-spikes come before any code.
+**Status (2026-10-30, end of day):** v1 is complete, and the v1.x UI is planned. PR 9
+published `v1.0.0` (§10). §18, the v1.x build plan, was reviewed cold, approved and
+merged (PR 10, #14). PR 11 (#15) fixed a v1.0.0 bug that review found, and CI
+published **`v1.0.1`**. **PR 12 is next:** the U-spikes (§18.6), then the read-only
+viewer. Per-PR progress is under §18.7. **To resume, paste Appendix C into a new
+session.**
 
 ## 0. At a glance
 
@@ -42,7 +45,7 @@ derail it) → §4 (Phase 0, where work starts) → the rest as each PR needs it
 
 **v1 vs later:** §1–§13 and §16–§17 are v1. §14 (UI theme) and §15 (UI layout) are
 designed and verified for **v1.x** and must not shape v1 code. §18 is the v1.x build
-plan (proposed 2026-10-30).
+plan (approved 2026-10-30).
 
 ## 1. Goal
 
@@ -67,7 +70,7 @@ Inputs: one or more PDFs, **or a directory** of them, with resume (§3.8).
   without Streamlit installed. If it needs fast listings, it gets a rebuildable SQLite
   cache (§3.12.1), never a second source of truth. Its theme (§14) and responsive
   layout (§15) are already designed and verified. Its build plan is §18, which
-  proposes running conversions as a `gdi convert` child process rather than calling
+  runs conversions as a `gdi convert` child process rather than calling
   the library in-process (§18.2).
 - No embeddings, vector store or database — v1 stops at `chunks.jsonl`; files are the
   source of truth, and any later store is a derived index (§3.12.1).
@@ -519,8 +522,8 @@ result.save(Path("out/report"))  # writes the §3.5 tree
 ```
 
 Rules: `convert()` **returns** data and writes nothing; `save()` is the only writer —
-so a UI can show results without touching disk. (§18.2 proposes that the v1.x UI
-run `gdi convert` as a child process and read the tree instead; the rule that
+so a UI can show results without touching disk. (§18.2 decides that the v1.x UI
+runs `gdi convert` as a child process and read the tree instead; the rule that
 `convert()` writes nothing is unchanged.) Dataclasses, fully typed (`ty` gates
 it). A batch helper `convert_many(inputs, out_dir, options, force=False)` yields one
 result-or-error per PDF and owns the §3.8 resume logic, so the CLI and a UI cannot
@@ -2158,13 +2161,13 @@ of the working text app; `git checkout v0.6.0` restores it intact if the rebuild
 | granite-docling silently mis-transcribes prose: a wrong number ("73" for "7.3"), an inserted phrase, invented paragraphs on a chart page, or a whole page lost to a loop, its charts with it (GAO-07-631 p. 24 carries Figure 7, so the cap costs 2 of the corpus's 13 charts — S6) | S5, S6; S11 found three more forms, each at a different page scale: a page replaced by "The text of this document is not available in the original format." repeated, an invented opening paragraph, and an invented page ("The Army's 2015-2016 budget …") that closes cleanly and passes every §3.10 check | cap/loop detection flags the lost page (§3.10); on born-digital PDFs a per-page similarity against the text layer sees the invented ones (S11's dropped to 0.50 and below against ≥ 0.75 for clean pages), so PR 7's §8.2 rule 2 score is also a candidate `run.json` warning (PR 7 found it marks a lost and an invented page alike: GAO-07-631 p24 scores 0.02 lost and 0.32 invented, so only the cap flag tells them apart); `--text-source pdf` for trusted born-digital PDFs (§3.2). **Decided in PR 7:** prose numbers are not scored separately. The per-page edit distance against the text layer already charges a "73" for "7.3", and a separate number check would need the same page pairing to say which number belongs where |
 | The eval corpus can't be licensed cleanly | Task C | public-domain US federal sources + project-made PDFs only (§4.1) |
 
-## 18. v1.x — the UI (proposed 2026-10-30)
+## 18. v1.x — the UI (approved 2026-10-30)
 
-**Status: proposed, not approved.** v1.0.0 shipped on 2026-10-30 (§10, PR 9). This
-section turns §14 (theme) and §15 (layout) into a build plan. It is PR 10's content,
-and the design freezes when the user approves it and the U-spikes (§18.6) report. Like
-§1–§13, every decision carries its reason. Decisions marked **(proposed)** are this
-section's recommendations and await that approval. **Reviewed cold on 2026-10-30:**
+**Status: approved by the user on 2026-10-30** (PR 10, #14). v1.0.0 shipped the same
+day (§10, PR 9). This section turns §14 (theme) and §15 (layout) into a build plan.
+Approval covers everything below, including what is still marked **(proposed)**. The
+U-spikes (§18.6) can still amend it, and any amendment travels with the PR that finds
+it (§10's rule). Like §1–§13, every decision carries its reason. **Reviewed cold on 2026-10-30:**
 19 findings, each checked against the code or Streamlit 1.66.1's source and folded in
 below. One was a v1.0.0 bug, which PR 11 fixes before any UI work (§18.7).
 **Decided with the user (2026-10-30):** the subprocess design (§18.2), row positions
@@ -2736,6 +2739,62 @@ Finish by summarizing what the PR does, the hand-run numbers, every plan amendme
 anything you need from me.
 
 This session: do PR 9 (chore/release-1.0.0) only, then open the PR and stop.
+```
+
+Change the last line to the next PR before each paste.
+
+## Appendix C — kickoff prompt for v1.x (PR 12 onward)
+
+Paste this as the first message of a new Claude Code session to carry the next PR in
+§18.7. Like Appendix B it resumes: the session finds the next PR from §18.7's progress
+table and from the branches that exist, so one prompt serves PR 12 through PR 16.
+
+```text
+You are implementing the v1.x UI: §18 of docs/plans/pdf-pipeline.md. v1 is complete
+and released (v1.0.1). Read §18 in full first, then §14 and §15 (the UI theme and
+layout it builds on), then §3.5, §3.7, §3.8, §3.12 and §3.13 as the PR needs them.
+The plan was written in earlier sessions you have no memory of; it is the single source
+of truth, and every decision in it carries its reason — read the reason before deciding
+a choice is safe to change. §18 was reviewed cold and approved; its four decisions
+marked (decided) were made with me and are not to be reopened without asking.
+
+Follow CLAUDE.md; where it and the plan disagree, the plan wins.
+
+Before anything else:
+- Read §18.7's progress table to find the next PR, and check `gh pr list --state all`
+  and the branches (local and origin) — if the next PR's branch already exists, resume
+  it rather than starting again.
+- Re-check every Streamlit behaviour §18 cites against the installed version (§18 was
+  checked against 1.66.1); record what you used.
+
+Rules for the PR:
+- One PR, on the branch §18.7 names, off a fresh main. Conventional Commits with the
+  type §18.7 gives it. Commit as you go, so a session that ends part-way leaves its work
+  on the branch.
+- Meet the PR's "Merge gate" column and put the evidence in the PR description. Run
+  `GATE_FORCE=1 ./scripts/gate.sh` before every push and keep it ≤ 15 s (§3.14 rule 9);
+  if UI tests push it over, apply §18.5's decided split, and say so.
+- §18.4 is not negotiable: the forced Streamlit flags, no remote fetch from anything a
+  PDF or a model produced, every output-tree string shown as text, chart code never run.
+  If a spike shows a rule cannot hold as written, stop and ask; do not weaken it.
+- Spike results (U1–U4) go in docs/plans/pdf-pipeline-spikes.md under a v1.x heading,
+  each with its question, measurement and verdict, like S1–S11.
+- No UI PR changes what a conversion produces (§18.1). If one must, it is
+  model-touching under CLAUDE.md's rule and runs the eval by hand.
+- If implementation contradicts the plan, amend the plan in the same PR and say why in
+  the PR description. If a decision is genuinely mine to make, stop and ask.
+- Update §18.7's progress table in the same PR.
+- Use the /astral skills for uv, ruff and ty.
+- Force-pushes are blocked here: to update a PR branch after main moves, merge main
+  into it and let the squash merge flatten it.
+- Open the PR, wait for CI, then STOP and ask me before merging. A merge that bumps the
+  version publishes a release, and anything outward-facing after merge waits for my
+  confirmation.
+
+Finish by summarizing what the PR does, its evidence, every plan amendment, and
+anything you need from me.
+
+This session: do PR 12 (feat/ui-viewer) only, then open the PR and stop.
 ```
 
 Change the last line to the next PR before each paste.
