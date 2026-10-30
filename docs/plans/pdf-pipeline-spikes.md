@@ -2033,7 +2033,7 @@ session scratchpad, never in the repo.
 | Spike | Verdict | Amends the plan |
 |---|---|---|
 | U1 | **Pass, with four keys added and one launcher fix.** The table's ten flags win over a hostile global and working-directory config, under `streamlit run` and under `bootstrap`; the packaged theme applies from any working directory; `Host: evil.example` is refused before any lookup. But a hostile `server.corsAllowedOrigins` admitted an `evil.example` WebSocket, `bootstrap.run` alone applies no flag at all, and any foreign-origin knock fetched `checkip.amazonaws.com` | yes: four keys join §18.4 rule 1; the launcher loads config itself and disables Streamlit's external-IP lookup (with the user); the HTTP routes' missing Host check is a stated residual (§18.4, §18.5) |
-| U2 | pending | |
+| U2 | **Pass, with a different neutraliser.** Unneutralised, eight Markdown image forms fetched from the PDF author's host; raw HTML and KaTeX fetched nothing. With `render.py` on, the hostile document made no request and rendered no image, link, LaTeX or icon, and GAO-07-631's real document made no request beyond the app. A backslash cannot stop GFM's bare links or Streamlit's `:streamlit:`/`:material/…:` swaps; a U+2060 joiner does. Crops render at the card width or narrower with `width="content"`. A framing page can drive the app only from an allowed origin, but it can always frame it and read what the app posts | yes: rule 2 rewritten as fail-closed escaping (§18.4); only fixed view names in the query string and a fixed page title (rule 3); framing is a stated residual |
 | U3 | pending | |
 | U4 | pending | |
 
@@ -2154,3 +2154,117 @@ are: four keys join §18.4 rule 1; the launcher sets `config._main_script_path` 
 HTTP routes' Host gap is a stated residual. Tests pin the private names the launcher
 touches (`config._main_script_path`, `net_util.get_external_ip`), so a Streamlit minor
 that renames one fails the gate instead of silently undoing the fix.
+
+## U2 — rendering (2026-10-30)
+
+**Question** (§18.6). With the neutraliser off, which constructs make `st.markdown`
+(HTML off) issue a request? With it on, does the hostile `document.md` make any request
+in the browser's network log? Do `st.image` crops render at the card width? **Decision
+rule:** §18.4 rule 2 as specified, or the plain-text fallback.
+
+**Environment.** U1's venv and launcher, run with the shipped flags (the four added keys
+and the external-IP fix) and a clean config. Google Chrome headless (`--headless=new`) on
+a fresh profile, driven over CDP. Every request was recorded from
+`Network.requestWillBeSent`, out-of-process frames included. `--host-resolver-rules`
+mapped `evil.example` and `frame.test` to a local logger on port 8799 and sent every
+other host to `NOTFOUND`, so nothing left the Mac. Each request to the logger was
+recorded server-side as well.
+
+**Hostile document.** Every construct carries its own path under
+`http://evil.example/u2/`, so each request names its source. The constructs:
+- images: inline, titled, reference, protocol-relative, relative, `data:`, inside a
+  link, in a table cell, in a footnote, in a heading;
+- links: inline, `javascript:`, angle-bracket autolink, bare URL, reference link;
+- raw HTML: `img`, `srcset`, `a`, `link`, `style @import`, `iframe`, `video poster`,
+  `audio`, `object`, `embed`, `svg image`, inline `style`;
+- KaTeX: `\href`, `\url`, `\includegraphics`, a block, and `\[ \]` and `\( \)`
+  delimiters;
+- text: `$5 and $3`, `:red[…]`, `:material/home:`, `:smile:`, `:streamlit:`, an email
+  address, `www.`, a fenced block and a code span.
+
+**(a) Neutraliser off** (`st.markdown(document_md)`):
+
+| Construct | Request | In the page |
+|---|---|---|
+| Markdown images: inline, titled, reference, protocol-relative, in a link, in a table, in a footnote, in a heading | **8 to evil.example**, each confirmed by the logger (`404 from 127.0.0.1:8799`) | `<img>` |
+| relative image | 1 to the app (`/app/static/u2-relative.png`) | `<img>` |
+| `data:` image | none | `<img>` |
+| raw HTML, all 12 forms | none | escaped text |
+| KaTeX `\href`, `\url`, `\includegraphics` | none (KaTeX `trust` is off) | rendered LaTeX |
+| `$5 and $3` | none | **LaTeX** |
+| links: inline, autolink, bare, reference | none until clicked | `<a href>` to evil.example |
+| `javascript:` link | none | `<a href="#">` |
+| `:streamlit:` | none | an inline `data:` SVG `<img>` |
+| `:material/home:` | none (the font is served by the app) | an icon |
+| `:red[…]` | none | coloured text |
+
+**(b) Neutraliser on.** First tried as specified, then as built in `render.py`:
+
+1. **Escaping the active characters is not enough.** Two rounds in the browser showed
+   why. GFM's bare-link pass (`http://`, `www.`, `a@b.c`) and Streamlit's
+   `:streamlit:` and `:material_…:` swaps are regexes over *text nodes*, applied after
+   escapes are resolved (`StreamlitMarkdown.*.js`: `j(e,[[/:streamlit:/g,…]])`). So
+   `http\://`, `www\.` and `\:streamlit\:` still became a link, a link and a logo.
+   An invisible U+2060 WORD JOINER defeats each pattern, because each needs
+   adjacency. It goes after a colon that touches the next character, before `@`, and
+   between `www` and its dot. A colon followed by a space (`Note: x`) gets none, so
+   copied prose stays clean.
+2. **The final run** fed the hostile document through `render.segments` with the
+   output-folder cases appended: a contained chart, a symlink out of the folder, a `../`
+   target, an absolute target, bracket and paren math, an email, `www.`, a fenced block
+   and a code span. Results:
+   - **no request** beyond the app, and the logger saw nothing;
+   - no `<img>` in any Markdown container, and no link beyond Streamlit's own heading
+     anchors;
+   - no KaTeX element and no Material icon;
+   - every construct visible as literal text (`$5 and $3`, `:red[red text]`,
+     `:streamlit:`, `<img src=…`, the bare URL, the email, `[js](javascript:alert(1))`);
+   - the contained chart through `st.image`;
+   - the symlink, `../` and absolute targets reduced to their alt text;
+   - the fenced block in `st.code`.
+3. **GAO-07-631's real `document.md`** from the release eval run gave no request beyond
+   the app, 15 pictures through `st.image` at their natural widths, no KaTeX (the report
+   has 43 dollar signs), no link and page overflow 0 at 1280 px. The cost is that the
+   report's own `http://www.gao.gov` and `mailto:` addresses show as text, not links,
+   as rule 2 asks.
+
+**(c) Crops at the card width.** Four GAO-07-631 crops (173–538 px wide) went into
+§15's `st.container(border=True, width=344)` cards, at 1280 and 390 px:
+- `width="content"`, the default: crops wider than the card shrink to its **314 px**
+  content width, and narrower ones keep their natural width (173 px). No crop is
+  enlarged.
+- `width="stretch"`: every crop is 314 px, which enlarges chart-007 from 173 px by 1.8×.
+
+Page overflow was 0 in every case. **`content` it is.**
+
+**(d) A framing page** (U1's `client.allowedOrigins`). A page on `http://frame.test`
+framed the app and, after 7 s, posted
+`{stCommVersion: 1, type: "UPDATE_FROM_QUERY_PARAMS", queryParams: "?…&pwned=1"}`.
+- **Positive control**, with that origin allowed: the app reran with `pwned=1` in
+  `st.query_params`. An allowed parent can steer the app's query string, and so `?view=`.
+- **Shipped flags** (`http://localhost`): ignored. U1's added key is load-bearing.
+- **In both runs**, Streamlit framed without objection (it sends no `frame-ancestors`
+  or `X-Frame-Options`), and the app posted to its parent with target `"*"`:
+  `SCRIPT_RUN_STATE_CHANGED`, `SET_THEME_CONFIG`, `GUEST_READY`, `WEBSOCKET_CONNECTED`
+  and `SET_PAGE_FAVICON`. The bundle also sends `SET_QUERY_PARAM`, `SET_PAGE_TITLE`,
+  `SET_APP_PAGES` and `CLIENT_ERROR` that way. So any page the user visits can frame
+  the UI, learn when it runs, read its query string and page title, and invite clicks
+  on it (clickjacking). It cannot type into it or drive it.
+
+**Also seen.** Streamlit's typography pass rewrites text nodes: `->` → `→`, `--` → `—`,
+`>=` → `≥`. So the Document view can differ from `document.md` in those pairs. It is
+cosmetic and not a security issue, and recorded so nobody reads it as a conversion bug.
+
+**Verdict: pass, with rule 2 rewritten.** The neutraliser is fail-closed:
+- every character that can start an image, a link, a directive, an emoji or LaTeX is
+  escaped;
+- every bare-link and shortcode pattern is broken with the joiner;
+- best-effort replacement turns inline links and autolinks into their text first;
+- contained inline images go to `st.image`, and fenced blocks go to `st.code`.
+
+Inline code spans are flattened to text, because escaping their backticks is what makes
+the rest safe. The plain-text fallback is not needed. Rule 3 gains two consequences of
+(d): only fixed view names go in the query string, and the page title is fixed. Framing
+is a stated residual for `SECURITY.md`. `tests/test_render.py` pins the output, and a
+mutation check of the neutraliser was caught at every point but the URL-scheme guard,
+which is defence in depth (resolving the path already rejects every case it covers).

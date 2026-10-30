@@ -2449,29 +2449,55 @@ localhost.
    media files whose content-hash URLs it would have to know already. The control
    channel and uploads (XSRF) are guarded.
 
+   **Third residual, stated in `SECURITY.md`: the UI can be framed (U2).** Streamlit
+   sends no `frame-ancestors` or `X-Frame-Options`, and no option adds one. Any page the
+   user visits can frame the UI, learn when it runs, read its query string and page
+   title (rule 3 keeps both free of document data) and invite clicks on it
+   (clickjacking). It cannot type into the UI or drive it, because `client.allowedOrigins`
+   ignores its messages (U2's control showed that an allowed parent *can* steer the
+   query string). PR 14 weighs this again when the Convert and Cancel buttons arrive.
+
 2. **Rendered Markdown fetches nothing, and nothing in it is a link.** `document.md` is
    model output. Docling escapes raw HTML in its Markdown export but passes Markdown
    images and links through. Review exported `![x](https://evil.example/a.png)` and
    `[y](javascript:alert)` and both survived, and a rendered remote image is a request
    the PDF's author chose: a tracking beacon, and a network contact §3.10 does not allow.
-   `render.py` therefore:
-   - splits `document.md` at image references and renders each one whose target is a
-     relative path **contained in the PDF's output folder** with `st.image` (Streamlit
-     serves it through its media manager). It drops every other image, keeping the alt
-     text as plain text. Relative URLs in `st.markdown` resolve against the app, and app
-     static serving reaches only the script's own `static/` folder, so "serve it from the
+   **U2 measured it:** unneutralised, eight Markdown image forms fetched from the
+   author's host, while raw HTML and KaTeX fetched nothing. `render.py` therefore
+   **fails closed** rather than recognising constructs (amended by U2):
+   - it lifts out each inline image whose target is a file **contained in the PDF's
+     output folder** (symlinks resolved; no scheme, no absolute path) and renders it
+     with `st.image` at `width="content"`, with no caption (rule 3). Streamlit serves it
+     through its media manager. Every other image is reduced to its alt text. Relative
+     URLs in `st.markdown` resolve against the app (U2 saw one go there), and app static
+     serving reaches only the script's own `static/` folder, so "serve it from the
      output folder" is not available.
-   - replaces every link, inline, reference-style, reference definition or autolink, by
-     its text. Even a relative link only navigates inside the app.
-   - escapes `$` (Streamlit renders `$…$` as LaTeX, which would garble "$5 and $3") and
-     Streamlit's directives (`:red[…]`, `:material/…:`, emoji shortcodes).
-   - renders with `unsafe_allow_html=False`, Streamlit's default, never changed.
+   - it lifts out fenced code blocks for `st.code`. Mistaking text for a fence, or a
+     fence for text, is safe either way.
+   - it backslash-escapes, outside existing escape pairs, every character that can
+     start an image, a link, a footnote, a directive, an emoji, HTML or LaTeX:
+     `` [ ] ! < $ : @ ` ``. Docling's own escapes (`\_`) are kept as pairs, since
+     doubling `\[` would leave a live bracket. A table's delimiter row is left alone.
+   - it breaks every pattern that Streamlit matches on text *after* escapes are
+     resolved, with an invisible U+2060 joiner: GFM's bare `http://`, `www.` and
+     `a@b.c` links, and Streamlit's `:streamlit:` and `:material/…:` swaps. A backslash
+     did not stop any of them (U2).
+   - it first turns inline links and autolinks into their text, as best effort.
+     Reference links and definitions stay as escaped text, because `[1]` and a
+     bibliography's `[1]: …` look exactly like them. Anything this misses is escaped,
+     so a miss looks untidy and fetches nothing.
+   - it renders with `unsafe_allow_html=False`, Streamlit's default, never changed.
 
-   A test feeds a hostile `document.md` (remote inline and reference images, a
-   `javascript:` link, an autolink, a reference definition, raw `<img>`, `$5 and $3`,
-   `:red[x]`) and asserts that none survives as markup. U2 checks the real app with the
-   browser's network log. **Fallback:** if the neutraliser is ever in doubt, the
-   Document view renders `st.text`. It is ugly, but it fetches nothing.
+   Inline code spans lose their formatting, because escaping backticks is what lets
+   everything inside them render as literal text. Streamlit's typography pass still
+   rewrites `->`, `--` and `>=` in the displayed text (U2). That is cosmetic.
+
+   `tests/test_render.py` feeds a hostile `document.md` and asserts that no active
+   character survives unescaped, every bare-link pattern is broken and no remote image
+   becomes an `Image`. It also pins containment, fences and escape pairs, and it was
+   mutation-checked. U2 ran the real app against the browser's network log: no request.
+   **Fallback:** if the neutraliser is ever in doubt, the Document view renders
+   `st.text`. It is ugly, but it fetches nothing.
 
 3. **Every other string from the output tree is shown as text, never as markup.** Model
    text reaches more than `document.md`. `run.json`'s warnings quote model-written chart
@@ -2485,7 +2511,13 @@ localhost.
    or dataframe cells, or through `render.py`'s neutraliser. It is never a label, an
    alert body, a pill option, a caption, a toast or a metric label. The notice slot's
    messages are our own fixed strings, with any tree-derived part shown beneath them as
-   `st.text`. The hostile-input test covers `run.json` warnings, `kvp.json` errors, chunk
+   `st.text`.
+
+   **Nothing from the tree goes in the query string or the page title (U2).** The app
+   posts both to its parent frame with target `"*"`, so any page that frames the UI
+   reads them (`SET_QUERY_PARAM`, `SET_PAGE_TITLE`). `?view=` takes only the six fixed
+   view names. A selected PDF or run is never a query parameter, and the page title is a
+   fixed string. The hostile-input test covers `run.json` warnings, `kvp.json` errors, chunk
    headings and a file name.
 
    **A pre-existing gap this exposes:** §3.13 rule 5 says no document content goes into
@@ -2611,7 +2643,7 @@ before push, and plan amendments in the PR that finds them.
 |---|---|
 | 10 | merged 2026-10-30 (#14, `a350956`); §18 approved by the user |
 | 11 | merged 2026-10-30 (#15, `5fe06e1`); CI published `v1.0.1` |
-| 12 | in progress on `feat/ui-viewer`: U1 done (pass, four keys added, the external-IP lookup disabled with the user); U2–U4 next |
+| 12 | in progress on `feat/ui-viewer`: U1 approved (four keys added, the external-IP lookup disabled with the user); U2 done (pass; rule 2 rewritten as fail-closed escaping, `render.py` and its tests landed); U3–U4 next |
 
 **Why the viewer comes before `--events`:** the viewer needs no conversion and carries
 U1 and U2, the riskiest unknowns. Building it first means the security model is settled
