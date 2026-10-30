@@ -825,7 +825,15 @@ Five rules:
    `<pdf>.old/` with no `<pdf>/`, renames it back (a crash mid-swap). Errors write
    `run.json` with `"status": "error"` through the same swap, so a failed re-run
    replaces a stale success rather than sitting beside it. Both renames stay within
-   `OUT_DIR`, so they are same-filesystem and atomic on APFS.
+   `OUT_DIR`, so they are same-filesystem and atomic on APFS. **Amended in PR 11
+   (1.0.1):** the swap, the staging folder and startup recovery replace, rename or
+   delete only a folder **gdi wrote**: a real directory holding nothing but §3.5
+   names (`export.is_ours`). v1.0.0 did this to whatever sat there, so
+   `gdi convert ~/Downloads/Documents.pdf -o ~` would have deleted `~/Documents`;
+   a `~/Documents.old` backup was at risk the same way. A folder that holds anything
+   else, a user's file in an output tree included, fails that PDF with
+   `ForeignFolderError` before any model loads, and nothing is written. Found by
+   §18's cold review.
 2. **Images are files, not base64.** `document.json` is saved with referenced images
    (`ImageRefMode.REFERENCED` — verify the exact export call in S3) so the JSON stays
    small and diffable. **Picture crops on** (`charts/chart-NNN.png`, and
@@ -2568,6 +2576,13 @@ before push, and plan amendments in the PR that finds them.
 | 14 | `feat/ui-convert` | inputs (path and uploads), the sidebar settings, `runner` (§18.2): run folders, progress, cancel, lock wait, errors, crash | `feat:` | the equivalence check below on the whole public corpus; cancel mid-page, mid-chart and mid-KVP; U4 re-run on the real app |
 | 15 | `docs/ui` | README (a UI section with both screenshots and `gdi ui`), CLAUDE.md, `SECURITY.md` (§18.4) | `docs:` | every new README command run as written |
 | 16 | `chore/release-1.1.0` | `version = "1.1.0"` + `uv lock`, both files | `chore:` | every §18.8 item checked; eval on the release commit meets baseline and budgets |
+
+**Progress** (updated as each PR lands, as in §10):
+
+| PR | State |
+|---|---|
+| 10 | merged 2026-10-30 (#14, `a350956`); §18 approved by the user |
+| 11 | #15: the swap guard (`export.is_ours`, `ForeignFolderError`), 21 tests, §3.12 rule 1 amended; gate 12.5 s; releases 1.0.1 on merge |
 
 **Why the viewer comes before `--events`:** the viewer needs no conversion and carries
 U1 and U2, the riskiest unknowns. Building it first means the security model is settled

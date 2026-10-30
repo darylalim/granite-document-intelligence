@@ -216,7 +216,11 @@ class ConvertResult:
     run: RunInfo
 
     def save(self, out_dir: Path) -> None:
-        """Write the §3.5 tree to `out_dir`, replacing whatever was there atomically."""
+        """Write the §3.5 tree to `out_dir`, replacing an earlier one atomically.
+
+        Raises `ForeignFolderError` rather than replace a folder gdi did not
+        write (PR 11).
+        """
         from granite_document_intelligence.export import save
 
         save(self, out_dir)
