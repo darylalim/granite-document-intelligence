@@ -3,6 +3,9 @@
   "sha256": "6cd5aa58f8f889cd8e5143935a9307b60dc11a01eb642be10be9c3be2a967677",
   "pages": 4,
   "text_layer": true,
+  "hidden_text": [
+    "—Con."
+  ],
   "charts": [],
   "tables": [
     {
@@ -31,7 +34,7 @@
   "pictures": [],
   "headings": "headings.txt",
   "notes": [
-    "The text layer of pages 2 and 3 carries a '—Con.' after each table's title that is not visible on the rendered page (an ordinary text object, hidden by what is drawn over or clipped around it); the captions here follow the rendered page.",
+    "The text layer of pages 2 and 3 carries a '—Con.' after each table's title that is not visible on the rendered page (an ordinary text object, hidden by what is drawn over or clipped around it); the captions here follow the rendered page, and hidden_text removes it from the text layer that score.py compares document.md with.",
     "Values keep the source's significance asterisk (*1.3), its en-dash minus (–0.7) and its X / Z codes."
   ]
 }
