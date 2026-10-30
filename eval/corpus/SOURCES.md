@@ -26,6 +26,22 @@ keeps each page's content stream and text layer as published.
 - **Changes:** none. SHA-256 (original and committed):
   `51f6dca94cf101b7f8dda482dffd3ba16119705083fbb06be289ee360790471f`.
 
+## gao-07-631-scan.pdf
+
+- **Work:** made by this project: a print-and-scan of `gao-07-631.pdf` above, PDF pages
+  12–26 (plan §4.1, item 4). Those 15 pages hold all 12 plots and both tables.
+- **Licence:** Apache-2.0, like the rest of the repository. The printed report is in
+  the public domain (above), so the scan is the project's own work.
+- **Why it qualifies:** it is the scanned multi-page case: image-only, with no text layer
+  (0 characters on every page) and one image per page.
+- **How it was made (2026-10-29):** the 15 pages were extracted with `pypdfium2` and
+  printed at actual size, single-sided, then scanned on a Brother MFC-L2710DW at 300 DPI
+  in grayscale, with no OCR. The scanner wrote 595 × 775 pt pages, cropping the Letter
+  page slightly; the whole page, footer included, is inside the crop. Its document
+  information is empty. Scanner specks and an edge line along the top are left in, as
+  realistic noise. SHA-256
+  `6c677f6b0e2df33da658b9d65bb5a0c513bc498d45053545467fc258804ae409`.
+
 ## gao-08-14-excerpt.pdf
 
 - **Work:** U.S. Government Accountability Office, *Energy Markets: Increasing
@@ -102,10 +118,3 @@ keeps each page's content stream and text layer as published.
 - **Changes:** n/a. The generator is deterministic. `uv run python
   eval/corpus/make_adversarial.py` rewrites it byte for byte: SHA-256
   `3d2a5f53ca34169fb3cedfcb99b74a13af485c2d67808b903b477f6156baad51`.
-
-## Pending
-
-- **The scanned document**, to be printed and scanned on the development machine (plan
-  §4.1, item 4). Being the project's own work, it will be Apache-2.0. Its source pages
-  are already in the corpus, so its expected outputs come from the born-digital
-  original's.

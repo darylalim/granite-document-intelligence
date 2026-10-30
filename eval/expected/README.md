@@ -19,6 +19,8 @@ itself. Every value came from the PDF itself, in one of three ways:
   the zero line, and each point converted. Every computed value fell within 0.05 of a
   whole number, so the CSVs give whole numbers. For a labelled bar chart, the same
   method reproduces the labels exactly (checked on GAO-07-631 Figure 5).
+- **The scan** (`gao-07-631-scan`) reuses its original's expected outputs, renumbered to
+  the scan's pages. Nothing in it was transcribed again.
 - **The adversarial PDF** is the project's own construction, so its expected values are
   the ones `make_adversarial.py` draws.
 
@@ -49,6 +51,8 @@ expectation on the same page by reading order.
 |---|---|
 | `pdf`, `sha256`, `pages` | the corpus file, its hash and its page count. A hash mismatch means the PDF changed under its expectations |
 | `text_layer` | `true` when the PDF has a usable text layer. §8.2 rule 2 then scores `document.md` against it |
+| `hidden_text` | optional: strings in the text layer that the rendered page never shows, removed from it before scoring (§8.2 rule 2). A white-filled or invisible character is dropped without being listed; this is for text hidden by what is drawn over or clipped around it, such as the Census `—Con.` |
+| `scan_of` | only on a print-and-scan: the born-digital `pdf` it was scanned from and the first and last of its `pages` scanned. Scan page N is that PDF's page N + first − 1 |
 | `charts[]` | `id`, `page`, `caption` as printed, `kind` (`bar` / `line` / `pie`), `values_from` (`labels` or `geometry`, above), `csv`. Optional: `panel`, the plot's own subtitle when one caption covers several plots, and `note` |
 | `tables[]` | `id`, `page`, `caption`, `csv`. Optional: `rotated` for a table printed sideways, `continues_on` / `continued_from` linking the pages of a table that spans a page break, and `note` |
 | `pictures[]` | non-chart pictures (`kind`: `logo`, `signature`, `map`, `photo`). A chart CSV produced for one is a **false positive** (§8.2 rule 5) |
@@ -84,7 +88,7 @@ is arbitrary. Values are numbers without units. The unit is in the header.
 ## headings.txt
 
 Each line is a heading, as printed, that `document.md` must contain. Each was checked to
-occur on the PDF's text layer. Compare case- and whitespace-insensitively, since some
+occur on the PDF's text layer, or for a scan on its original's. Compare case- and whitespace-insensitively, since some
 are set in capitals on the page (`ENERGY MARKETS`).
 
 ## kvp/
