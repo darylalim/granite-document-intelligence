@@ -1239,6 +1239,18 @@ manifest records. **The scan should be GAO-07-631's PDF pages 12–26**: those 1
 hold all 12 plots and both tables, so the scan's expected outputs are the existing CSVs
 with the pages renumbered, and nothing new has to be transcribed.
 
+**Status (2026-10-29): public tier done** (PR 2). The scan is `gao-07-631-scan.pdf`:
+those 15 pages printed at actual size and scanned on a Brother MFC-L2710DW at 300 DPI
+in grayscale, with no OCR, 1.2 MB and image-only (no text layer). Its expected outputs
+are the original's, renumbered (scan page N is the original's N + 11). Its manifest
+sets `"text_layer": false` and records the original under a new `scan_of` key. Two
+things wait on the scanned halves of S5 and S8, which run against it next. First,
+`score.py` skips text scoring on a scan, though §8.2 rule 2 names the born-digital
+original as its reference: `scan_of` is the data that change needs. Second, the
+scan has no `[capped_pages]` entry or `phase_a_s_per_page_scanned` budget yet, so a
+capped scan page would fail the eval until those are decided from a measured run
+(§3.11). The corpus is now seven PDFs, 2.6 MB.
+
 ### 4.2 Converting Granite Vision
 
 The command S2 ran (flags verified against mlx-vlm 0.7.10; the `python -m
@@ -1582,8 +1594,8 @@ detail rather than a quality change.
      an optional `hidden_text` list from each `manifest.json`. Notes are prose, and
      a quoted string in them (`'Maritime60%'`) is not always hidden. The Census
      manifest needs `"hidden_text": ["—Con."]`, added on `test/eval-corpus` when
-     PR 2 is rebased (the user's call, 2026-10-27). PR 7's baseline already ran with
-     it, on a scratch copy of the corpus, so adding it moves no score.
+     PR 2 is rebased (the user's call, 2026-10-27; added 2026-10-29). PR 7's baseline
+     already ran with it, on a scratch copy of the corpus, so adding it moves no score.
    - **Text is scored per page, from `document.json`.** Only `document.json` says
      which page an item came from, and `document.md` is exported from it. A page's
      prediction is its text items plus its tables' cells, since the text layer holds
@@ -1682,7 +1694,12 @@ detail rather than a quality change.
    is reported beside it, since S6 recorded one honest miss (the order date's
    format). **Follow-up for PR 2:** `make_adversarial.py` should build a page that
    loops at the shipped settings. Census p. 2 is the corpus's one real self-closing
-   loop, and it is flagged.
+   loop, and it is flagged. **Done in PR 2 (2026-10-29):** page 2 is now 95 identical
+   rows in 6 pt type, and it loops without reaching the cap (4,254 tokens, flagged by
+   the repetition check, the same on two runs), with KVP still 4/5 and valid. The loop
+   belongs to that exact page: 85 and 90 rows of the same layout did not loop, nor
+   did 60 rows at 8 or 6 pt. A model or dependency change may stop it looping, which
+   is why the amendment above stays.
 7. **Private results never reach git.** Private-tier runs write to
    `eval/private/results/` (already gitignored via `/eval/private/`), never
    `eval/results/`. The committed results file carries **only aggregate private
@@ -1871,7 +1888,7 @@ the only record of them):
 |---|---|
 | 0 | merged 2026-10-18 (#1) |
 | 1 | merged 2026-10-25 (#3); report approved, scanned halves of S5/S8 carved out (§4) |
-| 2 | **draft** (#2), waiting on the scan (§4.1). Its rebase onto `main` must drop its two `eval/` `.gitignore` lines, which PR 3 already carries (§5) |
+| 2 | **ready** (#2), rebased onto `main` on 2026-10-29 (its two `eval/` `.gitignore` lines dropped, since PR 3 carries them, §5). Adds the scan `gao-07-631-scan.pdf` (§4.1), the Census `hidden_text` (§8.2 rule 2) and an adversarial page 2 that loops at the shipped settings: 4,254 tokens, uncapped, flagged, KVP 4/5 valid, the same on two runs (§8.2 rule 6). Next: the scanned halves of S5 and S8 against the scan, and its eval entries (§4.1 status) |
 | 3 | merged 2026-10-27 (#4, `6138255`). Moved suites 68 → 68 tests; actions SHA-pinned. After merge, with the user's confirmation: interim description and the 18 §9.2 topics set, Dependabot alerts on. The old Granite 4.2 bf16 cache entry was not present on the development Mac |
 | 4 | merged 2026-10-27 (#6, `468fa30`). Our own chart stage replaces Docling's (decided with the user 2026-10-27, §3.2); page-level resume failed its feasibility gate and is deferred (§3.14 rule 7); floors filled in (§2.2); gate 8.6–9.0 s; Pillow 13.0.0 and certifi moved past their advisories, Pillow made eval-gated (§2.2). After merge: 0 open Dependabot alerts on `main` |
 | 5 | merged 2026-10-27 (#7, `9059e74`). Phase B shares the chart stage's Granite Vision (§3.8); Docling's KVP prompt copied under MIT (`THIRD_PARTY_NOTICES.md`, §3.3); schema checks in `kvp.py` (§3.13 rule 8); `Chunk.kind` dropped (§3.9); `referencing` declared (§2.2); W-9 KVP 10/11 and GAO-07-631 cover 3/4, both matching S6; gate 9.3–9.4 s |
@@ -2199,9 +2216,7 @@ Before anything else:
 - Read §10's progress table to find the next PR, and check `gh pr list --state all`
   and the branches (local and origin) — if the next PR's branch already exists, resume
   it rather than starting again.
-- The eval corpus lives on branch test/eval-corpus (PR 2) until that PR merges. For a
-  hand run, read a corpus PDF from it (`git show test/eval-corpus:eval/corpus/<file>`
-  into the scratchpad); do not merge or rebase PR 2 yourself.
+- The eval corpus is on main in eval/corpus/ and eval/expected/ (PR 2).
 - Re-check every version and API the plan cites against what is installed now, inside
   §2.2's floors and caps; record what you used.
 

@@ -18,8 +18,8 @@ peak_gb = 10.0
 # The baseline's medians of three × 1.25 (§3.11), in seconds. Phase A per page is
 # the corpus's Phase A time over its pages, model loads and degenerate pages
 # included; a chart is one chart's CSV + summary; a KVP page is one page's answer.
-# phase_a_s_per_page_scanned waits on the print-and-scan step (§4.1): no scanned
-# PDF has been measured yet, so it has no budget.
+# phase_a_s_per_page_scanned waits on the scanned halves of S5 and S8 (§4.1): no
+# scanned PDF has been measured yet, so it has no budget.
 phase_a_s_per_page = 7.08
 chart_s = 10.34
 kvp_page_s = 7.51
