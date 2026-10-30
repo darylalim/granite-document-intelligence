@@ -2577,6 +2577,13 @@ before push, and plan amendments in the PR that finds them.
 | 15 | `docs/ui` | README (a UI section with both screenshots and `gdi ui`), CLAUDE.md, `SECURITY.md` (§18.4) | `docs:` | every new README command run as written |
 | 16 | `chore/release-1.1.0` | `version = "1.1.0"` + `uv lock`, both files | `chore:` | every §18.8 item checked; eval on the release commit meets baseline and budgets |
 
+**Progress** (updated as each PR lands, as in §10):
+
+| PR | State |
+|---|---|
+| 10 | merged 2026-10-30 (#14, `a350956`); §18 approved by the user |
+| 11 | #15: the swap guard (`export.is_ours`, `ForeignFolderError`), 21 tests, §3.12 rule 1 amended; gate 12.5 s; releases 1.0.1 on merge |
+
 **Why the viewer comes before `--events`:** the viewer needs no conversion and carries
 U1 and U2, the riskiest unknowns. Building it first means the security model is settled
 before the UI can start a run.
