@@ -5,22 +5,28 @@
 # budget, needs a committed eval/results/ file showing why, in its own PR — the
 # memory ceiling is never raised.
 
-# The results file every later run is compared with: the shipped configuration's
-# first full run (PR 7). Re-baselining replaces this line and says why per moved
-# metric (§8.2 rule 1).
-baseline = "results/2026-10-27-24125f5-baseline.json"
+# The results file every later run is compared with. Re-baselining replaces this
+# line and says why per moved metric (§8.2 rule 1). Re-baselined on 2026-10-29
+# because the corpus changed: PR 2 added the scan and a looping adversarial page,
+# and score.py now scores the scan's text against its original. Without the scan
+# this run's totals equal PR 7's baseline (2026-10-27-24125f5) on all 29 metrics;
+# every moved metric moved by adding the scan to the averages (spike report, S8's
+# scanned half).
+baseline = "results/2026-10-29-3025669-baseline.json"
 
 [memory]
 # A ceiling from the Metal working set on a 16 GB Mac, not a measurement (§3.11).
 peak_gb = 10.0
 
 [time]
-# The baseline's medians of three × 1.25 (§3.11), in seconds. Phase A per page is
+# PR 7 baseline's medians of three × 1.25 (§3.11), in seconds. Phase A per page is
 # the corpus's Phase A time over its pages, model loads and degenerate pages
 # included; a chart is one chart's CSV + summary; a KVP page is one page's answer.
-# phase_a_s_per_page_scanned waits on the scanned halves of S5 and S8 (§4.1): no
-# scanned PDF has been measured yet, so it has no budget.
+# The 2026-10-29 baseline meets each one (Phase A 5.97, up from 5.66 because the
+# adversarial page now loops; chart 8.86 with the scan's charts), so none moved.
 phase_a_s_per_page = 7.08
+# The scan alone, from the 2026-10-29 baseline: 7.04 s/page × 1.25 (S8 scanned).
+phase_a_s_per_page_scanned = 8.8
 chart_s = 10.34
 kvp_page_s = 7.51
 # Phase A's converter and model load plus Granite Vision's load, on the first
