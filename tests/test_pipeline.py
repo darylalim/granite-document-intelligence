@@ -11,6 +11,7 @@ from granite_document_intelligence import (
     ConvertOptions,
     charts,
     chunk,
+    config,
     kvp,
     memory,
     models,
@@ -115,6 +116,21 @@ def test_without_a_schema_the_chart_stage_owns_its_model(
     assert stages.chart_vision is None
     assert result.kvp is None
     assert result.run.timings_ms["docling_doc_enrich"] == 2.0
+
+
+def test_run_json_records_every_model_pin(
+    monkeypatch: pytest.MonkeyPatch, blank_pdf: Path
+) -> None:
+    # §3.13 rule 1: the verified manifest carries three pins; the tokenizer's is ours.
+    Stages(monkeypatch)
+    manifest = {"models": {"repo": {"revision": "a" * 40}}, "conversion": {}}
+    monkeypatch.setattr(models, "verify_models_dir", lambda _: manifest)
+    result = pipeline.run(blank_pdf, ConvertOptions())
+    assert result.run.models["manifest"] == manifest
+    assert result.run.models["embedding_tokenizer"] == {
+        "repo_id": config.EMBEDDING_TOKENIZER.repo_id,
+        "revision": config.EMBEDDING_TOKENIZER.revision,
+    }
 
 
 def test_kvp_without_charts_still_loads_once(

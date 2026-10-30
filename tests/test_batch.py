@@ -307,6 +307,30 @@ class TestFailures:
             run([pdf], tmp_path / "out")
         assert not (tmp_path / "out").exists()
 
+    def test_an_unready_models_directory_mid_batch_stops_it(
+        self,
+        tmp_path: Path,
+        pdf_bytes: bytes,
+        fake: FakePipeline,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # It would fail every later PDF the same way, so the batch stops (§3.8).
+        src = tmp_path / "in"
+        for name in ("a.pdf", "b.pdf", "c.pdf"):
+            write_pdf(src / name, pdf_bytes)
+
+        def unready_at_b(pdf: Path, options: ConvertOptions) -> ConvertResult:
+            if pdf.name == "b.pdf":
+                raise ModelsNotReadyError("run gdi convert-model")
+            return fake(pdf, options)
+
+        monkeypatch.setattr(pipeline, "run", unready_at_b)
+        with pytest.raises(ModelsNotReadyError, match="gdi convert-model"):
+            run([src], tmp_path / "out")
+        assert fake.ran == ["a.pdf"]
+        assert run_json(tmp_path / "out" / "a")["status"] == "ok"
+        assert not (tmp_path / "out" / "b").exists()
+
 
 class TestStorage:
     @pytest.fixture

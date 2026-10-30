@@ -123,6 +123,19 @@ class TestConvert:
         # The summary goes to stderr whatever happened.
         assert "done, " in capsys.readouterr().err
 
+    def test_ctrl_c_exits_130_after_summarizing_what_finished(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        def interrupted(inputs: Any, out_dir: Path, options: Any, **_: Any) -> Any:
+            yield api.BatchItem(Path("0.pdf"), out_dir / "0", "done")
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(api, "convert_many", interrupted)
+        assert cli.main(["convert", "a.pdf", "b.pdf", "-o", "out"]) == 130
+        err = capsys.readouterr().err
+        assert "interrupted; finished PDFs are kept" in err
+        assert "1 done, " in err
+
     @pytest.mark.parametrize(
         "extra, message",
         [

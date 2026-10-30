@@ -1,7 +1,7 @@
 [project]
 name = "granite-document-intelligence"
-version = "0.6.0"
-description = "Being rebuilt as a local PDF document-intelligence CLI (IBM Granite + Docling on MLX). See docs/plans/pdf-pipeline.md."
+version = "1.0.0"
+description = "Local PDF document intelligence on Apple Silicon: converts multi-page PDFs to Markdown and JSON and extracts charts, tables and schema-driven key-values with IBM Granite Docling and Granite Vision on MLX."
 license = "Apache-2.0"
 license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
 requires-python = ">=3.12"

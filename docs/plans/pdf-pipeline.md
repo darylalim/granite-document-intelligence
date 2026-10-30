@@ -1903,7 +1903,7 @@ the only record of them):
 | 6 | merged 2026-10-27 (#8, `fc6714f`). `convert_many`, `batch`, `safety`, `runlock`, `gdi convert`; Phase A's converter stays per PDF (decided with the user 2026-10-27, §3.8); output overlaps refused up front and limits kept out of resume (§3.8); progress through `logging` and Docling's public `progress_callback` (§7). Hand run on the whole public corpus (`HF_HUB_OFFLINE=1`, socket guard, 0 network attempts): 6/6 done in 425 s, peak 6.68 GB; an immediate re-run skipped 6/6 in 0.5 s; with each schema, W-9 KVP 10/11, GAO-07-631 cover 3/4 and the adversarial PO 4/5 with no injected value, all matching S6/PR 5. Warnings were the known set: three capped pages, the Census p. 2 loop and the GAO-08-14 pie summary. **For PR 7:** `adversarial.pdf` p. 2 did not loop (1,203 tokens, a clean 60-row table), so its manifest's `loop_pages: [2]` pass rule fails at the shipped settings. Gate 11.1–11.4 s |
 | 7 | merged 2026-10-27 (#9, `a9e42e6`). `eval/matching.py`, `eval/score.py`, `tests/test_score.py` (85 tests; 38 rule mutations, each caught), `eval/budgets.toml`, and the baseline `eval/results/2026-10-27-24125f5-baseline.json`: a cold run plus three timed runs of the whole public corpus, within 0.3% of each other and byte-identical. Every budget is met: Phase A 5.66 s/page, chart 8.28 s, KVP page 6.01 s, cold start 7.13 s, peak 6.68 GB. Chart cells 46/69, KVP 13/15, text similarity 0.814, 0 network attempts. S6, S7 and S11 were re-run through `score.py`, and all three hold (spike report). Plan amendments: §3.11 (budgets), §8.1 (no TEDS), §8.2 rules 2, 3, 4 and 6 (the loop rule with the user). **For PR 2:** add `"hidden_text": ["—Con."]` to the Census manifest and document the key in `eval/expected/README.md`; have `make_adversarial.py` build a page that loops at the shipped settings. Gate 11.1–12.6 s |
 | 8 | merged 2026-10-29 (#10, `dc51e1f`). `CLAUDE.md` rewritten (tooling rules kept, the text app removed; adds the model lineup and pins, memory phases, a Security section and an eval-based "Verifying a dependency upgrade"), `README.md` rewritten (§9), `SECURITY.md` added, `.env.example` updated (`GDI_CACHE_DIR` replaces the old `MAX_INPUT_TOKENS`). README commands run as written on 2026-10-29: a fresh `gdi convert-model` into an empty `GDI_CACHE_DIR` in 197 s (sizes in §3.12 rule 5); `gdi convert` on GAO-07-631 in 272 s, then with the cover schema `--force` in 272 s (KVP 3/3, valid), and the Python API example in 272 s, each at a 6.68 GB peak, with the known page 24 cap; `hf cache rm` checked with `--dry-run` only (8.0 GB). Plan amendments: §3.12 rule 5 (measured disk), §3.13 rule 6 (the pip-audit invocation, verified: no known vulnerabilities in 170 packages). The README's figures are PR 7's baseline rather than S4/S8, since §3.11 says the README states measured numbers from the shipped code. After merge, with the user's confirmation: private vulnerability reporting enabled (it was off; `SECURITY.md` points to it). Gate 11.7–12.8 s |
-| 9 | **next** — start from Appendix B. Every §16 item must hold first |
+| 9 | on `chore/release-1.0.0`: `version = "1.0.0"` with `uv lock`, `description` set to §9.2's final sentence, the README's "Unreleased" note and CLAUDE.md's interim-version line updated. Three tests added for §16 (Ctrl-C's exit 130, a mid-batch `ModelsNotReadyError`, `run.json`'s four pins). Release eval `2026-10-30-2323d1c-release` (cold + three timed): every score equal to the baseline, adversarial pass, every budget met but cold start (10.48 s against 8.91), because its cold run overlapped a pip-audit install and pytest; re-measured idle in `2026-10-30-c564488-release-cold-recheck`, 8.01 s, verdict PASS. S10 re-run on the release lock: positive control caught, no model-repo code executed in `gdi convert` (charts, KVP, chunks) or a default-trust `mlx_vlm.load`, modules cache empty, no `*.py` and no `auto_map` outside `manifest.json`'s record of what was stripped. pip-audit 2.10.1: 170 packages, no known vulnerabilities. Gate 11.6–12.2 s (427 tests) |
 
 ## 11. Release
 
@@ -2110,7 +2110,7 @@ evidence (a link, a results file, a test name).
 - [ ] **Memory:** peak ≤ 10 GB on every corpus PDF; flat across the 30+ page document.
 - [ ] **Gate:** `GATE_FORCE=1 ./scripts/gate.sh` green and ≤ 15 s; CI green on
       `macos-26` with SHA-pinned actions. (Actions pinned and tested since PR 3; the
-      gate measured 4.0–4.6 s after it — §3.14 rule 9.)
+      gate measured 11.6–12.2 s on PR 9 — §3.14 rule 9.)
 - [ ] **Docs:** README and CLAUDE.md rewritten (§9), `SECURITY.md`, the README's
       measured numbers dated with versions; every README command run as written.
 - [ ] **Licensing:** `license-files` entries all exist (tested); `SOURCES.md` complete;
@@ -2215,10 +2215,8 @@ have no memory of; it is the single source of truth, and every decision in it ca
 its reason — read the reason before deciding a choice is safe to change. Phase 0's
 findings are in docs/plans/pdf-pipeline-spikes.md and are already applied to the plan.
 
-CLAUDE.md still describes the OLD Streamlit text app (its rewrite is PR 8). Follow its
-tooling rules (uv.lock never hand-edited, Conventional Commits, the gate, the hooks);
-ignore its app-specific rules (the smoke test, MODEL_NAME, language_directive, the
-theme).
+CLAUDE.md was rewritten for the pipeline in PR 8; follow it, and where it and this
+plan disagree, the plan wins.
 
 Before anything else:
 - Read §10's progress table to find the next PR, and check `gh pr list --state all`
