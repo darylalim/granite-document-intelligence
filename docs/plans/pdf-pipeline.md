@@ -2418,19 +2418,36 @@ localhost.
    | `server.maxUploadSize` | `200` | `max_file_mb` (§18.3) |
    | `browser.gatherUsageStats` | `false` | no telemetry: §3.10 allows the Hugging Face Hub as the only network contact |
    | `browser.serverAddress` | `localhost` | the URL printed and opened |
+   | `server.corsAllowedOrigins` | `http://localhost` | **added by U1.** A config's `["http://evil.example"]` let that origin open the WebSocket. A flag cannot force an empty list (1.66.1 drops it as "not given"), and localhost is always allowed, so this value adds nothing |
+   | `client.allowedOrigins` | `http://localhost` | **added by U1.** The parent frames whose `postMessage` drives the app. The default admits `https://*.streamlit.app` |
+   | `server.xsrfCookieSameSite` | `lax` | **added by U1.** Streamlit's default; a config's `none` weakens the XSRF cookie |
+   | `global.developmentMode` | `false` | **added by U1.** It sends `Access-Control-Allow-Origin: *` and logs at debug |
 
-   A test asserts the launcher's argv holds every row. U1 confirms each against a
-   hostile `~/.streamlit/config.toml` that sets every row's opposite, and confirms that
-   a WebSocket with `Host: evil.example` is refused.
+   A test asserts the launcher's flags hold every row. **U1 confirmed each** against a
+   hostile `~/.streamlit/config.toml` and a hostile working-directory config that set
+   every row's opposite. With the flags applied, it also confirmed that a WebSocket
+   with `Host: evil.example` is refused before any lookup (spike report, U1).
 
    **Residual risk, stated in `SECURITY.md`:** Streamlit's origin check accepts any
    `localhost` origin on any port (it compares the hostname only), so **another web app
    running on localhost can drive the UI**. That is within "a compromised Mac" only if
    that app is malicious. A vulnerable dev server on another port is the realistic case.
-   It is accepted for v1.x and named. Also, when a non-local origin knocks, Streamlit's
-   origin check may call `get_external_ip`, which fetches `checkip.amazonaws.com`; with
-   `allowedHosts` set the Host check should refuse first. U1 verifies the order, and if
-   the fetch can still happen, it is stated as a network contact the user did not ask for.
+   It is accepted for v1.x and named.
+
+   **The external-IP lookup is disabled (U1; decided with the user, 2026-10-30).**
+   Streamlit's origin check calls `net_util.get_external_ip()`, which fetches
+   `checkip.amazonaws.com`, *before* it refuses a foreign `Origin`. Only a disallowed
+   `Host` is refused first. So any page the user visits could trigger the fetch by
+   knocking with an allowed Host and a foreign Origin, and U1 caught it doing so. The
+   launcher replaces `streamlit.net_util.get_external_ip` with a function returning
+   `None`. A test asserts that the name exists and that the origin check of a foreign
+   `Origin` makes no HTTP request, so a Streamlit release that moves it fails the gate.
+
+   **Second residual, stated in `SECURITY.md`:** `allowedHosts` guards only the
+   WebSocket (U1). The HTTP routes accept any `Host`, so a DNS-rebound page can read
+   what plain GETs return: the generic app shell, `/_stcore/host-config`, the fonts, and
+   media files whose content-hash URLs it would have to know already. The control
+   channel and uploads (XSRF) are guarded.
 
 2. **Rendered Markdown fetches nothing, and nothing in it is a link.** `document.md` is
    model output. Docling escapes raw HTML in its Markdown export but passes Markdown
@@ -2507,9 +2524,17 @@ is unsupported, and the localhost-origin residual risk (rule 1).
   prototypes and depends on the extra.
 - **`gdi ui`** checks that Streamlit imports, and if not, prints the install command and
   exits 1 (no traceback). Otherwise it starts Streamlit **in its own process** through
-  `streamlit.web.bootstrap` with §18.4 rule 1's flags (U1 confirms the API applies them
-  as flags do), so there is no `gdi` → `streamlit` → script chain of three processes to
-  forward signals through. It does not check the models directory, because browsing
+  `streamlit.web.bootstrap` with §18.4 rule 1's flags, so there is no `gdi` →
+  `streamlit` → script chain of three processes to forward signals through. **U1:**
+  `bootstrap.run` alone applies no flag and never reads the script's
+  `.streamlit/config.toml`. Called that way, it served on a hostile `0.0.0.0` with XSRF
+  off. The launcher therefore does what `streamlit run`'s `_main_run` does:
+  1. set `config._main_script_path` to `app.py`;
+  2. call `bootstrap.load_config_options(flags)`;
+  3. replace `net_util.get_external_ip` (§18.4 rule 1);
+  4. call `bootstrap.run(app, False, [], flags)`.
+
+  Steps 1 and 3 touch private names, so a test pins both. It does not check the models directory, because browsing
   needs no model, and `gdi convert` already refuses an unready one with a message the UI
   shows.
 - **Code** under `src/granite_document_intelligence/ui/`:
@@ -2585,7 +2610,8 @@ before push, and plan amendments in the PR that finds them.
 | PR | State |
 |---|---|
 | 10 | merged 2026-10-30 (#14, `a350956`); §18 approved by the user |
-| 11 | #15: the swap guard (`export.is_ours`, `ForeignFolderError`), 21 tests, §3.12 rule 1 amended; gate 12.5 s; releases 1.0.1 on merge |
+| 11 | merged 2026-10-30 (#15, `5fe06e1`); CI published `v1.0.1` |
+| 12 | in progress on `feat/ui-viewer`: U1 done (pass, four keys added, the external-IP lookup disabled with the user); U2–U4 next |
 
 **Why the viewer comes before `--events`:** the viewer needs no conversion and carries
 U1 and U2, the riskiest unknowns. Building it first means the security model is settled

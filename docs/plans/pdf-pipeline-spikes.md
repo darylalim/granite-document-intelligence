@@ -2024,3 +2024,133 @@ byte-identical output. Nothing in Phase A changed since then.
 page alike: page 24's similarity is 0.32 invented and 0.02 lost. §17's per-page
 similarity warning would see both as "below 0.75". Telling them apart still needs
 the cap flag that only the lost page carries.
+
+# v1.x spikes — the UI (§18.6)
+
+Run in PR 12 (`feat/ui-viewer`), before its code. As for Phase 0, the scripts live in the
+session scratchpad, never in the repo.
+
+| Spike | Verdict | Amends the plan |
+|---|---|---|
+| U1 | **Pass, with four keys added and one launcher fix.** The table's ten flags win over a hostile global and working-directory config, under `streamlit run` and under `bootstrap`; the packaged theme applies from any working directory; `Host: evil.example` is refused before any lookup. But a hostile `server.corsAllowedOrigins` admitted an `evil.example` WebSocket, `bootstrap.run` alone applies no flag at all, and any foreign-origin knock fetched `checkip.amazonaws.com` | yes: four keys join §18.4 rule 1; the launcher loads config itself and disables Streamlit's external-IP lookup (with the user); the HTTP routes' missing Host check is a stated residual (§18.4, §18.5) |
+| U2 | pending | |
+| U3 | pending | |
+| U4 | pending | |
+
+## U1 — config and socket (2026-10-30)
+
+**Question** (§18.6). On an installed wheel: does `ui/.streamlit/config.toml` apply the
+theme from any working directory? Does every §18.4 rule 1 flag beat a hostile
+`~/.streamlit/config.toml` that sets its opposite? Is a WebSocket with
+`Host: evil.example` refused before any external-IP lookup? Does
+`streamlit.web.bootstrap` take the flags as `streamlit run` does? **Decision rule:** if
+a flag does not win, `gdi ui` refuses to start while that key is set elsewhere.
+
+**Environment.** Streamlit **1.66.1** (the version §18 was checked against, and the
+locked one), websockets 16.1.1, Python 3.12, macOS 27.0, M2 Pro. 1.66 serves on
+**Starlette/uvicorn**, not Tornado; every check below was re-read against the Starlette
+code (`web/server/starlette/starlette_websocket.py`, `server_util.py`).
+
+**Method.**
+- A wheel built with `uv build` from this branch plus a stub `ui/app.py`, the theme as
+  `ui/.streamlit/config.toml` (§14's file minus its `[server]`, `[client]` and
+  `[browser]` sections, which the launcher now owns) and the six fonts from `v0.6.0`.
+  It was installed with `--no-deps` into a fresh venv beside Streamlit 1.66.1.
+  `unzip -l` shows `ui/.streamlit/config.toml` in the wheel: `uv_build` ships
+  dot-directories.
+- `HOME` pointed at a scratch folder whose `~/.streamlit/config.toml` set every row's
+  opposite: `address = "0.0.0.0"`, `allowedHosts = ["*"]`, XSRF and CORS off,
+  `headless = false`, `fileWatcherType = "auto"`, static serving off,
+  `maxUploadSize = 1`, usage stats on, `serverAddress = "evil.example"`, a red
+  `primaryColor` and Comic Sans. It also set four keys the table lacked (below), and
+  `global.developmentMode = true`. The working directory held a second hostile config
+  (green `primaryColor`), and the run was repeated from `/`.
+- A launcher started the installed app three ways: `bootstrap.run` alone;
+  `config._main_script_path` + `bootstrap.load_config_options(flags)` +
+  `bootstrap.run`, which is what `streamlit run`'s `_main_run` does; and
+  `streamlit.web.cli.main(["run", …])` itself. It replaced
+  `net_util._make_blocking_http_get` and `get_internal_ip` with loggers, so every
+  lookup Streamlit attempted was recorded and none left the Mac.
+- A probe read the resolved options and each one's `where_defined`, the listening
+  socket (`lsof`), WebSocket handshakes with chosen `Host`/`Origin` pairs (a socket
+  opened to 127.0.0.1, with the URL carrying the Host), `/_stcore/host-config` with a
+  foreign `Origin`, an upload `PUT` with no XSRF token, a font under `app/static/`, and
+  the options the app script saw inside a real session (a `rerun_script` `BackMsg`).
+
+**Results.**
+
+| Check | `bootstrap.run` alone | table's 10 flags | + 4 keys + external-IP fix (shipped) |
+|---|---|---|---|
+| every table row from the flag | **none**: all ten from the hostile file | yes | yes |
+| listening socket | **0.0.0.0:8766** (the hostile port) | 127.0.0.1 | 127.0.0.1 |
+| theme | **hostile global** (`#ff0000`): the script's config is never read | packaged, from `/` and from the hostile directory | packaged |
+| WS `Host: evil.example` | — | 403, no lookup | 403, no lookup |
+| WS `Origin: http://evil.example`, Host localhost | — | **accepted** (hostile `corsAllowedOrigins`), after a `checkip` fetch | 403, **no fetch** |
+| WS `Origin: https://x.streamlit.app` | — | 403, after a `checkip` fetch | 403, no fetch |
+| WS `Origin: http://localhost:3000` | — | accepted (the stated residual) | accepted (the stated residual) |
+| `/_stcore/host-config` | — | ACAO `http://evil.example`, `allowedOrigins` `[evil.example]` | no ACAO, `["http://localhost"]` |
+| upload with no XSRF token | — | 403 | 403 |
+| HTTP `GET /` with `Host: evil.example` | — | 200 | 200 (residual, below) |
+| `app/static/fonts/…woff2` | — | 200 | 200 |
+
+`streamlit run` (through `cli.main`) and the `load_config_options` + `bootstrap.run` pair
+gave identical results in every row. With `global.developmentMode = true` left to the
+hostile file, neither started: 1.66.1 raises `server.port does not work when
+global.developmentMode is true` once any port is set. That fails closed, but only
+because a port was set.
+
+**Findings.**
+
+1. **`bootstrap.run` does not apply flags.** It uses `flag_options` only to re-apply
+   them when a config file changes. The flags reach the config only through
+   `bootstrap.load_config_options`. The script-level `.streamlit/config.toml` is found
+   only when `config._main_script_path` is set first. That is a private, module-level
+   name that `streamlit run` sets with a comment that it is "a bit suboptimal". Called
+   alone, `bootstrap.run` served on the hostile `0.0.0.0` with XSRF off and
+   `headless = false`, and printed `http://evil.example:8766` as the URL.
+2. **The table lacked four keys that a user config can weaken:**
+   - `server.corsAllowedOrigins` is the one that matters. A config's
+     `["http://evil.example"]` let a page on that origin open the WebSocket. That is
+     cross-site WebSocket hijacking from an ordinary web page, through a file the user
+     might have written for another project. A flag cannot force the list empty: 1.66.1
+     drops an empty-tuple flag value as "not given". So it is forced to
+     `["http://localhost"]`, which adds nothing, because localhost is always allowed.
+   - `client.allowedOrigins` lists the parent-frame origins whose `postMessage` can
+     drive the app (rerun, stop, set auth tokens). Its **default** admits
+     `https://*.streamlit.app`, which anyone can deploy to, and Streamlit sends no
+     `frame-ancestors` or `X-Frame-Options`. Forced to `["http://localhost"]`, inside
+     the localhost residual. U2 checks a framed app in the real browser.
+   - `server.xsrfCookieSameSite`: a config's `"none"` weakens the XSRF cookie. Forced to
+     `"lax"`, Streamlit's default.
+   - `global.developmentMode`: it sends `Access-Control-Allow-Origin: *`, adds
+     `http://localhost` to the message origins and logs at debug. Forced `false`.
+3. **The external-IP lookup happens before the origin is refused.**
+   `is_url_from_allowed_origins` tries localhost, the manual server address, the
+   internal IP and then **`net_util.get_external_ip()`**, which fetches
+   `checkip.amazonaws.com` (http, then https, 1 s each), before it consults
+   `corsAllowedOrigins`. So any web page the user visits that knocks with a foreign
+   `Origin` and an allowed `Host` makes a request §3.10 does not allow. A `Host`
+   refusal comes first and fetches nothing, so DNS rebinding alone does not trigger
+   it. Nothing fetches at start, because `server.address` is set manually.
+   **Decided with the user (2026-10-30): the launcher disables the lookup.** It
+   replaces `streamlit.net_util.get_external_ip` with a function returning `None`.
+   Re-run with that fix, both knocks are refused with no fetch. `get_internal_ip` still
+   runs: a UDP `connect` to 8.8.8.8, which sends no packet.
+4. **`allowedHosts` guards only the WebSocket.** The HTTP routes accept any `Host`, so a
+   DNS-rebound page can read what plain GETs return:
+   - the generic app shell;
+   - `/_stcore/host-config`;
+   - the fonts;
+   - a media file whose URL it already knows. Media URLs are content hashes, so it
+     cannot guess them.
+
+   The control channel (WebSocket) and uploads (XSRF) are guarded. This is a stated
+   residual, like the localhost origin.
+
+**Verdict: pass, with amendments.** Every flag wins once it is applied the way
+`streamlit run` applies it, so the decision rule's refusal is not needed. The amendments
+are: four keys join §18.4 rule 1; the launcher sets `config._main_script_path` and calls
+`load_config_options` before `bootstrap.run`; the external-IP lookup is disabled; and the
+HTTP routes' Host gap is a stated residual. Tests pin the private names the launcher
+touches (`config._main_script_path`, `net_util.get_external_ip`), so a Streamlit minor
+that renames one fails the gate instead of silently undoing the fix.
