@@ -94,6 +94,10 @@ if entry is None:
 result = reader.read(entry.folder)
 st.text(entry.name)
 
+# The view lives in session state alone: a `default=` beside the Run switch below
+# makes Streamlit warn on every rerun. A `?view=` link still wins (U2-safe: only
+# the six fixed labels are ever bound).
+st.session_state.setdefault("view", "document")
 # An error run.json opens on the Run view (§18.3), once per selection.
 if st.session_state.get("_shown_entry") != entry.folder:
     st.session_state._shown_entry = entry.folder
@@ -133,7 +137,6 @@ view = st.pills(
     "View",
     list(VIEWS),
     format_func=VIEWS.__getitem__,
-    default="document",
     key="view",
     on_change=_keep_view,
     label_visibility="collapsed",
@@ -190,7 +193,11 @@ def show_charts() -> None:
                         language=None,
                     )
                 if card.summary:
-                    st.text(card.summary)
+                    # Model-written Markdown, so through the neutraliser like the
+                    # document (§18.4 rule 2): bold and lists render, nothing fetches.
+                    for segment in render.segments(card.summary, result.folder):
+                        if isinstance(segment, render.Markdown):
+                            st.markdown(segment.text)
                 if card.warnings:
                     st.caption("Warnings")
                     st.text("\n".join(card.warnings))
@@ -291,7 +298,10 @@ def show_run() -> None:
     warnings = [*(w for c in result.charts for w in c.warnings), *result.run_warnings]
     if warnings:
         st.caption("Warnings")
-        st.dataframe(pd.DataFrame({"warning": warnings}), width="stretch")
+        st.dataframe(
+            pd.DataFrame({"warning": warnings}, index=range(1, len(warnings) + 1)),
+            width="stretch",
+        )
     timings = run.get("timings_ms") or {}
     if timings:
         st.caption("Timings (s)")

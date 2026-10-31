@@ -159,7 +159,7 @@ class TestViews:
         at = _show(_app(root), "charts")
         texts = [t.value for t in at.text]
         assert "chart-001 · page 1" in texts and "chart-002 · page 1" in texts
-        assert "Revenue is highest in the North." in texts
+        assert "Revenue is highest in the North." in [md.value for md in at.markdown]
         frame = at.dataframe[0].value
         # Numbered from 1, so a warning's `row N` is row N here.
         assert list(frame.index) == [1] and frame.iloc[0].tolist() == ["North", "120"]
@@ -206,10 +206,12 @@ class TestHostileTree:
     def test_no_view_turns_a_tree_string_into_markup(self, root: Path) -> None:
         at = _app(root, entry=HOSTILE_NAME)
         assert at.text[0].value == HOSTILE_NAME  # the folder name, as text
+        # The two Markdown sources rule 2 allows: the document and chart summaries.
         document = (root / HOSTILE_NAME / "document.md").read_text()
         neutralised = {
             s.text.strip()
-            for s in render.segments(document, root / HOSTILE_NAME)
+            for source in (document, HOSTILE_TEXT)
+            for s in render.segments(source, root / HOSTILE_NAME)
             if isinstance(s, render.Markdown)
         }
         for view in ["document", "tables", "charts", "kvp", "chunks", "run"]:
@@ -225,5 +227,6 @@ class TestHostileTree:
             if view in {"charts", "kvp", "chunks", "run"}:
                 # Rule 3 is "as text", not "hidden".
                 shown = [t.value for t in at.text] + [j.value for j in at.json]
+                shown += [md.value for md in at.markdown]
                 shown += [df.value.to_string() for df in at.dataframe]
                 assert any(MARK in value for value in shown), view
