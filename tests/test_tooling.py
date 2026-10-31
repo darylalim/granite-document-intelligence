@@ -633,10 +633,12 @@ class TestHooksConfig:
                 "STUB_LOG": str(tmp_path / "calls.log"),
                 "STUB_UV_OUTPUT": uv_output,
                 "STUB_UV_EXIT": str(uv_exit),
-                # The real environment may carry either of these; the memo cases
-                # set them deliberately, so neutralise them for everyone else.
+                # The real environment may carry any of these (the Stop hook sets
+                # GATE_SCOPE); the cases below set them deliberately, so
+                # neutralise them for everyone else.
                 "GITHUB_ACTIONS": "",
                 "GATE_FORCE": "",
+                "GATE_SCOPE": "",
                 **(extra_env or {}),
             },
         )
@@ -722,6 +724,30 @@ class TestHooksConfig:
         result = self._run_gate(tmp_path, uv_exit=0)
         assert "skipped" not in result.stdout, "the empty-input hash was trusted"
         assert "all passed" in result.stdout
+
+    def test_the_hook_scope_skips_only_the_apptest_marker(self, tmp_path: Path) -> None:
+        self._run_gate(tmp_path, uv_exit=0, extra_env={"GATE_SCOPE": "hook"})
+        calls = (tmp_path / "calls.log").read_text().splitlines()
+        assert "uv run pytest -q -m not apptest" in calls
+
+    def test_ci_runs_everything_whatever_the_scope(self, tmp_path: Path) -> None:
+        self._run_gate(
+            tmp_path, uv_exit=0, extra_env={"GATE_SCOPE": "hook", "GITHUB_ACTIONS": "1"}
+        )
+        calls = (tmp_path / "calls.log").read_text().splitlines()
+        assert "uv run pytest -q" in calls
+        assert not any("apptest" in call for call in calls)
+
+    def test_a_green_hook_run_does_not_skip_a_full_run(self, tmp_path: Path) -> None:
+        # The narrower suite proves less, so its memo must not stand in for the
+        # full gate's.
+        self._run_gate(tmp_path, uv_exit=0, extra_env={"GATE_SCOPE": "hook"})
+        result = self._run_gate(tmp_path, uv_exit=0)
+        assert "skipped" not in result.stdout
+        assert "all passed" in result.stdout
+
+    def test_the_stop_hook_runs_the_hook_scope(self) -> None:
+        assert "GATE_SCOPE=hook" in self._commands("Stop")
 
     def test_stop_hook_delegates_to_the_gate_script(self) -> None:
         # Inlining the chain back into settings.json would put it beyond the reach
@@ -993,7 +1019,33 @@ class TestImportCost:
             str(path.relative_to(self.ROOT)): sorted(
                 self._top_level_imports(path) & self.HEAVY
             )
-            for path in sorted((self.ROOT / folder).glob("*.py"))
+            for path in sorted((self.ROOT / folder).rglob("*.py"))
         }
         offenders = {k: v for k, v in offenders.items() if v}
         assert not offenders, f"move these imports inside the function: {offenders}"
+
+    # The Streamlit script itself, and the prototypes that are Streamlit scripts.
+    STREAMLIT_SCRIPTS = frozenset(
+        {
+            "src/granite_document_intelligence/ui/app.py",
+            "docs/plans/ui-layout/layout.py",
+            "docs/plans/ui-theme/preview.py",
+        }
+    )
+
+    @pytest.mark.parametrize(
+        "folder", ["tests", "src/granite_document_intelligence", "eval"]
+    )
+    def test_only_the_ui_script_imports_streamlit_at_top_level(
+        self, folder: str
+    ) -> None:
+        # The library and `gdi convert` must run with Streamlit absent (§18.5),
+        # and importing it costs the gate. Only ui/app.py may; tests import it
+        # inside the test that needs it.
+        offenders = [
+            str(path.relative_to(self.ROOT))
+            for path in sorted((self.ROOT / folder).rglob("*.py"))
+            if str(path.relative_to(self.ROOT)) not in self.STREAMLIT_SCRIPTS
+            and "streamlit" in self._top_level_imports(path)
+        ]
+        assert not offenders, f"move `import streamlit` inside a function: {offenders}"

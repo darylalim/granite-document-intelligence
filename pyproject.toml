@@ -3,7 +3,11 @@ name = "granite-document-intelligence"
 version = "1.0.1"
 description = "Local PDF document intelligence on Apple Silicon: converts multi-page PDFs to Markdown and JSON and extracts charts, tables and schema-driven key-values with IBM Granite Docling and Granite Vision on MLX."
 license = "Apache-2.0"
-license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
+license-files = [
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "src/granite_document_intelligence/ui/static/fonts/LICENSE.txt",
+]
 requires-python = ">=3.12"
 # Floors are the versions PR 4's hand run executed the models on, not researched
 # ones; caps guard API drift. Moving any model-touching package needs the eval
@@ -25,6 +29,12 @@ dependencies = [
     "transformers>=5.21.0,<6",
 ]
 
+[project.optional-dependencies]
+# `gdi ui` (plan §18.5). The floor is the version U1–U4 measured; the cap guards API
+# drift, and a Streamlit move in uv.lock re-runs §15's width check, as a model package
+# move re-runs the eval.
+ui = ["streamlit>=1.66.1,<2"]
+
 [project.scripts]
 gdi = "granite_document_intelligence.cli:main"
 
@@ -39,11 +49,10 @@ dev = [
     "ruff",
     "ty",
 ]
-# The v1.x UI prototypes (docs/plans/ui-theme/preview.py, ui-layout/layout.py) import
-# Streamlit, and ty checks them, so it stays resolvable here; the library never
-# imports it (plan §1, §5).
+# The `[ui]` extra, so the gate tests the UI and ty checks it and the v1.x prototypes
+# (docs/plans/ui-*). Only ui/app.py and ui/launch.py import Streamlit (plan §18.5).
 ui = [
-    "streamlit>=1.57",
+    "granite-document-intelligence[ui]",
 ]
 
 [tool.uv]
@@ -54,6 +63,11 @@ extend-select = ["I"]
 
 [tool.ruff.lint.isort]
 combine-as-imports = true
+
+[tool.pytest.ini_options]
+markers = [
+    "apptest: the viewer's AppTest layout and view tests; CI runs them, the Stop hook skips them (plan §18.5)",
+]
 
 # No `pythonpath`: with the src/ layout the tests import the installed package,
 # not the working directory (plan §3.6).

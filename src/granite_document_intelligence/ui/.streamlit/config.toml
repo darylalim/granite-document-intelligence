@@ -1,0 +1,155 @@
+# Granite Document Intelligence: the v1.x UI's theme, IBM Carbon g10 (light) and g100
+# (dark), designed and argued in docs/plans/ui-theme/config.toml (plan §14).
+#
+# Streamlit 1.66 reads this file because it sits beside the main script (app.py), ahead
+# of the working directory's and ~/.streamlit's (U1). It holds the theme and the
+# toolbar only. Every server and browser key is forced by the launcher as a flag
+# (ui/launch.py, §18.4 rule 1), because a flag is the one source a user config cannot
+# override.
+#
+# Rules, each pinned by tests/test_ui.py's TestThemeConfig:
+#   * keep both the light and the dark section, or the mode toggle disappears;
+#   * pin every <color>TextColor per mode, or Streamlit derives a washed-out one;
+#   * baseFontSize, metricValue* and showSidebarBorder are top-level-only keys;
+#   * the fonts are self-hosted in ui/static/fonts, each face with a unicodeRange;
+#   * chartSequentialColors and chartDivergingColors need exactly 10 entries.
+
+[theme]
+primaryColor = "#0f62fe"                   # Blue 60 — buttons, toggles, tab underline
+font = "IBM Plex Sans, Source Sans, sans-serif"
+codeFont = "IBM Plex Mono, Source Code Pro, monospace"
+baseFontSize = 15                          # Carbon density; the six view pills fit one row from 768 px
+headingFontWeights = [600, 600, 600, 600, 600, 600]
+metricValueFontWeight = 500                # Plex Medium for page / chart / table counts
+baseRadius = "none"                        # Carbon: square corners
+showWidgetBorder = true
+showSidebarBorder = true
+linkUnderline = false
+
+[[theme.fontFaces]]
+family = "IBM Plex Sans"
+url = "app/static/fonts/IBMPlexSans-var-latin.woff2"
+weight = "100 700"
+style = "normal"
+unicodeRange = "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD"
+
+[[theme.fontFaces]]
+family = "IBM Plex Sans"
+url = "app/static/fonts/IBMPlexSans-var-latin-ext.woff2"
+weight = "100 700"
+style = "normal"
+unicodeRange = "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF"
+
+[[theme.fontFaces]]
+family = "IBM Plex Mono"
+url = "app/static/fonts/IBMPlexMono-400-latin.woff2"
+weight = 400
+style = "normal"
+unicodeRange = "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD"
+
+[[theme.fontFaces]]
+family = "IBM Plex Mono"
+url = "app/static/fonts/IBMPlexMono-400-latin-ext.woff2"
+weight = 400
+style = "normal"
+unicodeRange = "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF"
+
+[[theme.fontFaces]]
+family = "IBM Plex Mono"
+url = "app/static/fonts/IBMPlexMono-600-latin.woff2"
+weight = 600
+style = "normal"
+unicodeRange = "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD"
+
+[[theme.fontFaces]]
+family = "IBM Plex Mono"
+url = "app/static/fonts/IBMPlexMono-600-latin-ext.woff2"
+weight = 600
+style = "normal"
+unicodeRange = "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF"
+
+[theme.light]                              # Carbon g10
+backgroundColor = "#f4f4f4"                # background
+secondaryBackgroundColor = "#ffffff"       # layer-01: fields, chips
+textColor = "#161616"                      # text-primary, 16.45:1
+linkColor = "#0f62fe"                      # link-primary, 4.55:1
+borderColor = "#c6c6c6"                    # border-strong-01 (border-subtle would vanish at 1.20:1)
+codeBackgroundColor = "#ffffff"
+codeTextColor = "#161616"
+dataframeHeaderBackgroundColor = "#e0e0e0" # layer-accent-01
+dataframeBorderColor = "#c6c6c6"
+greenColor = "#24a148"                     # support-success — st.success, "valid"
+greenTextColor = "#198038"                 # Green 60, 4.56:1
+redColor = "#da1e28"                       # support-error — st.error, "invalid"
+redTextColor = "#da1e28"                   # Red 60, 4.55:1
+orangeColor = "#ff832b"
+orangeTextColor = "#ba4e00"                # Orange 60, 4.57:1
+yellowColor = "#f1c21b"                    # support-warning — st.warning's tint
+yellowTextColor = "#684e00"                # Yellow 70 — the derived value was 2.59:1
+grayColor = "#8d8d8d"
+grayTextColor = "#525252"                  # text-secondary, 7.10:1
+blueColor = "#0f62fe"                      # support-info — st.info
+blueTextColor = "#0043ce"                  # Blue 70
+violetColor = "#8a3ffc"
+violetTextColor = "#6929c4"                # Purple 70
+# Carbon categorical palette (light): 14 slots, adjacent slots alternate lightness.
+# Slots 6 and 12 are one step lighter than Carbon's (Red 80, Cyan 90): Red 90 and
+# Cyan 100 sat 1.23 and 1.20:1 from the text, reading as text-coloured bars (PR 12).
+chartCategoricalColors = ["#6929c4", "#1192e8", "#005d5d", "#9f1853", "#fa4d56", "#750e13", "#198038", "#002d9c", "#ee538b", "#b28600", "#009d9a", "#003a6d", "#8a3800", "#a56eff"]
+# Blue 10 -> Blue 100: low values sit at the page colour
+chartSequentialColors = ["#edf5ff", "#d0e2ff", "#a6c8ff", "#78a9ff", "#4589ff", "#0f62fe", "#0043ce", "#002d9c", "#001d6c", "#001141"]
+# Purple <- neutral -> Teal (not red/green: red means "error" here, and it fails deuteranopia)
+chartDivergingColors = ["#491d8b", "#6929c4", "#8a3ffc", "#be95ff", "#e8daff", "#9ef0f0", "#08bdba", "#007d79", "#005d5d", "#004144"]
+
+[theme.light.sidebar]
+backgroundColor = "#ffffff"                # one step away from the text, mirroring dark's black rail
+secondaryBackgroundColor = "#f4f4f4"
+codeBackgroundColor = "#f4f4f4"
+borderColor = "#e0e0e0"
+textColor = "#161616"
+
+[theme.dark]                               # Carbon g100
+backgroundColor = "#161616"                # background
+secondaryBackgroundColor = "#262626"       # layer-01
+textColor = "#f4f4f4"                      # text-primary, 16.45:1
+linkColor = "#78a9ff"                      # link-primary (Blue 40), 7.68:1
+borderColor = "#393939"                    # border-subtle-01, 1.57:1 (light: 1.55)
+codeBackgroundColor = "#262626"
+codeTextColor = "#f4f4f4"
+dataframeHeaderBackgroundColor = "#393939" # layer-accent-01
+dataframeBorderColor = "#393939"
+greenColor = "#42be65"                     # Green 40
+greenTextColor = "#42be65"                 # 7.57:1
+redColor = "#fa4d56"                       # Red 50
+redTextColor = "#fa4d56"                   # 5.40:1 — a real red, not a derived salmon
+orangeColor = "#ff832b"
+orangeTextColor = "#ff832b"                # Orange 40, 7.35:1
+yellowColor = "#f1c21b"
+yellowTextColor = "#f1c21b"                # Yellow 30, 6.89:1 over its tint
+grayColor = "#8d8d8d"
+grayTextColor = "#a8a8a8"                  # Gray 40, 7.61:1
+blueColor = "#4589ff"                      # Blue 50
+blueTextColor = "#78a9ff"                  # Blue 40
+violetColor = "#a56eff"                    # Purple 50
+violetTextColor = "#be95ff"                # Purple 40
+# Carbon categorical palette (dark): same hue per slot as light, lightness inverted.
+# Slot 12 is Cyan 30, not Cyan 20: Cyan 20 sat 1.20:1 from the text (PR 12).
+# One deviation from Carbon: slot 6 is Red 30 #ffb3b8, not Red 10 #fff1f1 — Red 10 is
+# 1.00:1 against textColor, so its bars read as white and the series lost its red
+# identity across modes (seen in the 2026-10-18 preview). Red 30 keeps hue 356 deg,
+# 10.68:1 on the page, and mirrors light slots 5/6 (same hue, opposite lightness).
+chartCategoricalColors = ["#8a3ffc", "#33b1ff", "#007d79", "#ff7eb6", "#fa4d56", "#ffb3b8", "#6fdc8c", "#4589ff", "#d12771", "#d2a106", "#08bdba", "#82cfff", "#ba4e00", "#d4bbff"]
+# Blue 100 -> Blue 10: the light scale mirrored, so low values again sit at the page
+chartSequentialColors = ["#001141", "#001d6c", "#002d9c", "#0043ce", "#0f62fe", "#4589ff", "#78a9ff", "#a6c8ff", "#d0e2ff", "#edf5ff"]
+# Bright extremes, dark midpoint: the light scale's structure mirrored
+chartDivergingColors = ["#e8daff", "#be95ff", "#a56eff", "#6929c4", "#31135e", "#022b30", "#005d5d", "#007d79", "#08bdba", "#9ef0f0"]
+
+[theme.dark.sidebar]
+backgroundColor = "#000000"                # Carbon Black rail, one step below the page
+secondaryBackgroundColor = "#161616"
+codeBackgroundColor = "#161616"
+borderColor = "#393939"
+textColor = "#f4f4f4"
+
+[client]
+toolbarMode = "viewer"                     # no Deploy, no dead Auto rerun, no Clear cache

@@ -54,9 +54,19 @@ fingerprint() {
 		cut -d' ' -f1
 } </dev/null # hang-proof: xargs can run shasum with no file arguments
 
+# The Stop hook runs a narrower suite (GATE_SCOPE=hook): the viewer's AppTest
+# layout and view tests, marked `apptest`, put the gate past its 15 s budget,
+# and plan §18.5 decided they run in CI only. The security tests, AppTest's
+# hostile-tree one included, stay here. CI ignores the scope and runs everything;
+# so does any other caller. The narrower run keeps its own memo, so a green hook
+# run never lets a full run skip.
+scope=full
+[ "${GATE_SCOPE:-}" = hook ] && [ -z "${GITHUB_ACTIONS:-}" ] && scope=hook
+
 memo=''
 git_dir=$(git rev-parse --git-dir 2>/dev/null) && memo="$git_dir/gate-ok"
-before=$(fingerprint) || before=''
+[ -n "$memo" ] && [ "$scope" = hook ] && memo="$memo-hook"
+before=$(fingerprint) || before=''''
 
 # CI never skips. A fresh checkout has no memo, so this is belt-and-braces —
 # but the guarantee should hold by construction rather than by luck, since
@@ -90,7 +100,11 @@ run_gate() {
 run_gate 'ruff check' uv run ruff check .
 run_gate 'ruff format --check' uv run ruff format --check .
 run_gate 'ty check' uv run ty check
-run_gate 'pytest' uv run pytest -q
+if [ "$scope" = hook ]; then
+	run_gate 'pytest' uv run pytest -q -m 'not apptest'
+else
+	run_gate 'pytest' uv run pytest -q
+fi
 
 if [ -n "$failures" ]; then
 	# Deliberately leaves any existing memo alone rather than clearing it: it
@@ -109,4 +123,8 @@ if [ -n "$memo" ]; then
 	[ -z "$after" ] || printf '%s\n' "$after" >"$memo" 2>/dev/null || :
 fi
 
-echo 'gate: ruff check, ruff format --check, ty check, pytest — all passed'
+if [ "$scope" = hook ]; then
+	echo 'gate: ruff check, ruff format --check, ty check, pytest (not apptest) — all passed'
+else
+	echo 'gate: ruff check, ruff format --check, ty check, pytest — all passed'
+fi
