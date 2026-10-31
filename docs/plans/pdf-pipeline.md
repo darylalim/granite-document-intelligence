@@ -2029,9 +2029,16 @@ it sits on caught it.
    new invariants: palette lengths (`chartSequentialColors` and `chartDivergingColors`
    need exactly 10, or Streamlit silently uses its defaults), every categorical slot
    ≥ 3:1 against its mode's page **and** not within 1.5:1 of its mode's text colour.
+   **Done in PR 12** (`tests/test_ui.py`). The guard found three slots within 1.5:1 of
+   the text: light Red 90 `#570408` (1.23), light Cyan 100 `#012749` (1.20) and dark
+   Cyan 20 `#bae6ff` (1.20). **Decided with the user (2026-10-30):** each moves one
+   Carbon step along its hue, to Red 80 `#750e13` (1.58), Cyan 90 `#003a6d` (1.57) and
+   Cyan 30 `#82cfff` (1.55), in both `config.toml` files.
 3. Re-measure the results tab strip for the real layout at its narrowest supported
    width: the preview measured **442 px** for six tabs at 1280 px, and
-   `baseFontSize = 15` was originally tuned for the old five-tab strip.
+   `baseFontSize = 15` was originally tuned for the old five-tab strip. **PR 12:** the
+   switcher is pills (§15), and the six fit one row at every measured width from
+   768 px, at `baseFontSize = 15`.
 4. Known trade-off: diverging bars near zero nearly vanish in both modes, because the
    midpoint is the page colour — right for heatmaps, worth knowing for bar charts.
 5. Re-render the preview (or the real app) in both modes before shipping; the capture
@@ -2063,7 +2070,7 @@ horizontal overflow **0 at every width**:
 | Convert row | horizontal container: button + one caption | caption under button | 1 line | 1 line | 1 line |
 | Counts | 4 × `st.metric(border=True, width=130)` in a horizontal container | 2 × 2 | 1 row | 1 row | 1 row |
 | Notices | `st.empty()` slot (the old app's reason holds: a container keeps stale notes) | — | — | — | — |
-| View switcher | `st.pills`, single-select, `bind="query-params"` | 2 rows, all visible | 1 row | 1 row | 1 row |
+| View switcher | `st.pills`, single-select, `bind="query-params"`; plain labels (PR 12: Streamlit 1.66 binds the *formatted* label, so a link reads `?view=Charts`) | 2 rows, all visible | 1 row | 1 row | 1 row |
 | Chart cards | horizontal container of `st.container(border=True, width=344)` | 1 / row | 2 / row | 1 / 2 per row | 4 / 5 per row |
 | Document text | `st.container(width=760)` | fills width | fills width | max 760 | max 760 — a readable line |
 | Tables | `st.dataframe(width="content")` | scrolls inside itself | natural width | natural width | natural width, no stretched columns |
@@ -2101,6 +2108,13 @@ rendered its dataframe and no chart; `?view=…` seeded the Document view.
 left-aligned with free space to its right, chosen over centring so cards stay aligned
 with the text above them. No `st.columns` for content — they hold a fixed count and
 collapse to one stack at 640 px, which the wrapping grid does better.
+
+**Re-measured in PR 12** on GAO-07-631's real output through `gdi ui` (headless Chrome,
+CDP), at 768, 1024, 1280, 1440, 1920 and 2560 px, all six views in both themes. Page
+overflow was **0 in all 72 cases**. Cards per row were 2 / 1 / 2 / 2 / 4 / 5, as
+designed. The prose column is 760 px from 1280 px. Pills and count tiles hold one row
+throughout. Phone widths were not re-measured: a loopback-only app is not reachable
+from a phone (§18.7).
 
 **When the UI is built:** re-measure with real content at the same eight widths
 (chart crops and long table headers change widths), keep the 0-overflow check as a
@@ -2354,11 +2368,20 @@ PDF's output folder (§3.5):
 
 **Warnings on the card they belong to.** `run.json`'s warnings are prose today
 (`chart-001 (page 3): …`, `charts.py`). Matching that is parsing our own prose, unless
-the prefix is a contract. **(Proposed)** PR 12 pins it: every chart warning starts
-`chart-NNN (page N): `, a test in `test_charts.py` asserts the format for each warning
-kind, and the reader matches only that prefix. A structured `warnings_detail` field in
-`run.json` is the alternative; it is cleaner but changes `run.json`'s shape, which every
-existing tree lacks.
+the prefix is a contract. **PR 12 pins it** (`charts.WARNING_PREFIX`): every warning
+about a written chart starts `chart-NNN (page N): `, a test in `test_charts.py` asserts
+the format for each warning kind, and the reader matches only that prefix. A chart
+skipped for having no image has no card, so its warning names its Docling reference and
+appears on the Run view only. A structured `warnings_detail` field in `run.json` was the
+alternative; it is cleaner but changes `run.json`'s shape, which every existing tree
+lacks.
+
+**A chart's page** is recorded in no chart file. The reader takes it from the pictures
+in `document.json` that carry chart results (a description or a chart table, written by
+the chart stage in document order). It trusts that mapping only when the count matches
+the chart files. Otherwise the card says "page unknown" rather than risk a wrong page.
+A chart summary is model-written Markdown, so it is shown through `render.py`, like the
+document (PR 12).
 
 **Which results are shown.** A selector lists every folder under the chosen output root
 that holds a `run.json`, by its modification time, newest first (`run.json` records no
@@ -2606,7 +2629,9 @@ is unsupported, and the localhost-origin residual risk (rule 1).
   shows.
 - **Code** under `src/granite_document_intelligence/ui/`:
   - `app.py` is the Streamlit script, layout only, and the only module that imports
-    Streamlit.
+    Streamlit at top level.
+  - `launch.py` is `gdi ui`'s launcher (§18.4 rule 1, U1). It imports Streamlit inside
+    `run`, so the CLI imports it only for `gdi ui`.
   - `reader.py` holds the §3.5 reader and the run listing.
   - `runner.py` holds the subprocess, the run folders and the events parser.
   - `render.py` holds the neutraliser of §18.4 rule 2.
@@ -2638,6 +2663,12 @@ is unsupported, and the localhost-origin residual risk (rule 1).
     the Stop hook skips. The security tests stay in the Stop-hook gate, because they are
     plain Python and cheap: the renderer, the hostile inputs, the launcher's flags and
     the no-Streamlit check. A layout regression caught by CI minutes later costs little.
+    **PR 12 measured it and applied the split.** With every UI test in, the gate took
+    15.3–15.8 s. So the layout and view tests carry the `apptest` marker. The Stop
+    hook runs `GATE_SCOPE=hook scripts/gate.sh`, which adds `-m 'not apptest'` and
+    keeps its own memo, and takes 13.5–14.0 s. CI ignores the scope and runs all of
+    it. The hostile-tree test runs one `AppTest` session through all six views and
+    stays in both.
 - **"Works without Streamlit" is tested, not assumed.** `default-groups` includes `ui`,
   so the gate always has Streamlit installed. A test runs `cli.main(["convert", …])`
   against stubs in a subprocess with `streamlit` blocked from import
@@ -2678,7 +2709,7 @@ before push, and plan amendments in the PR that finds them.
 |---|---|
 | 10 | merged 2026-10-30 (#14, `a350956`); §18 approved by the user |
 | 11 | merged 2026-10-30 (#15, `5fe06e1`); CI published `v1.0.1` |
-| 12 | in progress on `feat/ui-viewer`: U1–U3 approved (four keys added and the external-IP lookup disabled; rule 2 rewritten as fail-closed escaping, `render.py` landed; the runner's liveness and cancel amended); U4 done (pass; no paging needed; the upload limit's units recorded); the viewer next |
+| 12 | on `feat/ui-viewer`: U1–U4 approved; the viewer built (`gdi ui`, `launch`, `reader`, `render`, six views); the chart-warning prefix and row positions (§18.4 rule 3); three categorical slots moved one Carbon step (§14, with the user); §15's widths re-measured on GAO-07-631 (overflow 0 at all six widths, both themes); hostile tree fetches nothing; the Stop hook skips `apptest` (13.5–14.0 s) |
 
 **Why the viewer comes before `--events`:** the viewer needs no conversion and carries
 U1 and U2, the riskiest unknowns. Building it first means the security model is settled

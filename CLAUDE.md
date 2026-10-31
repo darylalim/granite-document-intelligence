@@ -13,7 +13,7 @@ Each is justified in the section named. The reasons are non-obvious and were pai
 - **A move of `docling`, `docling-core`, `mlx`, `mlx-vlm`, `transformers`, `huggingface-hub` or `pillow` — or any model, revision, quantization or prompt change — runs the eval by hand before merge.** No test executes a line of `mlx`. Upgrade one package at a time (`uv lock --upgrade-package <name>`), never inside a blanket `uv lock --upgrade`. → *Verifying a dependency upgrade*
 - **`VlmPipelineOptions.images_scale` stays at 1.0.** Any other value puts every DocTags box in image pixels and crops every chart from the wrong region, still with `status=success`. → *Architecture*
 - **No model-repo code runs, and every model is pinned to a commit SHA.** Never pass `trust_remote_code=True`, and never load from anywhere but the stripped, manifest-checked models directory. → *Security*
-- **No test or library module imports `docling`, `torch`, `mlx`, `mlx_vlm` or `transformers` at module level**, and the gate stays ≤ 15 s. → *Tests*
+- **No test or library module imports `docling`, `torch`, `mlx`, `mlx_vlm` or `transformers` at module level**, nor `streamlit` outside `ui/app.py`, and the Stop hook's gate stays ≤ 15 s. → *Tests*
 - **A new test stub gets a new `$STUB_*` env var**, never a file written per test — that cost ~17 s of a 21 s gate. → *Tests*
 - **Treat a ruff/ty major as its own reviewable change**, not incidental lockfile noise — a linter upgrade can redefine the gate with no code change. → *Commands*
 - **Use Conventional Commits.** `release.sh --generate-notes` turns subject lines into public release notes. → *Commits*
@@ -36,7 +36,7 @@ uv run gdi convert report.pdf -o out
 - **Typecheck**: `uv run ty check`
 - **Test**: `uv run pytest`
 
-All four live in **`scripts/gate.sh`**, which CI (`.github/workflows/ci.yml`) and the Claude Code Stop hook (`.claude/settings.json`) both invoke, so the two cannot drift. It runs the *verifying* variants (`ruff format --check .`, `pytest -q`), so it reports formatting drift rather than fixing it. Reproduce CI with **`GATE_FORCE=1 ./scripts/gate.sh`** — a bare `./scripts/gate.sh` skips a tree that already passed (see the memo below), which reproduces the Stop hook but not CI. Run the individual commands above while iterating on one gate.
+All four live in **`scripts/gate.sh`**, which CI (`.github/workflows/ci.yml`) and the Claude Code Stop hook (`.claude/settings.json`) both invoke, so the two cannot drift. It runs the *verifying* variants (`ruff format --check .`, `pytest -q`), so it reports formatting drift rather than fixing it. Reproduce CI with **`GATE_FORCE=1 ./scripts/gate.sh`**, and the Stop hook with **`GATE_SCOPE=hook ./scripts/gate.sh`**, which skips the `apptest`-marked tests (see the scope below). A bare `./scripts/gate.sh` runs the full suite but skips a tree that already passed (see the memo below). Run the individual commands above while iterating on one gate.
 
 **Releasing** is a side effect of merging, not a command: bump `version` in `pyproject.toml`, run **`uv lock`**, and land **both files** on `main`. Once the gate is green CI runs `scripts/release.sh`, which tags `v<version>` and publishes a release with generated notes; every other push is a no-op. 1.0.0 is the pipeline's first release (plan §11); `v0.6.0` was the text app's last.
 
@@ -125,7 +125,7 @@ Floors are the versions PR 4's hand run executed the models on, not researched o
 | `python-dotenv` | floor only | `.env` for `HF_TOKEN` |
 | `mlx` | **not declared** | floats under `mlx-vlm`; the lock pins it |
 
-The `ui` dependency group holds `streamlit` for the v1.x UI prototypes under `docs/plans/ui-*`, which `ty` checks. The library never imports it, and nothing in v1 may assume a UI (§1, §14, §15). A cap move (`<0.8`, `<3`) is its own PR. Lowering a floor needs the eval on the lower version, resolved with `uv lock --resolution lowest-direct` and installed with `uv sync --frozen`, since a plain `uv sync` silently re-resolves to the highest versions (S1).
+The **`[ui]` extra** holds `streamlit>=1.66.1,<2` for `gdi ui` (§18.5), and the `ui` dependency group installs it for the gate and the prototypes under `docs/plans/ui-*`. Only `ui/app.py` imports Streamlit at top level (`launch.py` inside `run`), and the library and `gdi convert` run with it absent, which `TestWithoutStreamlit` checks by blocking the import. A Streamlit move in `uv.lock` re-runs §15's width check, as a model package move re-runs the eval. A cap move (`<0.8`, `<3`) is its own PR. Lowering a floor needs the eval on the lower version, resolved with `uv lock --resolution lowest-direct` and installed with `uv sync --frozen`, since a plain `uv sync` silently re-resolves to the highest versions (S1).
 
 ## Architecture
 
@@ -145,6 +145,12 @@ src/granite_document_intelligence/
   safety.py     # limits, %PDF- check, path containment, error records
   runlock.py    # the process-level run lock
   memory.py     # release helper, MLX cache limit, peak-memory reporting
+  ui/           # v1.x (plan §18): the only Streamlit in the package
+    app.py      # the viewer script: six read-only views; tree strings only as text
+    launch.py   # `gdi ui`: every security key forced as a flag, config loaded first
+    reader.py   # the §3.5 tree read as a contract; the run listing
+    render.py   # fail-closed Markdown neutraliser for document.md and summaries
+    .streamlit/config.toml, static/fonts/   # the Carbon theme and Plex, as package data
 ```
 
 **The library is the product** (§3.7). `convert()` returns data and writes nothing, and `ConvertResult.save()` is the only writer. `convert_many()` owns resume, so a CLI and a later UI cannot diverge on it. Importing the package loads no model and imports neither Docling nor MLX. A submodule named `convert` would shadow the exported `convert()` function, which is why Phase A lives in `phase_a.py`.
@@ -253,6 +259,8 @@ Further rules from §3.10:
 - **Runs every gate even after one fails**, so a single block names everything that is wrong. Claude Code stops honoring a Stop hook after 8 consecutive blocks (raise with `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`), and spending that budget one diagnostic at a time wastes it.
 - **Skips only a tree that already passed** — a SHA-256 over `git ls-files -co --exclude-standard` against `.git/gate-ok`, written only on green. Every uncertainty runs: an empty file list, a missing memo, a red previous run, a non-empty `GITHUB_ACTIONS`, or `GATE_FORCE`.
 
+**The Stop hook runs a narrower suite** (§18.5, PR 12). `GATE_SCOPE=hook` adds `-m 'not apptest'`, which skips the viewer's `AppTest` layout and view tests: with them the gate took 15.3–15.8 s, and without them 13.5–14.0 s. It keeps its own memo (`.git/gate-ok-hook`), so a green hook run never lets a full run skip. CI ignores the scope and runs everything, and so does a bare `./scripts/gate.sh`. The security tests, the hostile-tree `AppTest` included, run in both.
+
 It also `cd`s to `git rev-parse --show-toplevel` first: `ruff check .` and `pytest` resolve from the working directory, so a caller in a subdirectory would otherwise gate a narrower tree than it believes.
 
 Two cheaper short-circuits were tried first and both **failed open**, because each inferred "nothing to check" from a *proxy* rather than from the gate's inputs. An empty `git status --porcelain` skipped exactly the turns that had just *committed* work, and a held `index.lock` disabled the gate outright. Honoring `stop_hook_active` made the hook one-shot: it blocked once, then let the next Stop through without verifying its own fix. A content hash has neither failure: committing does not alter file content, and nothing is recorded on a red gate. Two details are load-bearing:
@@ -287,7 +295,7 @@ Neither script is shellchecked by any gate. Both were run through `shellcheck` a
 `.claude/settings.json` — the project-shared Claude Code hooks.
 - **Format hook.** `ruff check --fix` runs on each edited `.py`, followed by `ruff format` on `.py` **and** `.md`.
 - **Edit guard.** It blocks edits to `.env` / `.env.*` (the committed `.env.example` is exempt), `secrets.toml` and `uv.lock`.
-- **Stop hook.** It runs `scripts/gate.sh`.
+- **Stop hook.** It runs `GATE_SCOPE=hook scripts/gate.sh` (see gate.sh above).
 - **Personal overrides** go in the gitignored `.claude/settings.local.json`.
 
 Both hooks parse their payload with **`jq`**, an undeclared dependency that macOS 26 ships at `/usr/bin/jq`. If `jq` is missing, the guard **fails open**. The guard covers `Edit|Write|MultiEdit`, not `Bash`, so it is an accident guardrail, not a security boundary.
@@ -304,7 +312,10 @@ Both hooks parse their payload with **`jq`**, an undeclared dependency that macO
 
 ## Tests
 
-`tests/` — unit tests, all mocked: no model download, no real inference. One file per module (`test_api.py`, `test_batch.py`, `test_charts.py`, `test_chunk.py`, `test_cli.py`, `test_export.py`, `test_kvp.py`, `test_models.py`, `test_phase_a.py`, `test_pipeline.py`, `test_safety.py`), plus:
+`tests/` — unit tests, all mocked: no model download, no real inference. One file per module (`test_api.py`, `test_batch.py`, `test_charts.py`, `test_chunk.py`, `test_cli.py`, `test_export.py`, `test_kvp.py`, `test_models.py`, `test_phase_a.py`, `test_pipeline.py`, `test_safety.py`, `test_render.py`, `test_ui_reader.py`), plus:
+
+- `test_ui.py` — the UI's machinery: the theme guard (`TestThemeConfig`), the launcher's forced flags and its two private-name patches, executed against Streamlit's own origin check (`TestLauncher`), and `TestWithoutStreamlit`.
+- `test_ui_app.py` — the viewer under `AppTest` over one session-scoped tree built through the real `export.save()`. Layout and views are marked `apptest` (CI only); the hostile-tree walk runs everywhere.
 
 - `test_score.py` — the eval's scoring rules (`eval/matching.py`, `eval/score.py`), with every bad-prediction case mutation-checked (38 rule mutations, each caught; PR 7).
 - `test_s10_check.py` — S10's detector, executed in a real subprocess so a hook that stopped seeing executed code fails here, plus the check's verdict and its models-directory scan.
@@ -318,7 +329,7 @@ Both hooks parse their payload with **`jq`**, an undeclared dependency that macO
 
 Data-driven cases use `@pytest.mark.parametrize` with an `id=` on each `pytest.param`.
 
-**The gate stays ≤ 15 s** (§3.14 rule 9), because the Stop hook runs it every turn. It measured 11.7–12.8 s over three forced runs on 2026-10-29. `TestImportCost` fails any module under `tests/`, `src/granite_document_intelligence/` or `eval/` that imports `docling`, `torch`, `mlx`, `mlx_vlm` or `transformers` at top level. Import them inside the test that needs them, and mock the rest. One in-test import of Docling's pipeline options alone costs ~2.4 s, because it brings torch.
+**The gate stays ≤ 15 s** (§3.14 rule 9), because the Stop hook runs it every turn. It measured 11.7–12.8 s over three forced runs on 2026-10-29. `TestImportCost` fails any module under `tests/`, `src/granite_document_intelligence/` (subpackages included) or `eval/` that imports `docling`, `torch`, `mlx`, `mlx_vlm` or `transformers` at top level, and any but `ui/app.py` that imports `streamlit`. Import them inside the test that needs them, and mock the rest. One in-test import of Docling's pipeline options alone costs ~2.4 s, because it brings torch.
 
 **Behaviour is asserted by executing, not by grepping.** Several contracts appear in source under every arrangement of the code: the format hook's command order, gate.sh's exit code (`2` also occurs in its `cd`-failure branch), and release.sh's `--draft` (written twice). Substring checks stayed green when these were mutated. The suites that execute shell scripts (`TestReleaseWorkflow`, `TestHooksConfig`) share a **session-scoped `stub_bin` fixture**, and that is a performance contract. macOS scans every newly created executable the first time it runs: 241 ms against 4 ms for a re-run or a fresh symlink, since the scan is keyed to the inode. Writing stubs per test cost ~17 s of a 21 s gate. So the stubs are written once and varied through **`$STUB_*` environment variables**, and the scripts are **symlinked** into each throwaway repo. If a future stub needs per-test behaviour, add an environment variable. Do not go back to writing a file per test.
 
