@@ -2306,6 +2306,30 @@ The UI branches on `event` and `kind`, which our code wrote, never on a value a 
 produced (CLAUDE.md's rule). The same file is useful to any script that drives `gdi`,
 which is why this is a CLI feature rather than a private UI protocol.
 
+**As built (PR 13).** Where the code settled what the schema above left open:
+- **The writer is `events.py`, process-wide.** The CLI opens it with
+  `events.writing(path)` around the whole of `gdi convert`; the library calls
+  `events.emit(…)` where the stderr prose is logged, and that does nothing when no
+  writer is open. So `convert`, `convert_many` and their signatures are unchanged for
+  every other caller. Writes take a lock, since Docling reports pages from the thread
+  that converts the PDF.
+- **A path that cannot be opened is a failed write**, not a usage error: one warning,
+  and the run goes on without events. This is the first rule applied at the start.
+- **`batch` comes once the lock is held**, so a waiting run writes `waiting` before
+  `batch`, the order above. `holder_pid` is `null` when the lock file names no pid.
+- **`result` carries no error**, not even the exception's type. The plan's rule for
+  `error` (our own messages only) has no equivalent for an arbitrary per-PDF
+  exception, and the error is in that PDF's `run.json`. The sentinel test checks that
+  the failing exception's message stays out of the file.
+- **"A bad flag" means one `ConvertOptions` refuses** (`--chart-code` with
+  `--no-charts`, `--pages` without `--schema`, a chunk size out of range). A command
+  line argparse rejects while parsing (an unknown flag, `--max-pages 0`, a bad
+  `--text-source`) exits 2 before `--events` is known, and writes nothing. The UI
+  builds its argv from validated controls, so it cannot meet this case; a script that
+  does reads exit 2 with an empty file.
+- **Every run ends with one `summary`, `interrupted` or `error`**, or with none on a
+  crash. The README states the format and these rules for a reader.
+
 **The runner** starts `sys.executable -m granite_document_intelligence.cli convert …`
 (the same interpreter and install as the server, and the seam where tests substitute a
 `$STUB_*`-driven stub) with `start_new_session=True`, so a Ctrl-C to the server's
@@ -2711,6 +2735,7 @@ before push, and plan amendments in the PR that finds them.
 | 10 | merged 2026-10-30 (#14, `a350956`); §18 approved by the user |
 | 11 | merged 2026-10-30 (#15, `5fe06e1`); CI published `v1.0.1` |
 | 12 | merged 2026-10-30 (#17, `c9dd351`): U1–U4 approved; `gdi ui` and the six read-only views (`launch`, `reader`, `render`); the chart-warning prefix and row positions (§18.4 rule 3); three categorical slots moved one Carbon step (§14, with the user); §15's widths re-measured on GAO-07-631 (overflow 0 at all six widths, both themes); hostile tree fetches nothing; the Stop hook skips `apptest` (13.5–14.0 s), CI runs everything |
+| 13 | on `feat/progress-events`: `gdi convert --events PATH` (`events.py`); one test per event, the unwritable-file test (a real `EBADF` mid-batch: every PDF converts, one warning) and the sentinel tests extended to the events file (`test_events.py`, `test_safety.py`); README documents the format; §18.2 amended ("As built"). HANDRUN |
 
 **Why the viewer comes before `--events`:** the viewer needs no conversion and carries
 U1 and U2, the riskiest unknowns. Building it first means the security model is settled
