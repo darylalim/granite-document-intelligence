@@ -115,6 +115,12 @@ def emit(event: Event, **fields: int | str | None) -> None:
         writer.emit(event, fields)
 
 
+def error(kind: ErrorKind, message: str) -> None:
+    """Record why the run stopped as a whole: our own message for one of our own
+    batch-level errors, never `str()` of an arbitrary exception (§18.2)."""
+    emit("error", kind=kind, message=message)
+
+
 @contextmanager
 def writing(path: Path | None) -> Generator[None]:
     """Send `emit`'s events to `path` for the `with` block; with None, nowhere."""

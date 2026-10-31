@@ -219,7 +219,7 @@ def _convert_with_events(
             max_file_mb=args.max_file_mb,
         )
     except ValueError as exc:
-        events.emit("error", kind="usage", message=str(exc))
+        events.error("usage", str(exc))
         parser.error(str(exc))
 
     items: list[api.BatchItem] = []
@@ -237,15 +237,15 @@ def _convert_with_events(
             item.result = None
             items.append(item)
     except (batch.BatchError, kvp.SchemaError) as exc:
-        events.emit("error", kind="usage", message=str(exc))
+        events.error("usage", str(exc))
         print(f"gdi convert: error: {exc}", file=sys.stderr)
         return 2
     except models.ModelsNotReadyError as exc:
-        events.emit("error", kind="models", message=str(exc))
+        events.error("models", str(exc))
         print(f"gdi convert: {exc}", file=sys.stderr)
         return 1
     except runlock.RunLockedError as exc:
-        events.emit("error", kind="locked", message=str(exc))
+        events.error("locked", str(exc))
         print(f"gdi convert: {exc}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
