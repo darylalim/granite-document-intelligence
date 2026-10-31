@@ -24,6 +24,7 @@ from typing import Any
 
 from granite_document_intelligence import (
     config,
+    events,
     export,
     kvp,
     models,
@@ -290,17 +291,29 @@ def run(
     recorded = pipeline.recorded_options(options)
 
     with runlock.run_lock(wait=wait):
+        # After the lock, so a `waiting` event comes first (§18.2).
+        events.emit("batch", total=len(jobs))
         out_root.mkdir(parents=True, exist_ok=True)
         for job in jobs:
             if safety.is_within(job.out_dir, out_root):
                 recover(job.out_dir)
         for position, job in enumerate(jobs, start=1):
             _log.info("[%d/%d] %s", position, len(jobs), job.pdf)
+            events.emit(
+                "pdf",
+                position=position,
+                total=len(jobs),
+                pdf=str(job.pdf),
+                out_dir=str(job.out_dir),
+            )
             item = _one(job, out_root, options, recorded, force)
             if item.status == "skipped":
                 _log.info("  skipped: already converted with these options")
             elif item.status == "failed":
                 _log.warning("  failed: %s", item.error)
+            # The status only: a failure's message can quote the PDF, and the
+            # error is in its run.json (§18.2).
+            events.emit("result", pdf=str(job.pdf), status=item.status)
             yield item
 
 
@@ -316,11 +329,17 @@ def _size(n: int) -> str:
     return f"{size:.1f} GB"
 
 
-def summary(items: list[BatchItem], out_root: Path) -> str:
-    """The end-of-batch report (§3.8): counts, the output size, and every path."""
+def tally(items: list[BatchItem]) -> dict[str, int]:
+    """How many PDFs were done, skipped and failed, in that order."""
     counts = {status: 0 for status in ("done", "skipped", "failed")}
     for item in items:
         counts[item.status] += 1
+    return counts
+
+
+def summary(items: list[BatchItem], out_root: Path) -> str:
+    """The end-of-batch report (§3.8): counts, the output size, and every path."""
+    counts = tally(items)
     total = sum(item.output_bytes for item in items)
     lines = [
         (

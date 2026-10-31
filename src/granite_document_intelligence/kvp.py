@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from granite_document_intelligence import config, memory
+from granite_document_intelligence import config, events, memory
 from granite_document_intelligence.api import KvpResult
 
 if TYPE_CHECKING:
@@ -274,6 +274,7 @@ def run(
     try:
         for position, page_no in enumerate(pages, start=1):
             _log.info("  key-values %d/%d (page %d)", position, len(pages), page_no)
+            events.emit("kvp", position=position, total=len(pages), page_no=page_no)
             image = render_page(pdf, page_no)
             start = time.perf_counter()
             text, tokens = model.generate_counted(

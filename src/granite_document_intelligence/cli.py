@@ -4,7 +4,9 @@
 resume, expansion and failure handling live in the library (§7), so a UI gets
 the same behaviour. Exit status: 0 when every PDF was converted or skipped, 1
 when any failed or the run could not start (models not ready, another run
-holding the lock under `--no-wait`), 2 for a usage error, 130 on Ctrl-C. `gdi ui`
+holding the lock under `--no-wait`), 2 for a usage error, 130 on Ctrl-C.
+`--events PATH` also writes progress as JSON Lines for a program to follow
+(`events`, plan §18.2); stderr's prose is unchanged. `gdi ui`
 serves the viewer (plan §18) and exits 1 when Streamlit is not installed.
 """
 
@@ -129,6 +131,13 @@ def _parser() -> argparse.ArgumentParser:
         action="store_false",
         help="exit instead of waiting when another gdi run is in progress",
     )
+    convert.add_argument(
+        "--events",
+        type=Path,
+        metavar="PATH",
+        help="also append progress to PATH as JSON Lines, for a program to follow "
+        "(the format is in the README)",
+    )
 
     convert_model = commands.add_parser(
         "convert-model",
@@ -182,7 +191,19 @@ def _configure_logging(quiet: bool) -> None:
 
 
 def _convert(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
-    from granite_document_intelligence import api, batch, kvp, models, runlock
+    from granite_document_intelligence import events
+
+    _configure_logging(args.quiet)
+    with events.writing(args.events):
+        return _convert_with_events(args, parser)
+
+
+def _convert_with_events(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> int:
+    """`gdi convert` itself. Each exit has its event (§18.2): `error` with the
+    exit code's kind, `interrupted` or `summary`. A crash writes none."""
+    from granite_document_intelligence import api, batch, events, kvp, models, runlock
 
     try:
         options = api.ConvertOptions(
@@ -198,8 +219,8 @@ def _convert(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
             max_file_mb=args.max_file_mb,
         )
     except ValueError as exc:
+        events.emit("error", kind="usage", message=str(exc))
         parser.error(str(exc))
-    _configure_logging(args.quiet)
 
     items: list[api.BatchItem] = []
     try:
@@ -216,18 +237,27 @@ def _convert(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
             item.result = None
             items.append(item)
     except (batch.BatchError, kvp.SchemaError) as exc:
+        events.emit("error", kind="usage", message=str(exc))
         print(f"gdi convert: error: {exc}", file=sys.stderr)
         return 2
-    except (models.ModelsNotReadyError, runlock.RunLockedError) as exc:
+    except models.ModelsNotReadyError as exc:
+        events.emit("error", kind="models", message=str(exc))
+        print(f"gdi convert: {exc}", file=sys.stderr)
+        return 1
+    except runlock.RunLockedError as exc:
+        events.emit("error", kind="locked", message=str(exc))
         print(f"gdi convert: {exc}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
+        events.emit("interrupted")
         print("gdi convert: interrupted; finished PDFs are kept", file=sys.stderr)
         if items:
             print(batch.summary(items, args.out_dir), file=sys.stderr)
         return 130
+    counts = batch.tally(items)
+    events.emit("summary", **counts)
     print(batch.summary(items, args.out_dir), file=sys.stderr)
-    return 1 if any(item.status == "failed" for item in items) else 0
+    return 1 if counts["failed"] else 0
 
 
 UI_MISSING = (

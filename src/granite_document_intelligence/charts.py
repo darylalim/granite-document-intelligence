@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from granite_document_intelligence import config, memory
+from granite_document_intelligence import config, events, memory
 from granite_document_intelligence.api import Chart
 
 if TYPE_CHECKING:
@@ -350,6 +350,7 @@ def run(
             name = f"chart-{index:03d}"
             page_no = picture.prov[0].page_no if picture.prov else 0
             _log.info("  chart %d/%d (page %d)", position, len(targets), page_no)
+            events.emit("chart", position=position, total=len(targets), page_no=page_no)
             page = document.pages.get(page_no)
             image = render_crop(pdf, picture, page.size.height) if page else None
             if image is None:
