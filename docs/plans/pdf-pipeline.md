@@ -15,8 +15,9 @@ S6/S7/S11 confirmed) and PR 8 (docs rewrite) are merged; PR 9 (release 1.0.0) is
 **Status (2026-10-30, end of day):** v1 is complete, and the v1.x UI is planned. PR 9
 published `v1.0.0` (§10). §18, the v1.x build plan, was reviewed cold, approved and
 merged (PR 10, #14). PR 11 (#15) fixed a v1.0.0 bug that review found, and CI
-published **`v1.0.1`**. **PR 12 is next:** the U-spikes (§18.6), then the read-only
-viewer. Per-PR progress is under §18.7. **To resume, paste Appendix C into a new
+published **`v1.0.1`**. PR 12 (#17) ran the U-spikes (§18.6) and merged the read-only
+viewer, `gdi ui`. **PR 13 is next:** `gdi convert --events`. Per-PR progress is under
+§18.7. **To resume, paste Appendix C into a new
 session.**
 
 ## 0. At a glance
@@ -2709,7 +2710,7 @@ before push, and plan amendments in the PR that finds them.
 |---|---|
 | 10 | merged 2026-10-30 (#14, `a350956`); §18 approved by the user |
 | 11 | merged 2026-10-30 (#15, `5fe06e1`); CI published `v1.0.1` |
-| 12 | on `feat/ui-viewer`: U1–U4 approved; the viewer built (`gdi ui`, `launch`, `reader`, `render`, six views); the chart-warning prefix and row positions (§18.4 rule 3); three categorical slots moved one Carbon step (§14, with the user); §15's widths re-measured on GAO-07-631 (overflow 0 at all six widths, both themes); hostile tree fetches nothing; the Stop hook skips `apptest` (13.5–14.0 s) |
+| 12 | merged 2026-10-30 (#17, `c9dd351`): U1–U4 approved; `gdi ui` and the six read-only views (`launch`, `reader`, `render`); the chart-warning prefix and row positions (§18.4 rule 3); three categorical slots moved one Carbon step (§14, with the user); §15's widths re-measured on GAO-07-631 (overflow 0 at all six widths, both themes); hostile tree fetches nothing; the Stop hook skips `apptest` (13.5–14.0 s), CI runs everything |
 
 **Why the viewer comes before `--events`:** the viewer needs no conversion and carries
 U1 and U2, the riskiest unknowns. Building it first means the security model is settled
