@@ -169,8 +169,15 @@ def _value(text: str) -> float | None:
         return None
 
 
+# Every warning about a written chart starts with its name and page, so the UI can
+# put it on that chart's card by matching this prefix alone (plan §18.3). A chart
+# skipped for having no image has no card and no name, so it is named by its
+# Docling reference instead and appears on the Run view only.
+WARNING_PREFIX = re.compile(r"^(chart-\d{3}) \(page (\d+)\): ")
+
+
 def summary_disagreements(rows: list[list[str]], summary: str) -> list[str]:
-    """Labels the summary pairs with a number its own CSV row does not hold.
+    """Rows the summary pairs with a number the row does not hold.
 
     Both Granite Vision variants attached every percentage of the GAO-08-14 pie
     to the wrong slice while the CSV was right (S6), so the summary is checked
@@ -180,18 +187,23 @@ def summary_disagreements(rows: list[list[str]], summary: str) -> list[str]:
     label–number pairs, so it misses a wrong number stated without its label, and
     it skips labels holding a digit (`1995 to 2000`), whose "next number" is often
     part of another label — a false alarm PR 4's hand run hit.
+
+    Each entry names the row by its position (`row 4: summary 12, CSV 9`; row 1 is
+    the first after the header), never by its label: the label is document
+    content as the model read it, and `run.json` holds none (§3.13 rule 5, §18.4
+    rule 3; decided with the user, 2026-10-30).
     """
-    by_label: dict[str, list[float]] = {}
-    for row in rows[1:]:
+    by_label: dict[str, tuple[int, list[float]]] = {}
+    for number, row in enumerate(rows[1:], start=1):
         label = row[0].strip() if row else ""
         values = [v for v in (_value(cell) for cell in row[1:]) if v is not None]
         has_digit = any(ch.isdigit() for ch in label)
         if len(label) >= _MIN_LABEL and not has_digit and values:
-            by_label[label] = values
+            by_label[label] = (number, values)
     found: list[str] = []
     for clause in _CLAUSE.split(summary):
         lowered = clause.lower()
-        for label, values in by_label.items():
+        for label, (number, values) in by_label.items():
             at = lowered.find(label.lower())
             if at < 0:
                 continue
@@ -201,7 +213,8 @@ def summary_disagreements(rows: list[list[str]], summary: str) -> list[str]:
                 continue
             if not any(abs(claimed - v) <= 0.01 * max(abs(v), 1e-9) for v in values):
                 found.append(
-                    f"{label} {claimed:g} (CSV: {', '.join(f'{v:g}' for v in values)})"
+                    f"row {number}: summary {claimed:g}, "
+                    f"CSV {', '.join(f'{v:g}' for v in values)}"
                 )
     return found
 

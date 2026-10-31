@@ -21,6 +21,7 @@ from test_batch import FakePipeline, run, run_json, write_pdf
 from granite_document_intelligence import (
     ConvertOptions,
     RunLockedError,
+    charts,
     cli,
     convert,
     convert_many,
@@ -154,6 +155,8 @@ class TestPaths:
 
 SENTINEL_TOKEN = "hf_SENTINELtokenSENTINELtoken"
 SENTINEL_TEXT = "SENTINEL-PAGE-TEXT-7f3a"
+# Digit-free: the summary check skips labels holding a digit (charts.py).
+SENTINEL_LABEL = "Sentinel Chart Label"
 
 
 class TestNoSecretsOrContentInLogs:
@@ -191,6 +194,24 @@ class TestNoSecretsOrContentInLogs:
         for sentinel in (SENTINEL_TOKEN, SENTINEL_TEXT):
             assert sentinel not in written
             assert sentinel not in stderr
+
+    def test_a_chart_warning_quotes_no_label(self, blank_pdf: Path) -> None:
+        # A chart's CSV labels are document content as the model read it. The
+        # summary check names the row by position instead (§18.4 rule 3).
+        from conftest import build_document
+        from test_charts import GOOD, FakeVision
+
+        vision = FakeVision(
+            {
+                **GOOD,
+                charts.CSV_PROMPT: f"Region,Revenue\n{SENTINEL_LABEL},120\n",
+                charts.SUMMARY_PROMPT: f"{SENTINEL_LABEL} reached 999.",
+            }
+        )
+        doc = build_document()
+        result = charts.run(blank_pdf, doc, Path("unused"), vision=vision)  # ty: ignore[invalid-argument-type]
+        assert any("row 1: summary 999" in w for w in result.warnings)
+        assert not any(SENTINEL_LABEL in w for w in result.warnings)
 
     def test_an_error_record_keeps_only_our_own_frames(self) -> None:
         def foreign() -> None:

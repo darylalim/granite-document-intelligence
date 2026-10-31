@@ -2029,9 +2029,16 @@ it sits on caught it.
    new invariants: palette lengths (`chartSequentialColors` and `chartDivergingColors`
    need exactly 10, or Streamlit silently uses its defaults), every categorical slot
    ≥ 3:1 against its mode's page **and** not within 1.5:1 of its mode's text colour.
+   **Done in PR 12** (`tests/test_ui.py`). The guard found three slots within 1.5:1 of
+   the text: light Red 90 `#570408` (1.23), light Cyan 100 `#012749` (1.20) and dark
+   Cyan 20 `#bae6ff` (1.20). **Decided with the user (2026-10-30):** each moves one
+   Carbon step along its hue, to Red 80 `#750e13` (1.58), Cyan 90 `#003a6d` (1.57) and
+   Cyan 30 `#82cfff` (1.55), in both `config.toml` files.
 3. Re-measure the results tab strip for the real layout at its narrowest supported
    width: the preview measured **442 px** for six tabs at 1280 px, and
-   `baseFontSize = 15` was originally tuned for the old five-tab strip.
+   `baseFontSize = 15` was originally tuned for the old five-tab strip. **PR 12:** the
+   switcher is pills (§15), and the six fit one row at every measured width from
+   768 px, at `baseFontSize = 15`.
 4. Known trade-off: diverging bars near zero nearly vanish in both modes, because the
    midpoint is the page colour — right for heatmaps, worth knowing for bar charts.
 5. Re-render the preview (or the real app) in both modes before shipping; the capture
@@ -2063,7 +2070,7 @@ horizontal overflow **0 at every width**:
 | Convert row | horizontal container: button + one caption | caption under button | 1 line | 1 line | 1 line |
 | Counts | 4 × `st.metric(border=True, width=130)` in a horizontal container | 2 × 2 | 1 row | 1 row | 1 row |
 | Notices | `st.empty()` slot (the old app's reason holds: a container keeps stale notes) | — | — | — | — |
-| View switcher | `st.pills`, single-select, `bind="query-params"` | 2 rows, all visible | 1 row | 1 row | 1 row |
+| View switcher | `st.pills`, single-select, `bind="query-params"`; plain labels (PR 12: Streamlit 1.66 binds the *formatted* label, so a link reads `?view=Charts`) | 2 rows, all visible | 1 row | 1 row | 1 row |
 | Chart cards | horizontal container of `st.container(border=True, width=344)` | 1 / row | 2 / row | 1 / 2 per row | 4 / 5 per row |
 | Document text | `st.container(width=760)` | fills width | fills width | max 760 | max 760 — a readable line |
 | Tables | `st.dataframe(width="content")` | scrolls inside itself | natural width | natural width | natural width, no stretched columns |
@@ -2101,6 +2108,13 @@ rendered its dataframe and no chart; `?view=…` seeded the Document view.
 left-aligned with free space to its right, chosen over centring so cards stay aligned
 with the text above them. No `st.columns` for content — they hold a fixed count and
 collapse to one stack at 640 px, which the wrapping grid does better.
+
+**Re-measured in PR 12** on GAO-07-631's real output through `gdi ui` (headless Chrome,
+CDP), at 768, 1024, 1280, 1440, 1920 and 2560 px, all six views in both themes. Page
+overflow was **0 in all 72 cases**. Cards per row were 2 / 1 / 2 / 2 / 4 / 5, as
+designed. The prose column is 760 px from 1280 px. Pills and count tiles hold one row
+throughout. Phone widths were not re-measured: a loopback-only app is not reachable
+from a phone (§18.7).
 
 **When the UI is built:** re-measure with real content at the same eight widths
 (chart crops and long table headers change widths), keep the 0-overflow check as a
@@ -2237,9 +2251,11 @@ Not reasons: the run lock serialises two in-process callers on different threads
 correctly (checked in review: two threads each taking `run_lock(wait=True)` queued,
 no deadlock). CLAUDE.md's deadlock is nested acquisition on one call path.
 
-**What it costs:** one interpreter start and the library's imports per run, not per PDF,
-**unmeasured** (U3 measures it; the 7.13 s cold start, §3.11, is model load, which both
-designs pay); and a machine-readable progress channel the CLI lacks today. Progress goes
+**What it costs:** one interpreter start and the library's imports per run, not per PDF.
+**U3 measured ~4.5 s:** 0.05 s for the interpreter and the CLI, and the rest for Docling,
+mlx-vlm, transformers and torch. An in-process server would pay that once. Model load is
+per PDF in both designs. Accepted for the reasons above. The other cost is a
+machine-readable progress channel the CLI lacks today. Progress goes
 to stderr through `logging` as prose (`[2/6] report.pdf`, `  page 3/24`), and parsing
 our own prose is the degenerate-check mistake §8.1 warns about in another form.
 
@@ -2295,7 +2311,34 @@ which is why this is a CLI feature rather than a private UI protocol.
 terminal does not also hit the child unasked. Each run gets
 `$GDI_CACHE_DIR/ui/runs/<run-id>/` holding `events.jsonl`, `stdout.txt`, `stderr.txt`,
 `argv.json` and `pid`; the child's stdout and stderr go to those files, never a pipe.
-The Run view shows `stderr.txt` as text (§18.4 rule 3). Run folders older than 30 days
+The Run view shows `stderr.txt` as text (§18.4 rule 3), and it carries library noise
+(torch, transformers and docling-core warnings, progress bars; U3), so the UI's progress
+comes from the events file.
+
+**Liveness and cancel (amended by U3).** `start_new_session` is load-bearing: without
+it, U3's control lost the conversion to a Ctrl-C in the server's terminal. U3 also found
+two things the pid alone cannot tell the runner:
+- A finished child stays a zombie until its parent waits on it, and `kill(pid, 0)`
+  succeeds on a zombie. Once the zombie is reaped, the pid can belong to anyone.
+- Only the process that started a child receives its exit status.
+
+So the runner:
+- keeps every `Popen` it starts in a process-wide registry (`st.cache_resource`), polls
+  it on every rerun, and so reaps finished children and keeps their return codes;
+- writes the child's start time (`ps -o lstart`) beside `pid`.
+
+A run is **finished** when its events file holds `summary` or `interrupted`, or the
+registry holds its return code. A negative return code with no `result` for the current
+PDF is "crashed during <pdf>". A run is **running** only if its pid exists, is not a
+zombie and has the recorded start time. Anything else is **ended without a summary**:
+crashed, killed, or orphaned by a server restart (the child then belongs to PID 1, and
+its return code is gone). The UI says exactly that. **Cancel** is
+`os.killpg(pid, SIGINT)`, which is Ctrl-C's path. U3 measured exit 130, a free lock, no
+process left over, no `.partial` and the previous tree untouched mid-load, mid-page,
+mid-chart and mid-KVP. The child exits 0.07–0.9 s after the signal, and 4.4 s mid-KVP,
+where one generation step finishes first.
+
+Run folders older than 30 days
 are deleted when the UI starts **(decided)**. Cleanup covers `ui/runs/` and `ui/inputs/`
 only, both copies the UI made, and **never touches the output root**: those results are
 the user's, and nothing deletes them on a timer (the lesson of PR 11's bug).
@@ -2325,11 +2368,20 @@ PDF's output folder (§3.5):
 
 **Warnings on the card they belong to.** `run.json`'s warnings are prose today
 (`chart-001 (page 3): …`, `charts.py`). Matching that is parsing our own prose, unless
-the prefix is a contract. **(Proposed)** PR 12 pins it: every chart warning starts
-`chart-NNN (page N): `, a test in `test_charts.py` asserts the format for each warning
-kind, and the reader matches only that prefix. A structured `warnings_detail` field in
-`run.json` is the alternative; it is cleaner but changes `run.json`'s shape, which every
-existing tree lacks.
+the prefix is a contract. **PR 12 pins it** (`charts.WARNING_PREFIX`): every warning
+about a written chart starts `chart-NNN (page N): `, a test in `test_charts.py` asserts
+the format for each warning kind, and the reader matches only that prefix. A chart
+skipped for having no image has no card, so its warning names its Docling reference and
+appears on the Run view only. A structured `warnings_detail` field in `run.json` was the
+alternative; it is cleaner but changes `run.json`'s shape, which every existing tree
+lacks.
+
+**A chart's page** is recorded in no chart file. The reader takes it from the pictures
+in `document.json` that carry chart results (a description or a chart table, written by
+the chart stage in document order). It trusts that mapping only when the count matches
+the chart files. Otherwise the card says "page unknown" rather than risk a wrong page.
+A chart summary is model-written Markdown, so it is shown through `render.py`, like the
+document (PR 12).
 
 **Which results are shown.** A selector lists every folder under the chosen output root
 that holds a `run.json`, by its modification time, newest first (`run.json` records no
@@ -2381,8 +2433,14 @@ a failed run.
 The output root is a text field, defaulting to `~/gdi-out` **(decided)**. It is not
 `~/Documents/…`, because that is TCC-protected on macOS: the first write prompts, or
 fails with `EPERM`, depending on what launched the server. The upload limit is set to
-`max_file_mb` (200, the same 1024² unit `safety` uses), so the browser refuses what the
-pipeline would.
+`max_file_mb` (200). **U4 found that the units differ:** Streamlit's server counts
+1024² bytes, as `safety` does, but its browser-side uploader counts decimal megabytes.
+It refused a 200,000,001-byte file with "File must be 200.0MB or smaller." So uploads stop
+at 200,000,000 bytes, about 9.7 MB short of the pipeline's 200 MiB. A PDF in that gap is
+given by path instead. Raising the flag to close the gap would make the uploader's hint
+read "210MB", so the flag stays at 200 and the gap is stated in the README. A held upload
+costs the server about twice its size (U4: +0.38 GiB for 200 MB), which is why it is
+written to disk and cleared from the uploader before the run starts.
 
 **Settings map one to one onto `gdi convert` flags**, so a run from the UI is a run from
 the terminal: `--no-charts`, `--chart-code`, `--no-chunks`, `--chunk-tokens`,
@@ -2415,46 +2473,89 @@ localhost.
    | `server.headless` | `true` | the launcher opens the browser itself, once |
    | `server.fileWatcherType` | `none` | the watcher would scan the app's folder and site-packages for module changes; there is nothing to reload |
    | `server.enableStaticServing` | `true` | the fonts (§14) |
-   | `server.maxUploadSize` | `200` | `max_file_mb` (§18.3) |
+   | `server.maxUploadSize` | `200` | `max_file_mb` (§18.3); the browser reads it as decimal MB (U4) |
    | `browser.gatherUsageStats` | `false` | no telemetry: §3.10 allows the Hugging Face Hub as the only network contact |
    | `browser.serverAddress` | `localhost` | the URL printed and opened |
+   | `server.corsAllowedOrigins` | `http://localhost` | **added by U1.** A config's `["http://evil.example"]` let that origin open the WebSocket. A flag cannot force an empty list (1.66.1 drops it as "not given"), and localhost is always allowed, so this value adds nothing |
+   | `client.allowedOrigins` | `http://localhost` | **added by U1.** The parent frames whose `postMessage` drives the app. The default admits `https://*.streamlit.app` |
+   | `server.xsrfCookieSameSite` | `lax` | **added by U1.** Streamlit's default; a config's `none` weakens the XSRF cookie |
+   | `global.developmentMode` | `false` | **added by U1.** It sends `Access-Control-Allow-Origin: *` and logs at debug |
 
-   A test asserts the launcher's argv holds every row. U1 confirms each against a
-   hostile `~/.streamlit/config.toml` that sets every row's opposite, and confirms that
-   a WebSocket with `Host: evil.example` is refused.
+   A test asserts the launcher's flags hold every row. **U1 confirmed each** against a
+   hostile `~/.streamlit/config.toml` and a hostile working-directory config that set
+   every row's opposite. With the flags applied, it also confirmed that a WebSocket
+   with `Host: evil.example` is refused before any lookup (spike report, U1).
 
    **Residual risk, stated in `SECURITY.md`:** Streamlit's origin check accepts any
    `localhost` origin on any port (it compares the hostname only), so **another web app
    running on localhost can drive the UI**. That is within "a compromised Mac" only if
    that app is malicious. A vulnerable dev server on another port is the realistic case.
-   It is accepted for v1.x and named. Also, when a non-local origin knocks, Streamlit's
-   origin check may call `get_external_ip`, which fetches `checkip.amazonaws.com`; with
-   `allowedHosts` set the Host check should refuse first. U1 verifies the order, and if
-   the fetch can still happen, it is stated as a network contact the user did not ask for.
+   It is accepted for v1.x and named.
+
+   **The external-IP lookup is disabled (U1; decided with the user, 2026-10-30).**
+   Streamlit's origin check calls `net_util.get_external_ip()`, which fetches
+   `checkip.amazonaws.com`, *before* it refuses a foreign `Origin`. Only a disallowed
+   `Host` is refused first. So any page the user visits could trigger the fetch by
+   knocking with an allowed Host and a foreign Origin, and U1 caught it doing so. The
+   launcher replaces `streamlit.net_util.get_external_ip` with a function returning
+   `None`. A test asserts that the name exists and that the origin check of a foreign
+   `Origin` makes no HTTP request, so a Streamlit release that moves it fails the gate.
+
+   **Second residual, stated in `SECURITY.md`:** `allowedHosts` guards only the
+   WebSocket (U1). The HTTP routes accept any `Host`, so a DNS-rebound page can read
+   what plain GETs return: the generic app shell, `/_stcore/host-config`, the fonts, and
+   media files whose content-hash URLs it would have to know already. The control
+   channel and uploads (XSRF) are guarded.
+
+   **Third residual, stated in `SECURITY.md`: the UI can be framed (U2).** Streamlit
+   sends no `frame-ancestors` or `X-Frame-Options`, and no option adds one. Any page the
+   user visits can frame the UI, learn when it runs, read its query string and page
+   title (rule 3 keeps both free of document data) and invite clicks on it
+   (clickjacking). It cannot type into the UI or drive it, because `client.allowedOrigins`
+   ignores its messages (U2's control showed that an allowed parent *can* steer the
+   query string). PR 14 weighs this again when the Convert and Cancel buttons arrive.
 
 2. **Rendered Markdown fetches nothing, and nothing in it is a link.** `document.md` is
    model output. Docling escapes raw HTML in its Markdown export but passes Markdown
    images and links through. Review exported `![x](https://evil.example/a.png)` and
    `[y](javascript:alert)` and both survived, and a rendered remote image is a request
    the PDF's author chose: a tracking beacon, and a network contact §3.10 does not allow.
-   `render.py` therefore:
-   - splits `document.md` at image references and renders each one whose target is a
-     relative path **contained in the PDF's output folder** with `st.image` (Streamlit
-     serves it through its media manager). It drops every other image, keeping the alt
-     text as plain text. Relative URLs in `st.markdown` resolve against the app, and app
-     static serving reaches only the script's own `static/` folder, so "serve it from the
+   **U2 measured it:** unneutralised, eight Markdown image forms fetched from the
+   author's host, while raw HTML and KaTeX fetched nothing. `render.py` therefore
+   **fails closed** rather than recognising constructs (amended by U2):
+   - it lifts out each inline image whose target is a file **contained in the PDF's
+     output folder** (symlinks resolved; no scheme, no absolute path) and renders it
+     with `st.image` at `width="content"`, with no caption (rule 3). Streamlit serves it
+     through its media manager. Every other image is reduced to its alt text. Relative
+     URLs in `st.markdown` resolve against the app (U2 saw one go there), and app static
+     serving reaches only the script's own `static/` folder, so "serve it from the
      output folder" is not available.
-   - replaces every link, inline, reference-style, reference definition or autolink, by
-     its text. Even a relative link only navigates inside the app.
-   - escapes `$` (Streamlit renders `$…$` as LaTeX, which would garble "$5 and $3") and
-     Streamlit's directives (`:red[…]`, `:material/…:`, emoji shortcodes).
-   - renders with `unsafe_allow_html=False`, Streamlit's default, never changed.
+   - it lifts out fenced code blocks for `st.code`. Mistaking text for a fence, or a
+     fence for text, is safe either way.
+   - it backslash-escapes, outside existing escape pairs, every character that can
+     start an image, a link, a footnote, a directive, an emoji, HTML or LaTeX:
+     `` [ ] ! < $ : @ ` ``. Docling's own escapes (`\_`) are kept as pairs, since
+     doubling `\[` would leave a live bracket. A table's delimiter row is left alone.
+   - it breaks every pattern that Streamlit matches on text *after* escapes are
+     resolved, with an invisible U+2060 joiner: GFM's bare `http://`, `www.` and
+     `a@b.c` links, and Streamlit's `:streamlit:` and `:material/…:` swaps. A backslash
+     did not stop any of them (U2).
+   - it first turns inline links and autolinks into their text, as best effort.
+     Reference links and definitions stay as escaped text, because `[1]` and a
+     bibliography's `[1]: …` look exactly like them. Anything this misses is escaped,
+     so a miss looks untidy and fetches nothing.
+   - it renders with `unsafe_allow_html=False`, Streamlit's default, never changed.
 
-   A test feeds a hostile `document.md` (remote inline and reference images, a
-   `javascript:` link, an autolink, a reference definition, raw `<img>`, `$5 and $3`,
-   `:red[x]`) and asserts that none survives as markup. U2 checks the real app with the
-   browser's network log. **Fallback:** if the neutraliser is ever in doubt, the
-   Document view renders `st.text`. It is ugly, but it fetches nothing.
+   Inline code spans lose their formatting, because escaping backticks is what lets
+   everything inside them render as literal text. Streamlit's typography pass still
+   rewrites `->`, `--` and `>=` in the displayed text (U2). That is cosmetic.
+
+   `tests/test_render.py` feeds a hostile `document.md` and asserts that no active
+   character survives unescaped, every bare-link pattern is broken and no remote image
+   becomes an `Image`. It also pins containment, fences and escape pairs, and it was
+   mutation-checked. U2 ran the real app against the browser's network log: no request.
+   **Fallback:** if the neutraliser is ever in doubt, the Document view renders
+   `st.text`. It is ugly, but it fetches nothing.
 
 3. **Every other string from the output tree is shown as text, never as markup.** Model
    text reaches more than `document.md`. `run.json`'s warnings quote model-written chart
@@ -2468,7 +2569,13 @@ localhost.
    or dataframe cells, or through `render.py`'s neutraliser. It is never a label, an
    alert body, a pill option, a caption, a toast or a metric label. The notice slot's
    messages are our own fixed strings, with any tree-derived part shown beneath them as
-   `st.text`. The hostile-input test covers `run.json` warnings, `kvp.json` errors, chunk
+   `st.text`.
+
+   **Nothing from the tree goes in the query string or the page title (U2).** The app
+   posts both to its parent frame with target `"*"`, so any page that frames the UI
+   reads them (`SET_QUERY_PARAM`, `SET_PAGE_TITLE`). `?view=` takes only the six fixed
+   view names. A selected PDF or run is never a query parameter, and the page title is a
+   fixed string. The hostile-input test covers `run.json` warnings, `kvp.json` errors, chunk
    headings and a file name.
 
    **A pre-existing gap this exposes:** §3.13 rule 5 says no document content goes into
@@ -2507,14 +2614,24 @@ is unsupported, and the localhost-origin residual risk (rule 1).
   prototypes and depends on the extra.
 - **`gdi ui`** checks that Streamlit imports, and if not, prints the install command and
   exits 1 (no traceback). Otherwise it starts Streamlit **in its own process** through
-  `streamlit.web.bootstrap` with §18.4 rule 1's flags (U1 confirms the API applies them
-  as flags do), so there is no `gdi` → `streamlit` → script chain of three processes to
-  forward signals through. It does not check the models directory, because browsing
+  `streamlit.web.bootstrap` with §18.4 rule 1's flags, so there is no `gdi` →
+  `streamlit` → script chain of three processes to forward signals through. **U1:**
+  `bootstrap.run` alone applies no flag and never reads the script's
+  `.streamlit/config.toml`. Called that way, it served on a hostile `0.0.0.0` with XSRF
+  off. The launcher therefore does what `streamlit run`'s `_main_run` does:
+  1. set `config._main_script_path` to `app.py`;
+  2. call `bootstrap.load_config_options(flags)`;
+  3. replace `net_util.get_external_ip` (§18.4 rule 1);
+  4. call `bootstrap.run(app, False, [], flags)`.
+
+  Steps 1 and 3 touch private names, so a test pins both. It does not check the models directory, because browsing
   needs no model, and `gdi convert` already refuses an unready one with a message the UI
   shows.
 - **Code** under `src/granite_document_intelligence/ui/`:
   - `app.py` is the Streamlit script, layout only, and the only module that imports
-    Streamlit.
+    Streamlit at top level.
+  - `launch.py` is `gdi ui`'s launcher (§18.4 rule 1, U1). It imports Streamlit inside
+    `run`, so the CLI imports it only for `gdi ui`.
   - `reader.py` holds the §3.5 reader and the run listing.
   - `runner.py` holds the subprocess, the run folders and the events parser.
   - `render.py` holds the neutraliser of §18.4 rule 2.
@@ -2546,6 +2663,12 @@ is unsupported, and the localhost-origin residual risk (rule 1).
     the Stop hook skips. The security tests stay in the Stop-hook gate, because they are
     plain Python and cheap: the renderer, the hostile inputs, the launcher's flags and
     the no-Streamlit check. A layout regression caught by CI minutes later costs little.
+    **PR 12 measured it and applied the split.** With every UI test in, the gate took
+    15.3–15.8 s. So the layout and view tests carry the `apptest` marker. The Stop
+    hook runs `GATE_SCOPE=hook scripts/gate.sh`, which adds `-m 'not apptest'` and
+    keeps its own memo, and takes 13.5–14.0 s. CI ignores the scope and runs all of
+    it. The hostile-tree test runs one `AppTest` session through all six views and
+    stays in both.
 - **"Works without Streamlit" is tested, not assumed.** `default-groups` includes `ui`,
   so the gate always has Streamlit installed. A test runs `cli.main(["convert", …])`
   against stubs in a subprocess with `streamlit` blocked from import
@@ -2585,7 +2708,8 @@ before push, and plan amendments in the PR that finds them.
 | PR | State |
 |---|---|
 | 10 | merged 2026-10-30 (#14, `a350956`); §18 approved by the user |
-| 11 | #15: the swap guard (`export.is_ours`, `ForeignFolderError`), 21 tests, §3.12 rule 1 amended; gate 12.5 s; releases 1.0.1 on merge |
+| 11 | merged 2026-10-30 (#15, `5fe06e1`); CI published `v1.0.1` |
+| 12 | on `feat/ui-viewer`: U1–U4 approved; the viewer built (`gdi ui`, `launch`, `reader`, `render`, six views); the chart-warning prefix and row positions (§18.4 rule 3); three categorical slots moved one Carbon step (§14, with the user); §15's widths re-measured on GAO-07-631 (overflow 0 at all six widths, both themes); hostile tree fetches nothing; the Stop hook skips `apptest` (13.5–14.0 s) |
 
 **Why the viewer comes before `--events`:** the viewer needs no conversion and carries
 U1 and U2, the riskiest unknowns. Building it first means the security model is settled

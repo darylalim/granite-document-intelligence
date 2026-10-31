@@ -4,7 +4,8 @@
 resume, expansion and failure handling live in the library (§7), so a UI gets
 the same behaviour. Exit status: 0 when every PDF was converted or skipped, 1
 when any failed or the run could not start (models not ready, another run
-holding the lock under `--no-wait`), 2 for a usage error, 130 on Ctrl-C.
+holding the lock under `--no-wait`), 2 for a usage error, 130 on Ctrl-C. `gdi ui`
+serves the viewer (plan §18) and exits 1 when Streamlit is not installed.
 """
 
 from __future__ import annotations
@@ -145,6 +146,27 @@ def _parser() -> argparse.ArgumentParser:
         help="afterwards, delete the 8 GB bf16 source from the Hugging Face cache "
         "(only once the 8-bit model has loaded)",
     )
+
+    ui = commands.add_parser(
+        "ui",
+        help="browse converted results in a local web UI (needs the ui extra)",
+        description=(
+            "Serve the UI on this Mac only (127.0.0.1) and open it in the browser. "
+            "Ctrl-C stops it."
+        ),
+    )
+    ui.add_argument(
+        "--port",
+        type=_positive,
+        default=8501,
+        help="port to serve on (default 8501); a port in use is an error, not moved",
+    )
+    ui.add_argument(
+        "--no-browser",
+        dest="browser",
+        action="store_false",
+        help="print the URL without opening a browser",
+    )
     return parser
 
 
@@ -208,6 +230,25 @@ def _convert(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     return 1 if any(item.status == "failed" for item in items) else 0
 
 
+UI_MISSING = (
+    "gdi ui: Streamlit is not installed. Install the ui extra: "
+    "pip install 'granite-document-intelligence[ui]' (or `uv sync --extra ui` in a "
+    "checkout)."
+)
+
+
+def _ui(args: argparse.Namespace) -> int:
+    try:
+        import streamlit  # noqa: F401 — only to tell a missing extra apart (§18.5)
+    except ImportError:
+        print(UI_MISSING, file=sys.stderr)
+        return 1
+    from granite_document_intelligence.ui import launch
+
+    launch.run(args.port, open_browser=args.browser)
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
@@ -217,6 +258,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     load_dotenv()
     if args.command == "convert":
         return _convert(args, parser)
+    if args.command == "ui":
+        return _ui(args)
     if args.command == "convert-model":
         from granite_document_intelligence.models import convert_model
 

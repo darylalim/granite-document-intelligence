@@ -2024,3 +2024,431 @@ byte-identical output. Nothing in Phase A changed since then.
 page alike: page 24's similarity is 0.32 invented and 0.02 lost. §17's per-page
 similarity warning would see both as "below 0.75". Telling them apart still needs
 the cap flag that only the lost page carries.
+
+# v1.x spikes — the UI (§18.6)
+
+Run in PR 12 (`feat/ui-viewer`), before its code. As for Phase 0, the scripts live in the
+session scratchpad, never in the repo.
+
+| Spike | Verdict | Amends the plan |
+|---|---|---|
+| U1 | **Pass, with four keys added and one launcher fix.** The table's ten flags win over a hostile global and working-directory config, under `streamlit run` and under `bootstrap`; the packaged theme applies from any working directory; `Host: evil.example` is refused before any lookup. But a hostile `server.corsAllowedOrigins` admitted an `evil.example` WebSocket, `bootstrap.run` alone applies no flag at all, and any foreign-origin knock fetched `checkip.amazonaws.com` | yes: four keys join §18.4 rule 1; the launcher loads config itself and disables Streamlit's external-IP lookup (with the user); the HTTP routes' missing Host check is a stated residual (§18.4, §18.5) |
+| U2 | **Pass, with a different neutraliser.** Unneutralised, eight Markdown image forms fetched from the PDF author's host; raw HTML and KaTeX fetched nothing. With `render.py` on, the hostile document made no request and rendered no image, link, LaTeX or icon, and GAO-07-631's real document made no request beyond the app. A backslash cannot stop GFM's bare links or Streamlit's `:streamlit:`/`:material/…:` swaps; a U+2060 joiner does. Crops render at the card width or narrower with `width="content"`. A framing page can drive the app only from an allowed origin, but it can always frame it and read what the app posts | yes: rule 2 rewritten as fail-closed escaping (§18.4); only fixed view names in the query string and a fixed page title (rule 3); framing is a stated residual |
+| U3 | **Pass, with two runner amendments.** A real SIGINT mid-load, mid-page, mid-chart and mid-KVP gave exit 130 and a free lock every time (0.07–4.4 s after the signal), with no process left over, no `.partial`, and the previous tree untouched. The child survives reruns, a closed tab and Ctrl-C in the server's terminal (`start_new_session` is load-bearing: the control without it was interrupted). Per run, the interpreter and CLI import cost 0.05 s and the heavy imports ~4.5 s. But a finished child sits as a zombie that `kill(pid, 0)` reports alive, and only the server that started it can read its exit status | yes: the runner keeps every `Popen` in a process-wide registry and polls it; liveness comes from the events file, the registry and the recorded start time, never from the pid alone; cancel is `killpg(SIGINT)`; the start cost is recorded (§18.2) |
+| U4 | **Pass: no paging needed.** Beside a conversion at its chart-stage peak (MLX 6.15 GiB), the server held 0.12 GiB idle, 0.14 GiB with all of GAO-07-631's views rendered, and 0.50 GiB holding a 200 MB upload. There was no swap and no slowdown (median chart time 9.79 s alone, 9.77–10.03 s with the UI). Found on the way: the browser's upload limit counts decimal MB | yes: the Charts and Chunks views stay unpaged; the upload limit's units and a held upload's 2× cost recorded (§18.3, §18.4) |
+
+## U1 — config and socket (2026-10-30)
+
+**Question** (§18.6). On an installed wheel: does `ui/.streamlit/config.toml` apply the
+theme from any working directory? Does every §18.4 rule 1 flag beat a hostile
+`~/.streamlit/config.toml` that sets its opposite? Is a WebSocket with
+`Host: evil.example` refused before any external-IP lookup? Does
+`streamlit.web.bootstrap` take the flags as `streamlit run` does? **Decision rule:** if
+a flag does not win, `gdi ui` refuses to start while that key is set elsewhere.
+
+**Environment.** Streamlit **1.66.1** (the version §18 was checked against, and the
+locked one), websockets 16.1.1, Python 3.12, macOS 27.0, M2 Pro. 1.66 serves on
+**Starlette/uvicorn**, not Tornado; every check below was re-read against the Starlette
+code (`web/server/starlette/starlette_websocket.py`, `server_util.py`).
+
+**Method.**
+- A wheel built with `uv build` from this branch plus a stub `ui/app.py`, the theme as
+  `ui/.streamlit/config.toml` (§14's file minus its `[server]`, `[client]` and
+  `[browser]` sections, which the launcher now owns) and the six fonts from `v0.6.0`.
+  It was installed with `--no-deps` into a fresh venv beside Streamlit 1.66.1.
+  `unzip -l` shows `ui/.streamlit/config.toml` in the wheel: `uv_build` ships
+  dot-directories.
+- `HOME` pointed at a scratch folder whose `~/.streamlit/config.toml` set every row's
+  opposite: `address = "0.0.0.0"`, `allowedHosts = ["*"]`, XSRF and CORS off,
+  `headless = false`, `fileWatcherType = "auto"`, static serving off,
+  `maxUploadSize = 1`, usage stats on, `serverAddress = "evil.example"`, a red
+  `primaryColor` and Comic Sans. It also set four keys the table lacked (below), and
+  `global.developmentMode = true`. The working directory held a second hostile config
+  (green `primaryColor`), and the run was repeated from `/`.
+- A launcher started the installed app three ways: `bootstrap.run` alone;
+  `config._main_script_path` + `bootstrap.load_config_options(flags)` +
+  `bootstrap.run`, which is what `streamlit run`'s `_main_run` does; and
+  `streamlit.web.cli.main(["run", …])` itself. It replaced
+  `net_util._make_blocking_http_get` and `get_internal_ip` with loggers, so every
+  lookup Streamlit attempted was recorded and none left the Mac.
+- A probe read the resolved options and each one's `where_defined`, the listening
+  socket (`lsof`), WebSocket handshakes with chosen `Host`/`Origin` pairs (a socket
+  opened to 127.0.0.1, with the URL carrying the Host), `/_stcore/host-config` with a
+  foreign `Origin`, an upload `PUT` with no XSRF token, a font under `app/static/`, and
+  the options the app script saw inside a real session (a `rerun_script` `BackMsg`).
+
+**Results.**
+
+| Check | `bootstrap.run` alone | table's 10 flags | + 4 keys + external-IP fix (shipped) |
+|---|---|---|---|
+| every table row from the flag | **none**: all ten from the hostile file | yes | yes |
+| listening socket | **0.0.0.0:8766** (the hostile port) | 127.0.0.1 | 127.0.0.1 |
+| theme | **hostile global** (`#ff0000`): the script's config is never read | packaged, from `/` and from the hostile directory | packaged |
+| WS `Host: evil.example` | — | 403, no lookup | 403, no lookup |
+| WS `Origin: http://evil.example`, Host localhost | — | **accepted** (hostile `corsAllowedOrigins`), after a `checkip` fetch | 403, **no fetch** |
+| WS `Origin: https://x.streamlit.app` | — | 403, after a `checkip` fetch | 403, no fetch |
+| WS `Origin: http://localhost:3000` | — | accepted (the stated residual) | accepted (the stated residual) |
+| `/_stcore/host-config` | — | ACAO `http://evil.example`, `allowedOrigins` `[evil.example]` | no ACAO, `["http://localhost"]` |
+| upload with no XSRF token | — | 403 | 403 |
+| HTTP `GET /` with `Host: evil.example` | — | 200 | 200 (residual, below) |
+| `app/static/fonts/…woff2` | — | 200 | 200 |
+
+`streamlit run` (through `cli.main`) and the `load_config_options` + `bootstrap.run` pair
+gave identical results in every row. With `global.developmentMode = true` left to the
+hostile file, neither started: 1.66.1 raises `server.port does not work when
+global.developmentMode is true` once any port is set. That fails closed, but only
+because a port was set.
+
+**Findings.**
+
+1. **`bootstrap.run` does not apply flags.** It uses `flag_options` only to re-apply
+   them when a config file changes. The flags reach the config only through
+   `bootstrap.load_config_options`. The script-level `.streamlit/config.toml` is found
+   only when `config._main_script_path` is set first. That is a private, module-level
+   name that `streamlit run` sets with a comment that it is "a bit suboptimal". Called
+   alone, `bootstrap.run` served on the hostile `0.0.0.0` with XSRF off and
+   `headless = false`, and printed `http://evil.example:8766` as the URL.
+2. **The table lacked four keys that a user config can weaken:**
+   - `server.corsAllowedOrigins` is the one that matters. A config's
+     `["http://evil.example"]` let a page on that origin open the WebSocket. That is
+     cross-site WebSocket hijacking from an ordinary web page, through a file the user
+     might have written for another project. A flag cannot force the list empty: 1.66.1
+     drops an empty-tuple flag value as "not given". So it is forced to
+     `["http://localhost"]`, which adds nothing, because localhost is always allowed.
+   - `client.allowedOrigins` lists the parent-frame origins whose `postMessage` can
+     drive the app (rerun, stop, set auth tokens). Its **default** admits
+     `https://*.streamlit.app`, which anyone can deploy to, and Streamlit sends no
+     `frame-ancestors` or `X-Frame-Options`. Forced to `["http://localhost"]`, inside
+     the localhost residual. U2 checks a framed app in the real browser.
+   - `server.xsrfCookieSameSite`: a config's `"none"` weakens the XSRF cookie. Forced to
+     `"lax"`, Streamlit's default.
+   - `global.developmentMode`: it sends `Access-Control-Allow-Origin: *`, adds
+     `http://localhost` to the message origins and logs at debug. Forced `false`.
+3. **The external-IP lookup happens before the origin is refused.**
+   `is_url_from_allowed_origins` tries localhost, the manual server address, the
+   internal IP and then **`net_util.get_external_ip()`**, which fetches
+   `checkip.amazonaws.com` (http, then https, 1 s each), before it consults
+   `corsAllowedOrigins`. So any web page the user visits that knocks with a foreign
+   `Origin` and an allowed `Host` makes a request §3.10 does not allow. A `Host`
+   refusal comes first and fetches nothing, so DNS rebinding alone does not trigger
+   it. Nothing fetches at start, because `server.address` is set manually.
+   **Decided with the user (2026-10-30): the launcher disables the lookup.** It
+   replaces `streamlit.net_util.get_external_ip` with a function returning `None`.
+   Re-run with that fix, both knocks are refused with no fetch. `get_internal_ip` still
+   runs: a UDP `connect` to 8.8.8.8, which sends no packet.
+4. **`allowedHosts` guards only the WebSocket.** The HTTP routes accept any `Host`, so a
+   DNS-rebound page can read what plain GETs return:
+   - the generic app shell;
+   - `/_stcore/host-config`;
+   - the fonts;
+   - a media file whose URL it already knows. Media URLs are content hashes, so it
+     cannot guess them.
+
+   The control channel (WebSocket) and uploads (XSRF) are guarded. This is a stated
+   residual, like the localhost origin.
+
+**Verdict: pass, with amendments.** Every flag wins once it is applied the way
+`streamlit run` applies it, so the decision rule's refusal is not needed. The amendments
+are: four keys join §18.4 rule 1; the launcher sets `config._main_script_path` and calls
+`load_config_options` before `bootstrap.run`; the external-IP lookup is disabled; and the
+HTTP routes' Host gap is a stated residual. Tests pin the private names the launcher
+touches (`config._main_script_path`, `net_util.get_external_ip`), so a Streamlit minor
+that renames one fails the gate instead of silently undoing the fix.
+
+## U2 — rendering (2026-10-30)
+
+**Question** (§18.6). With the neutraliser off, which constructs make `st.markdown`
+(HTML off) issue a request? With it on, does the hostile `document.md` make any request
+in the browser's network log? Do `st.image` crops render at the card width? **Decision
+rule:** §18.4 rule 2 as specified, or the plain-text fallback.
+
+**Environment.** U1's venv and launcher, run with the shipped flags (the four added keys
+and the external-IP fix) and a clean config. Google Chrome headless (`--headless=new`) on
+a fresh profile, driven over CDP. Every request was recorded from
+`Network.requestWillBeSent`, out-of-process frames included. `--host-resolver-rules`
+mapped `evil.example` and `frame.test` to a local logger on port 8799 and sent every
+other host to `NOTFOUND`, so nothing left the Mac. Each request to the logger was
+recorded server-side as well.
+
+**Hostile document.** Every construct carries its own path under
+`http://evil.example/u2/`, so each request names its source. The constructs:
+- images: inline, titled, reference, protocol-relative, relative, `data:`, inside a
+  link, in a table cell, in a footnote, in a heading;
+- links: inline, `javascript:`, angle-bracket autolink, bare URL, reference link;
+- raw HTML: `img`, `srcset`, `a`, `link`, `style @import`, `iframe`, `video poster`,
+  `audio`, `object`, `embed`, `svg image`, inline `style`;
+- KaTeX: `\href`, `\url`, `\includegraphics`, a block, and `\[ \]` and `\( \)`
+  delimiters;
+- text: `$5 and $3`, `:red[…]`, `:material/home:`, `:smile:`, `:streamlit:`, an email
+  address, `www.`, a fenced block and a code span.
+
+**(a) Neutraliser off** (`st.markdown(document_md)`):
+
+| Construct | Request | In the page |
+|---|---|---|
+| Markdown images: inline, titled, reference, protocol-relative, in a link, in a table, in a footnote, in a heading | **8 to evil.example**, each confirmed by the logger (`404 from 127.0.0.1:8799`) | `<img>` |
+| relative image | 1 to the app (`/app/static/u2-relative.png`) | `<img>` |
+| `data:` image | none | `<img>` |
+| raw HTML, all 12 forms | none | escaped text |
+| KaTeX `\href`, `\url`, `\includegraphics` | none (KaTeX `trust` is off) | rendered LaTeX |
+| `$5 and $3` | none | **LaTeX** |
+| links: inline, autolink, bare, reference | none until clicked | `<a href>` to evil.example |
+| `javascript:` link | none | `<a href="#">` |
+| `:streamlit:` | none | an inline `data:` SVG `<img>` |
+| `:material/home:` | none (the font is served by the app) | an icon |
+| `:red[…]` | none | coloured text |
+
+**(b) Neutraliser on.** First tried as specified, then as built in `render.py`:
+
+1. **Escaping the active characters is not enough.** Two rounds in the browser showed
+   why. GFM's bare-link pass (`http://`, `www.`, `a@b.c`) and Streamlit's
+   `:streamlit:` and `:material_…:` swaps are regexes over *text nodes*, applied after
+   escapes are resolved (`StreamlitMarkdown.*.js`: `j(e,[[/:streamlit:/g,…]])`). So
+   `http\://`, `www\.` and `\:streamlit\:` still became a link, a link and a logo.
+   An invisible U+2060 WORD JOINER defeats each pattern, because each needs
+   adjacency. It goes after a colon that touches the next character, before `@`, and
+   between `www` and its dot. A colon followed by a space (`Note: x`) gets none, so
+   copied prose stays clean.
+2. **The final run** fed the hostile document through `render.segments` with the
+   output-folder cases appended: a contained chart, a symlink out of the folder, a `../`
+   target, an absolute target, bracket and paren math, an email, `www.`, a fenced block
+   and a code span. Results:
+   - **no request** beyond the app, and the logger saw nothing;
+   - no `<img>` in any Markdown container, and no link beyond Streamlit's own heading
+     anchors;
+   - no KaTeX element and no Material icon;
+   - every construct visible as literal text (`$5 and $3`, `:red[red text]`,
+     `:streamlit:`, `<img src=…`, the bare URL, the email, `[js](javascript:alert(1))`);
+   - the contained chart through `st.image`;
+   - the symlink, `../` and absolute targets reduced to their alt text;
+   - the fenced block in `st.code`.
+3. **GAO-07-631's real `document.md`** from the release eval run gave no request beyond
+   the app, 15 pictures through `st.image` at their natural widths, no KaTeX (the report
+   has 43 dollar signs), no link and page overflow 0 at 1280 px. The cost is that the
+   report's own `http://www.gao.gov` and `mailto:` addresses show as text, not links,
+   as rule 2 asks.
+
+**(c) Crops at the card width.** Four GAO-07-631 crops (173–538 px wide) went into
+§15's `st.container(border=True, width=344)` cards, at 1280 and 390 px:
+- `width="content"`, the default: crops wider than the card shrink to its **314 px**
+  content width, and narrower ones keep their natural width (173 px). No crop is
+  enlarged.
+- `width="stretch"`: every crop is 314 px, which enlarges chart-007 from 173 px by 1.8×.
+
+Page overflow was 0 in every case. **`content` it is.**
+
+**(d) A framing page** (U1's `client.allowedOrigins`). A page on `http://frame.test`
+framed the app and, after 7 s, posted
+`{stCommVersion: 1, type: "UPDATE_FROM_QUERY_PARAMS", queryParams: "?…&pwned=1"}`.
+- **Positive control**, with that origin allowed: the app reran with `pwned=1` in
+  `st.query_params`. An allowed parent can steer the app's query string, and so `?view=`.
+- **Shipped flags** (`http://localhost`): ignored. U1's added key is load-bearing.
+- **In both runs**, Streamlit framed without objection (it sends no `frame-ancestors`
+  or `X-Frame-Options`), and the app posted to its parent with target `"*"`:
+  `SCRIPT_RUN_STATE_CHANGED`, `SET_THEME_CONFIG`, `GUEST_READY`, `WEBSOCKET_CONNECTED`
+  and `SET_PAGE_FAVICON`. The bundle also sends `SET_QUERY_PARAM`, `SET_PAGE_TITLE`,
+  `SET_APP_PAGES` and `CLIENT_ERROR` that way. So any page the user visits can frame
+  the UI, learn when it runs, read its query string and page title, and invite clicks
+  on it (clickjacking). It cannot type into it or drive it.
+
+**Also seen.** Streamlit's typography pass rewrites text nodes: `->` → `→`, `--` → `—`,
+`>=` → `≥`. So the Document view can differ from `document.md` in those pairs. It is
+cosmetic and not a security issue, and recorded so nobody reads it as a conversion bug.
+
+**Verdict: pass, with rule 2 rewritten.** The neutraliser is fail-closed:
+- every character that can start an image, a link, a directive, an emoji or LaTeX is
+  escaped;
+- every bare-link and shortcode pattern is broken with the joiner;
+- best-effort replacement turns inline links and autolinks into their text first;
+- contained inline images go to `st.image`, and fenced blocks go to `st.code`.
+
+Inline code spans are flattened to text, because escaping their backticks is what makes
+the rest safe. The plain-text fallback is not needed. Rule 3 gains two consequences of
+(d): only fixed view names go in the query string, and the page title is fixed. Framing
+is a stated residual for `SECURITY.md`. `tests/test_render.py` pins the output, and a
+mutation check of the neutraliser was caught at every point but the URL-scheme guard,
+which is defence in depth (resolving the path already rejects every case it covers).
+
+## U3 — lifecycle (2026-10-30)
+
+**Question** (§18.6). What happens to a child `gdi convert` when its session reruns, its
+tab closes, a second tab opens and the server stops? Does a real SIGINT mid-page,
+mid-chart and mid-KVP give exit 130 and a free lock? What do interpreter start and
+imports cost per run? **Decision:** §18.2's runner. Decided already: a closed tab does
+not stop the child, and reopening the UI finds it through `ui/runs/*/pid` and its events
+file.
+
+**Environment.** This branch at `d3ae319`, the project's `.venv` (docling 2.143.1,
+mlx-vlm 0.7.10, Streamlit 1.66.1), the real models directory, M2 Pro, 16 GB, on AC
+power. Children were started as §18.2 specifies:
+`sys.executable -m granite_document_intelligence.cli convert …`, with
+`start_new_session=True`, stdin from `/dev/null`, and stdout and stderr to files in a
+run folder holding `argv.json` and `pid`. Signals were sent as soon as a stage's own log
+line appeared in `stderr.txt`, plus a short delay.
+
+**(a) SIGINT at each stage** (`sigint.py`). The chart and KVP targets were converted to
+completion first, so each interrupted `--force` run had a good tree to destroy:
+
+| Case | PDF | Signal | Exit | After signal | Lock | Left over | Previous tree |
+|---|---|---|---|---|---|---|---|
+| mid-load | GAO-07-631 | `[1/1]` + 2 s, during imports and model load | **130** | 0.07 s | free | nothing | — (none) |
+| mid-page | GAO-07-631 | `page 3/42` + 1 s | **130** | 0.68 s | free | nothing | — (none) |
+| mid-chart | GAO-08-14 excerpt | `chart 1/1` + 2 s | **130** | 0.89 s | free | nothing | 9 of 9 files byte-identical |
+| mid-KVP | W-9 with its schema | `key-values 1/1` + 2 s | **130** | **4.39 s** | free | nothing | 5 of 5 files byte-identical |
+
+"Left over" counts processes still in the child's group (`ps -g`), which was always
+empty, and new entries in the output root (no `.partial`, no `.old`). The stderr tail
+was `gdi convert: interrupted; finished PDFs are kept` every time. The KVP delay is one
+generation step that cannot be interrupted, most likely the image prefill. The signal is
+handled when it returns. Nothing is written before the pipeline finishes in memory
+(§3.12), so a cancel at any of these stages leaves no residue at all. A `.partial` can
+only come from a crash during the final write itself, which these runs did not hit;
+startup recovery of that residue is covered by `test_export.py`.
+
+**(b) Start cost per run.** Fresh processes, four runs each, warm disk cache. The first
+run was 5.13 s; the table gives the median of the other three:
+
+| Step | Seconds |
+|---|---|
+| interpreter (`python -c pass`) | 0.02 |
+| `import granite_document_intelligence.cli` | 0.04–0.05 |
+| plus Docling's converter and VLM pipeline, mlx-vlm, the chunker, transformers and torch | **4.46** |
+
+An in-process server would pay the 4.5 s once, at its first conversion. The child pays
+it once per run, not per PDF. Model loading is per PDF in both designs (§3.1), so this
+is the whole difference. It is most of §3.11's 7.13 s cold start.
+
+**(c) The lifecycle in the browser** (`drive.py`, `app.py`). The spike app started a
+child from a query parameter and listed the run folders, checking each pid with
+`os.kill(pid, 0)` and `ps`. The server ran in its own process group, so
+`killpg(server, SIGINT)` reproduced Ctrl-C in its terminal. Chrome was driven over CDP.
+
+- **Control, with no `start_new_session`.** The child shares the server's group, and
+  Ctrl-C to the server interrupted the child too (`interrupted; finished PDFs are
+  kept`).
+- **Shipped**, with the 15-page scan as the long child:
+
+  | Step | Child |
+  |---|---|
+  | 3 reruns of tab 1 | running (`Rs`, its own group) |
+  | tab 1 closed, 10 s later | running |
+  | tab 2 opened | listed from its `pid` file |
+  | child finished, server still up | **`Z`, a zombie** |
+  | tab 2 rerun | **`kill(pid, 0)` succeeded**, then `ps` found nothing |
+  | a short child started from tab 2, then Ctrl-C to the server's group | survived, reparented to PID 1, finished |
+
+  Both conversions wrote `run.json` with status `ok`, and the lock was free at the end.
+
+**Findings.**
+
+1. **`start_new_session` is load-bearing.** Without it, Ctrl-C in the server's terminal
+   cancels the conversion.
+2. **A finished child is a zombie until someone waits on it, and a zombie answers
+   `kill(pid, 0)`.** The `Popen` was dropped at the end of the script run that made it.
+   Python reaps dropped children only when the *next* `Popen` is created, so the
+   zombie went only because the app ran `ps` (`subprocess._cleanup`). That made the
+   app report a finished run as alive. Once reaped, the pid is free for reuse by any
+   process, so `kill(pid, 0)` can also answer for a stranger.
+3. **Only the process that started a child gets its exit status.** §18.2 infers a
+   crash from "a `pdf` event with no `result` and a negative return code". After a
+   server restart the child belongs to PID 1, and its return code is gone.
+4. **Cancel needs nothing beyond SIGINT.** The child spawned no processes of its own,
+   so `os.kill(pid, …)` reaches all the work. `killpg` is equivalent today and keeps
+   Ctrl-C's semantics if that changes.
+5. **The child's stderr carries library noise:** torch's "Redirects are currently not
+   supported in MacOs", a `use_fast` notice, `Loading weights` progress bars and
+   docling-core's bbox-clamp `UserWarning`s. The Run view shows `stderr.txt` as text
+   (rule 3), so this noise is safe but cluttered. The events file is the channel the UI
+   reads.
+
+**Verdict: pass, with §18.2 amended.**
+- The runner keeps every `Popen` it starts in a process-wide registry (one per server,
+  e.g. `st.cache_resource`), polls it on each rerun to reap finished children and keep
+  their return codes, and records each child's start time beside its `pid`.
+- A run counts as finished when its events file holds `summary` or `interrupted`, or the
+  registry holds its return code. It counts as running only if the pid exists, is not a
+  zombie and has the recorded start time.
+- Anything else is "ended without a summary": crashed, killed, or orphaned by a server
+  restart, with the return code unknown.
+- Cancel is `os.killpg(pid, SIGINT)`.
+- The 4.5 s per-run import cost is recorded and accepted, with the reasons §18.2 already
+  gives.
+
+## U4 — memory (2026-10-30)
+
+**Question** (§18.6). Server RSS idle, while showing GAO-07-631's results (9 charts, its
+tables, its chunks) and while holding a 200 MB upload, each beside a conversion's
+6.68 GB peak. **Decision:** whether the Mac stays inside §3.11's 10 GB ceiling with the
+UI open, and whether the Charts and Chunks views need paging.
+
+**Environment.** U1–U3's launcher (shipped flags) on the project's `.venv`, Streamlit
+1.66.1, the real models, M2 Pro, 16 GB, on AC power. My own session and your desktop apps
+(Chrome, the Claude app) were open but idle, about 7 GiB in use before each run. Each
+scenario ran one conversion of the 15-page `gao-07-631-scan.pdf` (`--force`; 9 charts
+found), started the way §18.2's runner starts it. `sample.py` recorded, every 0.5 s:
+- `psutil` RSS of the server, of the child, and of the headless Chrome's process tree
+  (Chrome's processes share memory, so that sum overstates);
+- system available memory and swap use;
+- `vm_stat` swapouts.
+
+The MLX peaks come from each run's `run.json` (`peak_memory_bytes`).
+
+**Scenarios.**
+- **ref:** no server, no browser.
+- **idle:** the UI open on an empty page.
+- **results:** one page holding everything the viewer will show for GAO-07-631 at once:
+  - `document.md` through `render.py`, with 15 pictures in `st.image`;
+  - 3 tables as dataframes;
+  - 9 chart cards, each with its crop, CSV dataframe and summary;
+  - 56 chunks as a dataframe;
+  - `kvp.json` in `st.json`.
+
+  The conversion started 10 s after the page finished rendering.
+- **upload:** `st.file_uploader` holding one upload of 199,999,999 bytes (below).
+
+**Results** (GiB; RSS peaks over the whole run; Chrome is the headless instance only):
+
+| | ref | idle | results | upload |
+|---|---|---|---|---|
+| server RSS before the conversion | — | 0.12 | 0.14 | **0.50** |
+| server RSS peak during it | — | 0.12 | 0.14 | 0.50 |
+| Chrome RSS peak (shared memory counted in each process) | — | 1.54 | 1.63 | 1.40 |
+| child RSS peak | 4.17 | 3.99 | 4.06 | 3.74 |
+| MLX peak, Phase A / charts (`run.json`) | 1.50 / 6.15 | 1.50 / 6.15 | 1.50 / 6.15 | 1.50 / 6.15 |
+| available before → minimum | 9.25 → 2.08 | 9.23 → 1.99 | 9.18 → 1.86 | 8.16 → 1.68 |
+| swap growth, swapouts | 0, 0 | 0, 0 | 0, 0 | 0, 0 |
+| chart time, median of 9 (s) | 9.79 | 9.79 | 9.86 | 10.03 |
+| Phase A, s/page | 7.53 | 7.68 | 7.58 | 7.62 |
+| total (s) | 235.5 | 236.2 | 239.1 | 236.7 |
+
+The MLX chart peak of 6.15 GiB is §3.11's 6.68 GB in binary units. Child RSS is below
+the MLX peak because macOS RSS does not count all of a process's Metal allocations, so
+the MLX figure is the one the ceiling applies to.
+
+**Findings.**
+
+1. **The server's share is small.** Rendering every GAO-07-631 view at once added
+   20 MB. Streamlit sends the images to the browser and keeps references, not pixels.
+   The Charts and Chunks views need **no paging** for a report of this size, and
+   §15's lazy views keep the unselected ones unrendered anyway. Chunks stay "paged
+   rather than all at once" (§18.3) for corpora far larger than 56 chunks, but U4 does
+   not require it.
+2. **A held upload costs about twice its size** (+0.38 GiB for 200 MB; Streamlit's
+   `MemoryUploadedFileManager`). §18.3 already writes uploads to disk and clears the
+   uploader before starting. U4 shows that is worth doing, not that it is urgent.
+3. **The conversion did not notice the UI.** There was no swap in any run, and chart and
+   page times stayed within 2.5% of the reference. The worst minimum available was
+   1.68 GiB, with the user's desktop apps open.
+4. **The browser's upload limit counts decimal megabytes.** The first upload run used
+   199 MiB (208,666,624 bytes) and never left the browser. Bisected with single
+   uploads: 199,999,999 bytes uploaded (`204`), and 200,000,001 bytes was refused in the
+   page with "File must be 200.0MB or smaller." Streamlit's server enforces
+   `maxUploadSize × 1024²`, as `safety.max_file_mb` does. So uploads stop about 9.7 MB
+   short of the pipeline's limit. The upload run above is the re-run at
+   199,999,999 bytes.
+
+**Verdict: pass.** With the UI open, idle, showing a full report, or holding a maximum
+upload, the conversion keeps its 6.15 GiB MLX peak. The server adds at most 0.5 GiB,
+nothing swaps and nothing slows. The ceiling is not at risk, and no view needs paging
+for U4's reasons. The upload limit's units and the upload's 2× cost are recorded in
+§18.3 and §18.4's table.

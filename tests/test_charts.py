@@ -200,7 +200,41 @@ class TestRun:
         _, result = self._run(blank_pdf, vision)
         assert any("chart-001" in w and "comma-split" in w for w in result.warnings)
 
-    def test_charts_are_numbered_in_document_order(self, blank_pdf: Path) -> None:
+    @pytest.mark.parametrize(
+        ("responses", "docling_crop", "fragment"),
+        [
+            pytest.param({}, True, "used Docling's crop", id="docling-crop"),
+            pytest.param({charts.CSV_PROMPT: ""}, False, "no table", id="no-table"),
+            pytest.param(
+                {charts.CSV_PROMPT: "a,b\nx, y,1\n"},
+                False,
+                "comma-split",
+                id="repaired",
+            ),
+            pytest.param(
+                {charts.SUMMARY_PROMPT: "North reached 999."},
+                False,
+                "disagrees with its CSV",
+                id="disagreement",
+            ),
+        ],
+    )
+    def test_every_card_warning_carries_the_prefix(
+        self,
+        blank_pdf: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        responses: dict[str, str],
+        docling_crop: bool,
+        fragment: str,
+    ) -> None:
+        # The UI files a warning on its card by this prefix alone (plan §18.3).
+        if docling_crop:
+            monkeypatch.setattr(charts, "render_crop", lambda *_: None)
+        _, result = self._run(blank_pdf, FakeVision({**GOOD, **responses}))
+        (warning,) = [w for w in result.warnings if fragment in w]
+        match = charts.WARNING_PREFIX.match(warning)
+        assert match and match.groups() == ("chart-001", "1"), warning
+
         _, result = self._run(blank_pdf, FakeVision(GOOD), charts=3)
         assert [c.index for c in result.charts] == [1, 2, 3]
 
@@ -257,12 +291,11 @@ class TestSummaryDisagreements:
             "- **Rail** transport represents **6%**.\n"
             "- **Pipelines** constitute the smallest segment at **4%**."
         )
-        found = charts.summary_disagreements(PIE, summary)
-        assert [entry.split(" ")[0] for entry in found] == [
-            "Maritime",
-            "Motor",
-            "Rail",
-            "Pipelines",
+        assert charts.summary_disagreements(PIE, summary) == [
+            "row 1: summary 60, CSV 30",
+            "row 2: summary 30, CSV 6",
+            "row 3: summary 6, CSV 4",
+            "row 4: summary 4, CSV 60",
         ]
 
     def test_an_agreeing_summary_is_clean(self) -> None:
@@ -276,7 +309,7 @@ class TestSummaryDisagreements:
         rows = [["Group", "Earnings"], ["Women", "$42,110"]]
         assert charts.summary_disagreements(rows, "Women earned $42,110.") == []
         assert charts.summary_disagreements(rows, "Women earned 48,110.") == [
-            "Women 48110 (CSV: 42110)"
+            "row 1: summary 48110, CSV 42110"
         ]
 
     def test_a_disagreement_is_a_warning(self, blank_pdf: Path) -> None:
@@ -284,8 +317,11 @@ class TestSummaryDisagreements:
         doc = build_document()
         result = charts.run(blank_pdf, doc, Path("unused"), vision=vision)  # ty: ignore[invalid-argument-type]
         assert any(
-            "disagrees with its CSV" in w and "North 999" in w for w in result.warnings
+            "disagrees with its CSV" in w and "row 1: summary 999, CSV 120" in w
+            for w in result.warnings
         )
+        # The row's label is document content: run.json never quotes it (§18.4 rule 3).
+        assert not any("North" in w for w in result.warnings)
         # The summary itself is kept as generated.
         assert result.charts[0].summary == "North reached 999."
 

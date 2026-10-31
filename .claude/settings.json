@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PROJECT_DIR:-.}/scripts/gate.sh\""
+            "command": "GATE_SCOPE=hook \"${CLAUDE_PROJECT_DIR:-.}/scripts/gate.sh\""
           }
         ]
       }
