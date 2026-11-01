@@ -47,7 +47,9 @@ def _wait(registry: runner.Registry, run_id: str, timeout: float = 10) -> runner
     while time.monotonic() < deadline:
         registry.poll()
         run = runner.read_run(run_id, registry)
-        if not run.active:
+        # Inactive by its events, and reaped: the stub writes `interrupted`
+        # just before it exits, so the exit code can lag the state.
+        if not run.active and not registry.running(run_id):
             return run
         time.sleep(0.02)
     raise AssertionError(f"run {run_id} still {run.state}")
