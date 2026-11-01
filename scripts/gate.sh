@@ -100,10 +100,13 @@ run_gate() {
 run_gate 'ruff check' uv run ruff check .
 run_gate 'ruff format --check' uv run ruff format --check .
 run_gate 'ty check' uv run ty check
+# Four pytest-xdist workers. The suite waits on subprocesses and imports more than
+# it computes, and in one process it took ~12.4 s of the Stop hook's 15 s budget
+# (plan §3.14 rule 9); four workers took 7.6 s (PR 13b, §18.7).
 if [ "$scope" = hook ]; then
-	run_gate 'pytest' uv run pytest -q -m 'not apptest'
+	run_gate 'pytest' uv run pytest -q -n 4 -m 'not apptest'
 else
-	run_gate 'pytest' uv run pytest -q
+	run_gate 'pytest' uv run pytest -q -n 4
 fi
 
 if [ -n "$failures" ]; then

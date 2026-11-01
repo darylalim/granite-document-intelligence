@@ -1165,6 +1165,18 @@ fastest configuration" — and by quality per second through the eval (§8.1).
    (2026-10-27):** 11.1–11.4 s over three forced runs (334 tests). About 1 s is
    pytest (8.3 → 9.3 s): the run-lock tests start real holder processes and one waits
    out a 0.3 s hold; the rest is linting and type-checking the new modules.
+   **Run in parallel from PR 13b (2026-10-31, with the user).** By PR 13 the Stop-hook
+   gate took 14.2–14.5 s on `main`: `ty` 1.6 s, pytest's start-up and collection 1.1 s,
+   the tests 10.8 s. Of the tests, `test_tooling.py`'s executions of `gate.sh` and
+   `release.sh` were 4.4 s (about 110 subprocesses), and torch's import ~1.5 s, which no
+   marker can remove, since the chunking tests bring it in as well as the Docling ones
+   (measured: deselecting every Docling test saved nothing). So the gate runs pytest
+   on four `pytest-xdist` workers (`-n 4`): the hook gate took 8.8–8.9 s, the full gate
+   9.1 s, and seven parallel runs of the full suite (five at `-n 4`, two at `-n 8`) all
+   passed. Two consequences: **every test must be safe to run beside any other**, in
+   another process and in any order (state in `tmp_path`, not in a shared path), and a
+   session-scoped fixture runs once per worker, so `stub_bin`'s first-run scan is paid
+   four times.
 
 ## 4. Phase 0 — spikes (before any production code)
 
@@ -2693,7 +2705,8 @@ is unsupported, and the localhost-origin residual risk (rule 1).
     hook runs `GATE_SCOPE=hook scripts/gate.sh`, which adds `-m 'not apptest'` and
     keeps its own memo, and takes 13.5–14.0 s. CI ignores the scope and runs all of
     it. The hostile-tree test runs one `AppTest` session through all six views and
-    stays in both.
+    stays in both. Since PR 13b the gate runs pytest on four workers (§3.14 rule 9),
+    and the two scopes took 8.8 s and 9.1 s; the split stays, as headroom for PR 14.
 - **"Works without Streamlit" is tested, not assumed.** `default-groups` includes `ui`,
   so the gate always has Streamlit installed. A test runs `cli.main(["convert", …])`
   against stubs in a subprocess with `streamlit` blocked from import
@@ -2724,6 +2737,7 @@ before push, and plan amendments in the PR that finds them.
 | 11 | `fix/swap-guard` | **a v1.0.0 bug, found in review:** `export.swap_into_place` renames whatever folder sits at the output path to `.old` and deletes it, gdi's or not, and `save_error` goes through the same swap. `gdi convert ~/Downloads/Documents.pdf -o ~` would delete `~/Documents`, and the overlap check (§3.8) compares only jobs within one batch. Fix: refuse to replace an existing folder that holds no gdi `run.json` (and is not empty), recorded as that PDF's failure without touching the folder; a test for the success and the error path; `version = "1.0.1"` + `uv lock` | `fix:` | the reproduction in a test; eval not required (no output changes); released as 1.0.1 |
 | 12 | `feat/ui-viewer` | U1–U4 in the spike report; the `[ui]` extra, `gdi ui`, theme, fonts and theme guard (§14), `reader`, `render`, the warnings prefix contract and the §18.4 rule 3 gap's resolution (§18.3, §18.4), the six views read-only over an existing tree, `AppTest` tests | `feat:` | user approves U1–U4; §15's widths re-measured on GAO-07-631's real output at 768, 1024, 1280, 1440, 1920 and 2560 px with page overflow 0 at each (phones cannot reach a loopback-only app; 768 stands in for a half-screen window); the hostile inputs render nothing remote; gate ≤ 15 s |
 | 13 | `feat/progress-events` | `gdi convert --events PATH` (§18.2) with its schema in the README and a test per event, the unwritable-file test, the sentinel test extended | `feat:` | a hand run on the public corpus with `--events`, its event file in the PR description; README updated in this PR (CLAUDE.md: CLI changes are mirrored there) |
+| 13b | `test/parallel-gate` | **inserted after PR 13** (with the user, 2026-10-31): the gate's pytest on four `pytest-xdist` workers (§3.14 rule 9), because the Stop-hook gate was at 14.2–14.5 s with PR 14's runner tests still to come | `test:` | the hook gate re-measured well under 15 s; the full suite green on repeated parallel runs |
 | 14 | `feat/ui-convert` | inputs (path and uploads), the sidebar settings, `runner` (§18.2): run folders, progress, cancel, lock wait, errors, crash | `feat:` | the equivalence check below on the whole public corpus; cancel mid-page, mid-chart and mid-KVP; U4 re-run on the real app |
 | 15 | `docs/ui` | README (a UI section with both screenshots and `gdi ui`), CLAUDE.md, `SECURITY.md` (§18.4) | `docs:` | every new README command run as written |
 | 16 | `chore/release-1.1.0` | `version = "1.1.0"` + `uv lock`, both files | `chore:` | every §18.8 item checked; eval on the release commit meets baseline and budgets |
@@ -2736,6 +2750,7 @@ before push, and plan amendments in the PR that finds them.
 | 11 | merged 2026-10-30 (#15, `5fe06e1`); CI published `v1.0.1` |
 | 12 | merged 2026-10-30 (#17, `c9dd351`): U1–U4 approved; `gdi ui` and the six read-only views (`launch`, `reader`, `render`); the chart-warning prefix and row positions (§18.4 rule 3); three categorical slots moved one Carbon step (§14, with the user); §15's widths re-measured on GAO-07-631 (overflow 0 at all six widths, both themes); hostile tree fetches nothing; the Stop hook skips `apptest` (13.5–14.0 s), CI runs everything |
 | 13 | merged 2026-10-31 (#18, `53528b7`): `gdi convert --events PATH` (`events.py`); one test per event, the unwritable-file test (a real `EBADF` mid-batch: every PDF converts, one warning) and the sentinel tests extended to the events file (`test_events.py`, `test_safety.py`); README documents the format; §18.2 amended ("As built"). Hand run on the whole public corpus (`HF_HUB_OFFLINE=1`, 2026-10-31): 7/7 done in 674 s, 104 events, 69 `page` events against 69 pages in the `run.json`s and 19 `chart` against 19 crops; an immediate re-run 7/7 skipped in 0.5 s (16 events); the W-9 with its schema one `kvp` event, `kvp.json` valid. Every line `"v": 1`, and no key beyond the schema's. Hook gate 14.5–14.7 s against `main`'s 14.2–14.5 s, interleaved (+0.3 s; `main` itself has drifted up from PR 12's 13.5–14.0 s); the full gate 16.2 s, in CI only |
+| 13b | on `test/parallel-gate`: `pytest-xdist` in the `dev` group, `-n 4` in both gate scopes. Hook gate 8.8–8.9 s (was 14.2–14.5 s), full gate 9.1 s (was 16.2 s); the full suite passed five times at `-n 4` and twice at `-n 8` |
 
 **Why the viewer comes before `--events`:** the viewer needs no conversion and carries
 U1 and U2, the riskiest unknowns. Building it first means the security model is settled

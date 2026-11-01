@@ -134,7 +134,7 @@ exit "$STUB_UV_EXIT"
 
 @pytest.fixture(scope="session")
 def stub_bin(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """The stub executables, written — and so scanned — once per session.
+    """The stub executables, written — and so scanned — once per session (per xdist worker).
 
     macOS scans every *newly created* executable the first time it runs. Measured
     on this machine: 241 ms for a freshly written script against 4 ms to re-run
@@ -728,14 +728,14 @@ class TestHooksConfig:
     def test_the_hook_scope_skips_only_the_apptest_marker(self, tmp_path: Path) -> None:
         self._run_gate(tmp_path, uv_exit=0, extra_env={"GATE_SCOPE": "hook"})
         calls = (tmp_path / "calls.log").read_text().splitlines()
-        assert "uv run pytest -q -m not apptest" in calls
+        assert "uv run pytest -q -n 4 -m not apptest" in calls
 
     def test_ci_runs_everything_whatever_the_scope(self, tmp_path: Path) -> None:
         self._run_gate(
             tmp_path, uv_exit=0, extra_env={"GATE_SCOPE": "hook", "GITHUB_ACTIONS": "1"}
         )
         calls = (tmp_path / "calls.log").read_text().splitlines()
-        assert "uv run pytest -q" in calls
+        assert "uv run pytest -q -n 4" in calls
         assert not any("apptest" in call for call in calls)
 
     def test_a_green_hook_run_does_not_skip_a_full_run(self, tmp_path: Path) -> None:
