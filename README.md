@@ -84,12 +84,48 @@ gdi convert INPUT [INPUT ...] -o OUT_DIR
 | `--max-pages N`, `--max-file-mb MB` | Refuse larger PDFs (defaults 500 pages and 200 MB). |
 | `--quiet` | Print only warnings and the summary. |
 | `--no-wait` | Exit instead of waiting when another `gdi` run is in progress. |
+| `--events PATH` | Also append progress to `PATH` as JSON Lines, for a program to follow (see [Progress events](#progress-events)). |
 
 `gdi convert` exits with **0** when every PDF was converted or skipped, **1** when any PDF failed or the run could not start, **2** on a usage error and **130** on Ctrl-C. A failed PDF records its error in its `run.json`, and the batch continues.
 
 Only one `gdi` run works at a time on a Mac, because two runs would each load the models and push 16 GB into swap. A second run waits for the first to finish. With `--no-wait`, it exits with 1 instead.
 
 **Resume is per PDF.** A batch interrupted by Ctrl-C, a closed lid or a reboot keeps every PDF it finished and redoes the one it was working on, **from its first page**. Page-level resume is not possible through Docling's public API yet.
+
+### Progress events
+
+`--events PATH` appends one JSON object per line to `PATH` as the run goes, for a program that drives `gdi` to follow. The progress on stderr is unchanged. Each line is flushed before the run moves on, so a reader can follow the file while it grows. A batch of one PDF with a chart looks like this:
+
+```text
+{"v": 1, "event": "batch", "total": 1}
+{"v": 1, "event": "pdf", "position": 1, "total": 1, "pdf": "report.pdf", "out_dir": "out/report"}
+{"v": 1, "event": "page", "completed": 1, "total": 2}
+{"v": 1, "event": "page", "completed": 2, "total": 2}
+{"v": 1, "event": "chart", "position": 1, "total": 1, "page_no": 2}
+{"v": 1, "event": "result", "pdf": "report.pdf", "status": "done"}
+{"v": 1, "event": "summary", "done": 1, "skipped": 0, "failed": 0}
+```
+
+| Event | When | Fields |
+|---|---|---|
+| `waiting` | Another `gdi` run holds the lock, and this one waits for it. | `holder_pid`, or `null` when unknown |
+| `batch` | This run holds the lock and starts. | `total`: the number of PDFs |
+| `pdf` | A PDF starts. | `position`, `total`, `pdf`, `out_dir` |
+| `page` | granite-docling finished a page. | `completed`, `total` |
+| `chart` | Granite Vision starts on a chart. | `position`, `total`, `page_no` |
+| `kvp` | Key-value extraction starts on a page. | `position`, `total`, `page_no` |
+| `result` | A PDF finished. | `pdf`, `status`: `done`, `skipped` or `failed` |
+| `error` | The run could not start, or stopped as a whole. | `kind`: `usage` (exit 2), `models` or `locked` (exit 1); `message` |
+| `interrupted` | Ctrl-C (exit 130). | none |
+| `summary` | Every PDF was done, skipped or failed (exit 0 or 1). | `done`, `skipped`, `failed` |
+
+Reading the file:
+- Every line carries `"v": 1`, the format's version. Skip any line you cannot parse or whose `v` you do not know.
+- A run ends with one `summary`, `interrupted` or `error`. A file that ends without one belongs to a run that is still going or that crashed: a crash or a `kill -9` writes nothing. A `pdf` with no `result` after it is the PDF the run was working on.
+- A `failed` result has no message, because an error's text can quote the PDF. The error is in that PDF's `run.json`. The events hold counts and paths, never text from a PDF or a model.
+- The file is appended to, never replaced, so give each run its own path.
+- If the file cannot be written, `gdi` prints one warning and carries on without it. A conversion never fails because of its events.
+- A command line that `gdi` rejects while parsing it, such as an unknown flag or `--max-pages 0`, exits with 2 before the file is opened and writes nothing to it.
 
 ### Output
 

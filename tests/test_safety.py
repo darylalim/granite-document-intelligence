@@ -25,6 +25,7 @@ from granite_document_intelligence import (
     cli,
     convert,
     convert_many,
+    events,
     pipeline,
     runlock,
     safety,
@@ -160,7 +161,8 @@ SENTINEL_LABEL = "Sentinel Chart Label"
 
 
 class TestNoSecretsOrContentInLogs:
-    """§3.13 rule 5: run.json and stderr carry no env value and no page text."""
+    """§3.13 rule 5: run.json, stderr and the events file (§18.2) carry no env
+    value and no page text."""
 
     def test_a_failure_records_neither_the_token_nor_the_document(
         self,
@@ -187,13 +189,21 @@ class TestNoSecretsOrContentInLogs:
 
         monkeypatch.setattr(pipeline, "run", leaky)
         out = tmp_path / "out"
-        assert cli.main(["convert", str(pdf), "-o", str(out)]) == 1
+        events_file = tmp_path / "events.jsonl"
+        argv = ["convert", str(pdf), "-o", str(out), "--events", str(events_file)]
+        assert cli.main(argv) == 1
         stderr = capsys.readouterr().err
         written = "".join(p.read_text() for p in out.rglob("*") if p.is_file())
         assert "model output was unusable" in written
+        progress = events_file.read_text()
+        assert '"status": "failed"' in progress
+        # Not even the exception's own message: str() of an arbitrary
+        # exception can quote the PDF, so the events name no error (§18.2).
+        assert "model output was unusable" not in progress
         for sentinel in (SENTINEL_TOKEN, SENTINEL_TEXT):
             assert sentinel not in written
             assert sentinel not in stderr
+            assert sentinel not in progress
 
     def test_a_chart_warning_quotes_no_label(self, blank_pdf: Path) -> None:
         # A chart's CSV labels are document content as the model read it. The
@@ -209,9 +219,13 @@ class TestNoSecretsOrContentInLogs:
             }
         )
         doc = build_document()
-        result = charts.run(blank_pdf, doc, Path("unused"), vision=vision)  # ty: ignore[invalid-argument-type]
+        events_file = blank_pdf.with_name("events.jsonl")
+        with events.writing(events_file):
+            result = charts.run(blank_pdf, doc, Path("unused"), vision=vision)  # ty: ignore[invalid-argument-type]
         assert any("row 1: summary 999" in w for w in result.warnings)
         assert not any(SENTINEL_LABEL in w for w in result.warnings)
+        assert '"event": "chart"' in events_file.read_text()
+        assert SENTINEL_LABEL not in events_file.read_text()
 
     def test_an_error_record_keeps_only_our_own_frames(self) -> None:
         def foreign() -> None:
@@ -336,12 +350,20 @@ class TestRunLock:
     ) -> None:
         holder = hold_lock(cache, 0.3)
         pdf = write_pdf(tmp_path / "a.pdf", pdf_bytes)
+        events_file = tmp_path / "events.jsonl"
         started = time.monotonic()
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING), events.writing(events_file):
             assert run([pdf], tmp_path / "out") == {"a.pdf": "done"}
         holder.wait()
         assert f"waiting for another gdi run (pid {holder.pid})" in caplog.text
         assert time.monotonic() - started >= 0.2
+        # The `waiting` event (§18.2) comes before the batch starts. Checked
+        # here rather than in test_events.py, to start one holder, not two.
+        lines = events_file.read_text().splitlines()[:2]
+        assert [json.loads(line) for line in lines] == [
+            {"v": 1, "event": "waiting", "holder_pid": holder.pid},
+            {"v": 1, "event": "batch", "total": 1},
+        ]
 
     def test_a_lock_left_by_an_exited_process_does_not_block(
         self, cache: Path, tmp_path: Path, pdf_bytes: bytes, fake: FakePipeline

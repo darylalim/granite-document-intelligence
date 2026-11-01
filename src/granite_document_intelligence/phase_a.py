@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from granite_document_intelligence import config, memory
+from granite_document_intelligence import config, events, memory
 from granite_document_intelligence.api import ConvertOptions, PageStats
 
 if TYPE_CHECKING:
@@ -97,12 +97,14 @@ def _profiled() -> Generator[None]:
 
 
 def _page_progress(event: Any) -> None:
-    """Per-page progress on stderr through the CLI's logging (§7), via Docling's
-    public progress events. It reports counts, never page content."""
+    """Per-page progress on stderr through the CLI's logging (§7), and as a
+    `page` event (§18.2), via Docling's public progress events. It reports
+    counts, never page content."""
     from docling.datamodel.progress import PageCompletedProgress
 
     if isinstance(event, PageCompletedProgress):
         _log.info("  page %d/%d", event.completed_pages, event.total_pages)
+        events.emit("page", completed=event.completed_pages, total=event.total_pages)
 
 
 @dataclass

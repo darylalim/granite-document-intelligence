@@ -15,7 +15,7 @@ import os
 from collections.abc import Generator
 from contextlib import contextmanager
 
-from granite_document_intelligence import config
+from granite_document_intelligence import config, events
 
 LOCK_NAME = "run.lock"
 
@@ -26,10 +26,10 @@ class RunLockedError(RuntimeError):
     """Another run holds the lock and the caller chose not to wait."""
 
 
-def _holder(fd: int) -> str:
+def _holder_pid(fd: int) -> int | None:
     os.lseek(fd, 0, os.SEEK_SET)
     pid = os.read(fd, 32).decode("ascii", "replace").strip()
-    return f"pid {pid}" if pid.isdigit() else "pid unknown"
+    return int(pid) if pid.isdigit() else None
 
 
 @contextmanager
@@ -47,12 +47,14 @@ def run_lock(*, wait: bool = True) -> Generator[None]:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            holder = _holder(fd)
+            pid = _holder_pid(fd)
+            holder = "pid unknown" if pid is None else f"pid {pid}"
             if not wait:
                 raise RunLockedError(
                     f"another gdi run ({holder}) is in progress; not waiting (--no-wait)"
                 ) from None
             _log.warning("waiting for another gdi run (%s) to finish", holder)
+            events.emit("waiting", holder_pid=pid)
             fcntl.flock(fd, fcntl.LOCK_EX)
         os.ftruncate(fd, 0)
         os.lseek(fd, 0, os.SEEK_SET)

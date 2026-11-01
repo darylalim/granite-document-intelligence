@@ -20,7 +20,7 @@ Text from a PDF never steers the program, and everything the program loads or ex
 - No code from a model repository runs, because setup strips it from the models directory.
 - Nothing the pipeline does depends on model output beyond writing it to disk, and generated chart code is never executed.
 - Key-value schemas cannot fetch remote `$ref`s.
-- Error records and logs never contain environment variables, tokens or page text.
+- Error records, logs and the `--events` progress file never contain environment variables, tokens or page text.
 
 Multi-user use, serving the tool over a network, defending against the user and a compromised Mac are **out of scope**.
 

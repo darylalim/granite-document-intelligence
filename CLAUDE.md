@@ -142,6 +142,7 @@ src/granite_document_intelligence/
   chunk.py      # HybridChunker over the DoclingDocument
   export.py     # writes the output tree; run.json last; atomic swap
   batch.py      # input expansion, resume, overlap refusal, continue-on-error
+  events.py     # `gdi convert --events`: progress as JSON Lines (§18.2); a no-op unless opened
   safety.py     # limits, %PDF- check, path containment, error records
   runlock.py    # the process-level run lock
   memory.py     # release helper, MLX cache limit, peak-memory reporting
@@ -222,7 +223,7 @@ Two principles follow: PDF-derived data never steers the program, and everything
 2. **No model-repo code runs.** mlx-vlm's patched `AutoProcessor` defaults `trust_remote_code` to True for `granite4_vision`, and Docling's MLX engine cannot pass False (S10). Not passing it is therefore not enough, and the code is removed from the artifact instead. `gdi convert-model` converts with `trust_remote_code=False`, then deletes every `*.py` file and every `auto_map` key, nested ones included, and records both in the manifest. `convert()` refuses any folder that still holds either one, and our own loaders pass `False` as a second guard.
 3. **Weights are safetensors only.** granite-embedding ships a pickle beside its safetensors; any future weight load passes `use_safetensors=True`.
 4. **The parsers are unsandboxed in v1.** pdfium and docling-parse run in-process. This is stated in the README and in `SECURITY.md`. The upgrade path is conversion in a separate low-privilege process.
-5. **No secrets or document content in logs**, `run.json` or stored tracebacks. `test_safety.py` asserts this with a sentinel `HF_TOKEN` and a sentinel string in the PDF.
+5. **No secrets or document content in logs**, `run.json`, stored tracebacks or the `--events` file. `test_safety.py` asserts this with a sentinel `HF_TOKEN` and a sentinel string in the PDF. An event carries counts, our own paths and our own error classes; a failed PDF's `result` names no error at all (§18.2).
 6. **Dependency vulnerabilities are watched.** Dependabot alerts are on, and the pip-audit step runs under *Verifying a dependency upgrade*.
 7. **Inputs are recognised by content.** A file must start with `%PDF-` at byte 0, whatever its extension, and the size limit is checked before pdfium opens it.
 8. **The KVP schema is local and bounded.** It must be a JSON object of at most 256 KB, and any `$ref` or `$dynamicRef` not starting with `#` is refused. The validator is built with an explicit empty `referencing.Registry`. That is load-bearing: jsonschema given no registry falls back to one that fetches an unknown `$ref` with `urlopen` and only warns.
@@ -312,7 +313,7 @@ Both hooks parse their payload with **`jq`**, an undeclared dependency that macO
 
 ## Tests
 
-`tests/` — unit tests, all mocked: no model download, no real inference. One file per module (`test_api.py`, `test_batch.py`, `test_charts.py`, `test_chunk.py`, `test_cli.py`, `test_export.py`, `test_kvp.py`, `test_models.py`, `test_phase_a.py`, `test_pipeline.py`, `test_safety.py`, `test_render.py`, `test_ui_reader.py`), plus:
+`tests/` — unit tests, all mocked: no model download, no real inference. One file per module (`test_api.py`, `test_batch.py`, `test_charts.py`, `test_chunk.py`, `test_cli.py`, `test_events.py`, `test_export.py`, `test_kvp.py`, `test_models.py`, `test_phase_a.py`, `test_pipeline.py`, `test_safety.py`, `test_render.py`, `test_ui_reader.py`), plus:
 
 - `test_ui.py` — the UI's machinery: the theme guard (`TestThemeConfig`), the launcher's forced flags and its two private-name patches, executed against Streamlit's own origin check (`TestLauncher`), and `TestWithoutStreamlit`.
 - `test_ui_app.py` — the viewer under `AppTest` over one session-scoped tree built through the real `export.save()`. Layout and views are marked `apptest` (CI only); the hostile-tree walk runs everywhere.
