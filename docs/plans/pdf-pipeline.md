@@ -17,8 +17,8 @@ published `v1.0.0` (§10). §18, the v1.x build plan, was reviewed cold, approve
 merged (PR 10, #14). PR 11 (#15) fixed a v1.0.0 bug that review found, and CI
 published **`v1.0.1`**. PR 12 (#17) ran the U-spikes (§18.6) and merged the read-only
 viewer, `gdi ui`. PR 13 (#18) merged `gdi convert --events`, and PR 13b (#19) runs the gate's pytest on
-four workers. **PR 14 is next:** the UI
-starts conversions. Per-PR progress is under §18.7. **To resume, paste Appendix C into a
+four workers. **PR 14** (the UI starts conversions) is open, and **PR 15**, the UI's
+docs, is next. Per-PR progress is under §18.7. **To resume, paste Appendix C into a
 new session.**
 
 ## 0. At a glance
@@ -2791,6 +2791,7 @@ before push, and plan amendments in the PR that finds them.
 | 12 | merged 2026-10-30 (#17, `c9dd351`): U1–U4 approved; `gdi ui` and the six read-only views (`launch`, `reader`, `render`); the chart-warning prefix and row positions (§18.4 rule 3); three categorical slots moved one Carbon step (§14, with the user); §15's widths re-measured on GAO-07-631 (overflow 0 at all six widths, both themes); hostile tree fetches nothing; the Stop hook skips `apptest` (13.5–14.0 s), CI runs everything |
 | 13 | merged 2026-10-31 (#18, `53528b7`): `gdi convert --events PATH` (`events.py`); one test per event, the unwritable-file test (a real `EBADF` mid-batch: every PDF converts, one warning) and the sentinel tests extended to the events file (`test_events.py`, `test_safety.py`); README documents the format; §18.2 amended ("As built"). Hand run on the whole public corpus (`HF_HUB_OFFLINE=1`, 2026-10-31): 7/7 done in 674 s, 104 events, 69 `page` events against 69 pages in the `run.json`s and 19 `chart` against 19 crops; an immediate re-run 7/7 skipped in 0.5 s (16 events); the W-9 with its schema one `kvp` event, `kvp.json` valid. Every line `"v": 1`, and no key beyond the schema's. Hook gate 14.5–14.7 s against `main`'s 14.2–14.5 s, interleaved (+0.3 s; `main` itself has drifted up from PR 12's 13.5–14.0 s); the full gate 16.2 s, in CI only |
 | 13b | merged 2026-10-31 (#19, `d6ef6dc`): `pytest-xdist` in the `dev` group, `-n 4` in both gate scopes. Hook gate 8.8–8.9 s (was 14.2–14.5 s), full gate 9.1 s (was 16.2 s); the full suite passed five times at `-n 4` and twice at `-n 8` |
+| 14 | open: `ui/runner.py` (the child, run folders, the events reader, liveness and cancel, cleanup, uploads); the inputs, the sidebar's settings, the Convert row and a polling notice in `app.py`; `tests/test_ui_runner.py` and `TestConvert`/`TestHostileEvents` with a `$STUB_CHILD_*` stub. Equivalence on the whole public corpus: 7 PDFs, 110 files identical. Cancel mid-page, mid-chart and mid-KVP: lock free, no process or residue, previous trees byte-identical. U4 on the real app: server ≤ 0.50 GiB, MLX peak 6.15 GiB unchanged, no swap (spike report, "PR 14"). §18.2, §18.3 and §18.4 rule 1 amended (as built; clickjacking weighed: Cancel takes two clicks). Gate 10.4 s full, 8.7 s hook |
 
 **Why the viewer comes before `--events`:** the viewer needs no conversion and carries
 U1 and U2, the riskiest unknowns. Building it first means the security model is settled

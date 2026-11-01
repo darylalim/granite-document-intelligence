@@ -2452,3 +2452,61 @@ upload, the conversion keeps its 6.15 GiB MLX peak. The server adds at most 0.5 
 nothing swaps and nothing slows. The ceiling is not at risk, and no view needs paging
 for U4's reasons. The upload limit's units and the upload's 2× cost are recorded in
 §18.3 and §18.4's table.
+
+## PR 14 — the merge gate's hand runs on the real app (2026-10-31)
+
+Not a new spike: §18.7's merge gate for PR 14, recorded here beside U3 and U4, which it
+re-runs on the shipped runner. **Environment.** Branch `feat/ui-convert` (`1b5f7da` for
+the equivalence and cancel runs, `4defefa` for U4; the change between them is the
+listing's refresh, which touches no conversion), the project's `.venv` (docling
+2.143.1, mlx-vlm 0.7.10, Streamlit 1.66.1), the real models, `HF_HUB_OFFLINE=1`, M2 Pro,
+16 GB, on AC power. `gdi ui --no-browser --port 8765` was driven in headless Chrome over
+CDP: typing into the fields, clicking the buttons, reading the page's text.
+
+**(a) Equivalence** (§18.7). The public corpus folder (7 PDFs) through
+`gdi convert eval/corpus -o cli/` and, from the UI, the same folder typed into the path
+field with the default settings and the output folder `ui/`. The UI's Convert was
+clicked while the CLI run held the lock: the notice read "Waiting for another gdi run
+(pid …)" 2.7 s later, and the UI's child started converting when the CLI's run ended
+(653 s). The diff compared every file byte for byte, and each `run.json` without
+`timings_ms`, `chart_ms`, `kvp_ms`, `peak_memory_bytes`, `output_bytes` and the pages'
+`generation_ms` and `render_ms` (`run.json` records the PDF's name, not its path).
+**Result: 7 PDFs, 110 files, identical.** The browser requested nothing off localhost.
+
+**(b) Cancel** (§18.8), as U3's cases, through Cancel and then "Stop it":
+
+| Case | PDF | Signal after | Asked first | "Cancelled" shown | Lock | Group left | Residue | Previous tree |
+|---|---|---|---|---|---|---|---|---|
+| mid-page | GAO-07-631 | `page 3 of` + 1 s | yes | 1.13 s | free | none | none | — (none) |
+| mid-chart | GAO-08-14 excerpt | `chart 1 of` + 2 s | yes | 1.16 s | free | none | none | 9 of 9 byte-identical |
+| mid-KVP | W-9 with its schema | `key-values page 1 of` + 2 s | yes | 3.10 s | free | none | none | 5 of 5 byte-identical |
+
+"Shown" is from the click on "Stop it" to the notice, so it includes up to 1 s of the
+notice's polling. Each run's events file ends `interrupted`, written only on the CLI's
+exit-130 path, and its `stderr.txt` ends `gdi convert: interrupted; finished PDFs are
+kept`. "Group left" is `pgrep -g <pid>`.
+
+**(c) U4 on the real app.** U4's upload scenario through the shipped path: a
+199,999,999-byte upload (the 15-page scan padded after `%%EOF`, which pdfium ignores)
+held in the uploader, then converted, so it is written to `ui/inputs/` and the uploader
+cleared before the child starts:
+
+| | idle | upload held | converting | after |
+|---|---|---|---|---|
+| server RSS (GiB) | 0.13 | 0.50 | 0.50 peak | 0.11 |
+| MLX peak, Phase A / charts (`run.json`) | | | 1.50 / 6.15 | |
+| swap growth | 0 | 0 | 0 | 0 |
+
+The conversion took 241.1 s (U4: 236.7 s) and wrote `status: ok`. The minimum available
+memory was 1.35 GiB with the desktop apps open. Once the conversion ended, the server
+had no child left, not even a zombie: the registry reaped it on the notice's next poll.
+**Verdict: U4 holds.** The server adds at most 0.5 GiB, and gives it back once the
+upload is on disk.
+
+**Found on the way, fixed in this PR:**
+- **The listing waited for the batch.** PDFs that finished mid-batch were not listed
+  until the batch ended, since only the notice reruns while a run is active. The notice
+  now reruns the whole app when a `result` event arrives.
+- **A pre-existing bug from PR 12.** A keyed selectbox keeps an empty value when its
+  options arrive, so an output folder that started empty stayed on "No results" after
+  its first conversion. The app now drops an empty selection before rendering.
