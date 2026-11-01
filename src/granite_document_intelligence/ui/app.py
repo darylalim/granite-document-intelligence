@@ -190,6 +190,10 @@ with st.sidebar:
     )
     root = Path(root_text).expanduser()
     entries = reader.list_runs(root)
+    if state.get(f"entry:{root}") is None:
+        # A keyed selectbox keeps an empty value when options arrive, so a
+        # folder that had no results would stay on none once it has some.
+        state.pop(f"entry:{root}", None)
     entry = st.selectbox(
         "PDF",
         entries,
@@ -416,7 +420,7 @@ def _run_notice(run: runner.Run) -> None:
         )
 
 
-def _notice(was_active: bool) -> None:
+def _notice(was_active: bool, finished: int) -> None:
     registry.poll()
     now = runner.read_run(state.run_id, registry) if state.run_id else None
     problem = state.problem
@@ -437,11 +441,16 @@ def _notice(was_active: bool) -> None:
         # buttons, and show the run's newest PDF.
         state._select_newest = True
         st.rerun(scope="app")
+    if now is not None and len(now.progress.results) > finished:
+        # A PDF of the batch finished: list it now, not when the batch ends.
+        st.rerun(scope="app")
 
 
 result = reader.read(entry.folder) if entry is not None else None
 # Polls once a second while a run is active, and only this slot reruns (§15).
-st.fragment(_notice, run_every=1.0 if active else None)(active)
+st.fragment(_notice, run_every=1.0 if active else None)(
+    active, len(run.progress.results) if run is not None else 0
+)
 
 if entry is None or result is None:
     st.info(

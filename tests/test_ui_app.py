@@ -447,3 +447,31 @@ class TestHostileEvents:
         _until(at, lambda at: any("did not start" in e.value for e in at.error))
         assert not [(k, v) for k, v in _markdown_bearing(at) if MARK in v]
         assert HOSTILE_TEXT in [t.value for t in at.text]
+
+
+@pytest.mark.apptest
+def test_a_finished_pdf_is_listed_before_the_batch_ends(
+    tmp_path: Path, blank_pdf: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out = tmp_path / "out"
+    at = _app(out, entry=None)
+    at.text_input(key="in_path").set_value(str(blank_pdf)).run()
+    at, _ = _converting(
+        at,
+        monkeypatch,
+        events=_event("batch", total=2)
+        + _event("pdf", position=1, total=2, pdf="/in/a.pdf", out_dir=str(out / "a")),
+        hold="30",
+    )
+    _until(at, lambda at: at.get("progress"))
+    export.save(make_result(), out / "a")
+    run_id = at.session_state["run_id"]
+    from granite_document_intelligence.ui import runner
+
+    with (runner.runs_dir() / run_id / "events.jsonl").open("a") as handle:
+        handle.write(_event("result", pdf="/in/a.pdf", status="done"))
+    _until(at, lambda at: at.metric)  # the first PDF's counts, mid-batch
+    assert at.get("progress")
+    at.button(key="cancel").click().run()
+    at.button(key="stop").click().run()
+    _until(at, lambda at: at.warning)
