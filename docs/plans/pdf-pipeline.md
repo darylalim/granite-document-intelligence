@@ -17,8 +17,8 @@ published `v1.0.0` (§10). §18, the v1.x build plan, was reviewed cold, approve
 merged (PR 10, #14). PR 11 (#15) fixed a v1.0.0 bug that review found, and CI
 published **`v1.0.1`**. PR 12 (#17) ran the U-spikes (§18.6) and merged the read-only
 viewer, `gdi ui`. PR 13 (#18) merged `gdi convert --events`, and PR 13b (#19) runs the gate's pytest on
-four workers. **PR 14 is next:** the UI
-starts conversions. Per-PR progress is under §18.7. **To resume, paste Appendix C into a
+four workers. **PR 14** (the UI starts conversions) is open, and **PR 15**, the UI's
+docs, is next. Per-PR progress is under §18.7. **To resume, paste Appendix C into a
 new session.**
 
 ## 0. At a glance
@@ -2381,6 +2381,30 @@ are deleted when the UI starts **(decided)**. Cleanup covers `ui/runs/` and `ui/
 only, both copies the UI made, and **never touches the output root**: those results are
 the user's, and nothing deletes them on a timer (the lesson of PR 11's bug).
 
+**As built (PR 14).** `ui/runner.py`. Where the code settled what the text above left
+open:
+- **The command line.** The seam is `runner.CHILD`, a tuple the tests replace with
+  `tests/ui_child_stub.py` driven by `$STUB_CHILD_*` variables. Every path in the argv
+  is absolute, and the inputs follow `--`, so a name such as `-rf.pdf` cannot read as a
+  flag. A test parses the runner's argv with the CLI's own parser.
+- **The start time** is in `started`, read with `ps -o stat=,lstart=` under `LC_ALL=C`.
+  The same call tells a zombie (`Z`) apart, so one `ps` decides liveness. A folder
+  with no `pid` yet, younger than 10 s, is "starting", not dead.
+- **"Crashed" needs a PDF without a result.** A negative return code after every
+  PDF's `result` but before `summary` is "ended without a summary", because no PDF
+  can be named.
+- **The registry is created once per server** (`st.cache_resource`), and cleanup
+  runs then, which is "when the UI starts". It skips a run still active, and it
+  unlinks a symlink in either folder without following it.
+- **One UI conversion at a time.** While the session's run is active, the Convert
+  row holds Cancel instead of Convert. A run started from a terminal still makes a
+  UI run wait, and the notice says so. A session with no run of its own adopts the
+  newest active one, which is how a reopened or second tab finds it (U3).
+- **The notice polls only while a run is active**, through
+  `st.fragment(run_every=1 s)`, so only the notice slot reruns. When the run ends,
+  the fragment reruns the whole app, which refreshes the listing and selects the
+  newest result.
+
 **The rejected alternative, kept for the record:** in-process `convert_many` in a
 background thread with a progress callback. It is simpler to start (no event schema,
 no second interpreter), but it keeps the pipeline's residual memory in the server, puts
@@ -2467,6 +2491,12 @@ a failed run.
   A UI run and a CLI run with the same schema at different paths therefore re-convert
   each other's output. That is v1 behaviour and is stated in the UI's help text, not
   changed here.
+- **As built (PR 14).** `runner.upload_name` keeps the name's last path component.
+  It drops control and format characters and leading dots, falls back to
+  `upload.pdf` (or `schema.json`), and trims to 200 bytes, keeping the suffix. An
+  uploaded schema's stored path replaces the text in the schema field, so the next
+  run names the same path and resume holds. The uploader is cleared by moving it to
+  a new key, since Streamlit has no call that empties one.
 
 The output root is a text field, defaulting to `~/gdi-out` **(decided)**. It is not
 `~/Documents/…`, because that is TCC-protected on macOS: the first write prompts, or
@@ -2552,6 +2582,15 @@ localhost.
    (clickjacking). It cannot type into the UI or drive it, because `client.allowedOrigins`
    ignores its messages (U2's control showed that an allowed parent *can* steer the
    query string). PR 14 weighs this again when the Convert and Cancel buttons arrive.
+
+   **Weighed in PR 14, accepted with one change.** A framed session is a fresh
+   session. Its path field is empty, it has no uploads, and the framing page can
+   neither type nor preset a setting: none is bound to the query string, only
+   `?view=`. Convert is disabled with no input, so a lured click on it does nothing.
+   Cancel is different, because a fresh session adopts the active run (§18.2, as
+   built). So Cancel takes two clicks: Cancel, then "Stop it". The worst case is a
+   stopped conversion, with its finished PDFs kept and the current PDF's previous
+   tree untouched (U3).
 
 2. **Rendered Markdown fetches nothing, and nothing in it is a link.** `document.md` is
    model output. Docling escapes raw HTML in its Markdown export but passes Markdown
@@ -2752,6 +2791,7 @@ before push, and plan amendments in the PR that finds them.
 | 12 | merged 2026-10-30 (#17, `c9dd351`): U1–U4 approved; `gdi ui` and the six read-only views (`launch`, `reader`, `render`); the chart-warning prefix and row positions (§18.4 rule 3); three categorical slots moved one Carbon step (§14, with the user); §15's widths re-measured on GAO-07-631 (overflow 0 at all six widths, both themes); hostile tree fetches nothing; the Stop hook skips `apptest` (13.5–14.0 s), CI runs everything |
 | 13 | merged 2026-10-31 (#18, `53528b7`): `gdi convert --events PATH` (`events.py`); one test per event, the unwritable-file test (a real `EBADF` mid-batch: every PDF converts, one warning) and the sentinel tests extended to the events file (`test_events.py`, `test_safety.py`); README documents the format; §18.2 amended ("As built"). Hand run on the whole public corpus (`HF_HUB_OFFLINE=1`, 2026-10-31): 7/7 done in 674 s, 104 events, 69 `page` events against 69 pages in the `run.json`s and 19 `chart` against 19 crops; an immediate re-run 7/7 skipped in 0.5 s (16 events); the W-9 with its schema one `kvp` event, `kvp.json` valid. Every line `"v": 1`, and no key beyond the schema's. Hook gate 14.5–14.7 s against `main`'s 14.2–14.5 s, interleaved (+0.3 s; `main` itself has drifted up from PR 12's 13.5–14.0 s); the full gate 16.2 s, in CI only |
 | 13b | merged 2026-10-31 (#19, `d6ef6dc`): `pytest-xdist` in the `dev` group, `-n 4` in both gate scopes. Hook gate 8.8–8.9 s (was 14.2–14.5 s), full gate 9.1 s (was 16.2 s); the full suite passed five times at `-n 4` and twice at `-n 8` |
+| 14 | open: `ui/runner.py` (the child, run folders, the events reader, liveness and cancel, cleanup, uploads); the inputs, the sidebar's settings, the Convert row and a polling notice in `app.py`; `tests/test_ui_runner.py` and `TestConvert`/`TestHostileEvents` with a `$STUB_CHILD_*` stub. Equivalence on the whole public corpus: 7 PDFs, 110 files identical. Cancel mid-page, mid-chart and mid-KVP: lock free, no process or residue, previous trees byte-identical. U4 on the real app: server ≤ 0.50 GiB, MLX peak 6.15 GiB unchanged, no swap (spike report, "PR 14"). §18.2, §18.3 and §18.4 rule 1 amended (as built; clickjacking weighed: Cancel takes two clicks). Gate 10.4 s full, 8.7 s hook |
 
 **Why the viewer comes before `--events`:** the viewer needs no conversion and carries
 U1 and U2, the riskiest unknowns. Building it first means the security model is settled
