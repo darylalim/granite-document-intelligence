@@ -12,15 +12,14 @@ the same day). PR 3
 (`api` complete, batch, `gdi convert`), PR 7 (eval harness, baseline and budgets;
 S6/S7/S11 confirmed) and PR 8 (docs rewrite) are merged; PR 9 (release 1.0.0) is next, and merges only when every §16 item holds. Per-PR progress is under §10. **To resume, paste Appendix B into a new session for the next PR.**
 
-**Status (2026-10-31):** v1 is complete, and the v1.x UI is planned. PR 9
+**Status (2026-11-03):** v1 and v1.x are complete. PR 9
 published `v1.0.0` (§10). §18, the v1.x build plan, was reviewed cold, approved and
 merged (PR 10, #14). PR 11 (#15) fixed a v1.0.0 bug that review found, and CI
 published **`v1.0.1`**. PR 12 (#17) ran the U-spikes (§18.6) and merged the read-only
 viewer, `gdi ui`. PR 13 (#18) merged `gdi convert --events`, and PR 13b (#19) runs the gate's pytest on
 four workers. PR 14 (#20) merged the UI's conversions: inputs, settings, progress and cancel.
 PR 15 (#21) merged the UI's docs (README, CLAUDE.md, `SECURITY.md`).
-**PR 16 is in review** (`chore/release-1.1.0`): the 1.1.0 release; every §18.8 item is checked on its commit. Per-PR progress is under §18.7. **To resume, paste Appendix C into a
-new session.**
+PR 16 (#22) released 1.1.0 with every §18.8 item checked, and CI published **`v1.1.0`**. Per-PR progress is under §18.7. No PR is planned beyond it.
 
 ## 0. At a glance
 
@@ -2794,7 +2793,7 @@ before push, and plan amendments in the PR that finds them.
 | 13b | merged 2026-10-31 (#19, `d6ef6dc`): `pytest-xdist` in the `dev` group, `-n 4` in both gate scopes. Hook gate 8.8–8.9 s (was 14.2–14.5 s), full gate 9.1 s (was 16.2 s); the full suite passed five times at `-n 4` and twice at `-n 8` |
 | 14 | merged 2026-10-31 (#20, `393d34b`): `ui/runner.py` (the child, run folders, the events reader, liveness and cancel, cleanup, uploads); the inputs, the sidebar's settings, the Convert row and a polling notice in `app.py`; `tests/test_ui_runner.py` and `TestConvert`/`TestHostileEvents` with a `$STUB_CHILD_*` stub. Equivalence on the whole public corpus: 7 PDFs, 110 files identical. Cancel mid-page, mid-chart and mid-KVP: lock free, no process or residue, previous trees byte-identical. U4 on the real app: server ≤ 0.50 GiB, MLX peak 6.15 GiB unchanged, no swap (spike report, "PR 14"). §18.2, §18.3 and §18.4 rule 1 amended (as built; clickjacking weighed: Cancel takes two clicks). Gate 10.4 s full, 8.7 s hook |
 | 15 | merged 2026-11-03 (#21, `d23278c`): README's UI section, with light and dark screenshots of GAO-07-631's Charts view in one `<picture>` (`docs/images/`; captured through `gdi ui` in headless Chrome over CDP, page overflow 0 in both modes), and two UI bullets under "Untrusted documents"; `SECURITY.md`'s UI section with the three §18.4 rule 1 residuals; CLAUDE.md's `runner.py`, runner tests, cache folders, screenshot recipe and UI security note. `uv run gdi ui` run as written: listening on `127.0.0.1:8501` only; a port in use exits 1 |
-| 16 | in review: `version = "1.1.0"` and `uv lock` (only the project's version moves). §18.8 re-checked on the release commit `ee626f5`: U1 from the built wheel under a hostile `~/.streamlit/config.toml` and working-directory config, 13/13 (loopback only; `Host: evil.example` and a foreign `Origin` refused with 403; an upload without the XSRF token refused; no outbound connect or DNS lookup); U2 on the hostile tree and GAO-07-631, six views each: 1,703 requests, none outside the app; §15 at six widths × both themes × six views: overflow 0, chart cards 2/1/2/2/4/5 a row; equivalence on the public corpus: 7 PDFs, 110 files identical; the six views show each PDF's counts; Cancel mid-page, mid-chart and mid-KVP: asked first, the child's `interrupted` exit (130), lock free, no process or `.partial`/`.old` left, previous trees byte-identical; gate 10.1 s hook, 11.0 s full; eval `eval/results/2026-11-03-ee626f5-release.json`: PASS, every score total equal to 1.0.1's release run, cold start 8.37 s (budget 8.91) |
+| 16 | merged 2026-11-03 (#22, `b352f8b`); CI published `v1.1.0`: `version = "1.1.0"` and `uv lock` (only the project's version moves). §18.8 re-checked on the release commit `ee626f5`: U1 from the built wheel under a hostile `~/.streamlit/config.toml` and working-directory config, 13/13 (loopback only; `Host: evil.example` and a foreign `Origin` refused with 403; an upload without the XSRF token refused; no outbound connect or DNS lookup); U2 on the hostile tree and GAO-07-631, six views each: 1,703 requests, none outside the app; §15 at six widths × both themes × six views: overflow 0, chart cards 2/1/2/2/4/5 a row; equivalence on the public corpus: 7 PDFs, 110 files identical; the six views show each PDF's counts; Cancel mid-page, mid-chart and mid-KVP: asked first, the child's `interrupted` exit (130), lock free, no process or `.partial`/`.old` left, previous trees byte-identical; gate 10.1 s hook, 11.0 s full; eval `eval/results/2026-11-03-ee626f5-release.json`: PASS, every score total equal to 1.0.1's release run, cold start 8.37 s (budget 8.91) |
 
 **Why the viewer comes before `--events`:** the viewer needs no conversion and carries
 U1 and U2, the riskiest unknowns. Building it first means the security model is settled
