@@ -148,10 +148,11 @@ src/granite_document_intelligence/
   runlock.py    # the process-level run lock
   memory.py     # release helper, MLX cache limit, peak-memory reporting
   ui/           # v1.x (plan §18): the only Streamlit in the package
-    app.py      # the viewer script: six read-only views; tree strings only as text
+    app.py      # the script: inputs, settings, Convert/Cancel, six views; tree strings only as text
     launch.py   # `gdi ui`: every security key forced as a flag, config loaded first
     reader.py   # the §3.5 tree read as a contract; the run listing
     render.py   # fail-closed Markdown neutraliser for document.md and summaries
+    runner.py   # the `gdi convert` child (§18.2): run folders, events, liveness, cancel, cleanup, uploads
     .streamlit/config.toml, static/fonts/   # the Carbon theme and Plex, as package data
 ```
 
@@ -230,6 +231,8 @@ Two principles follow: PDF-derived data never steers the program, and everything
 8. **The KVP schema is local and bounded.** It must be a JSON object of at most 256 KB, and any `$ref` or `$dynamicRef` not starting with `#` is refused. The validator is built with an explicit empty `referencing.Registry`. That is load-bearing: jsonschema given no registry falls back to one that fetches an unknown `$ref` with `urlopen` and only warns.
 9. **Repository hygiene.** There is a `SECURITY.md`, and CI's actions are pinned to commit SHAs.
 
+**The UI** (`gdi ui`, plan §18.4) adds a loopback socket and an HTML renderer. The launcher forces every security-relevant Streamlit key as a flag, `render.py` neutralises model Markdown so nothing fetches, and every other tree string is shown as text. `SECURITY.md` names its three accepted residuals: any `localhost` origin can drive it, HTTP routes ignore `allowedHosts`, and it can be framed (Cancel takes two clicks).
+
 Further rules from §3.10:
 - **Generated chart code** is written with an "Untrusted: review before running" header, and nothing imports or runs it.
 - **Output paths** come only from the input's relative path, never from PDF metadata, and every write is checked to land under the output directory.
@@ -249,6 +252,8 @@ Further rules from §3.10:
 `SECURITY.md` — how to report a vulnerability (GitHub private vulnerability reporting) and the threat model in short.
 
 `README.md` — the user-facing account: setup, usage built on a corpus PDF (GAO-07-631, so the documented command is one the eval exercises), output layout, the Python API, dated performance figures, disk space and untrusted documents. No test guards it. A change to the CLI, the output layout or a measured figure has to be mirrored there by hand, and **every command in it is run as written** before a docs PR merges (§10). Its performance figures carry their date and versions.
+
+`docs/images/ui-light.png` and `ui-dark.png` — the README's UI screenshots, one `<picture>` that follows the reader's GitHub theme. A theme, layout or label change dates them, and so does a model change, since the chart CSVs in frame are model output; the alt text names the counts (42 pages, 3 tables, 9 charts, 56 chunks). Captured on 2026-11-03 (PR 15) from the release eval's GAO-07-631 tree (`eval/runs/2026-10-30-2323d1c-release/r1/`) copied to `$HOME/gdi-out` under a scratch `HOME`, so the field shows the default `~/gdi-out`. The server was `gdi ui --no-browser`, and the browser headless Chrome over CDP: `Emulation.setDeviceMetricsOverride` at 1280 × 1400 CSS px, `deviceScaleFactor` 2; `Emulation.setEmulatedMedia` with `prefers-color-scheme` for each mode (the theme follows it); and `?view=Charts`. Wait for four `stMetricValue`s and every `/media/` image to complete before `Page.captureScreenshot`.
 
 `.python-version` — pins the project interpreter to `3.12`, matching `requires-python = ">=3.12"` and the ty target.
 
@@ -309,15 +314,16 @@ Both hooks parse their payload with **`jq`**, an undeclared dependency that macO
 `cli.main()` calls `load_dotenv()` after parsing arguments, so `gdi --help` stays instant. `load_dotenv()` never overrides a variable that is already set, and it does nothing when there is no `.env`, so the same code works locally and in a deployment. The library itself reads only the process environment.
 
 - `HF_TOKEN` — an optional Hugging Face token with read scope. The models are public; without a token the Hub only rate-limits harder and logs an "unauthenticated requests" warning. Set it in `.env` locally (gitignored; copy `.env.example`) or as a real environment variable. It must never appear in `run.json`, logs or stored tracebacks (§3.13 rule 5).
-- `GDI_CACHE_DIR` — where the models directory and `run.lock` live (default `~/.cache/granite-document-intelligence`). Tests point it at `tmp_path`, so no test touches the real cache.
+- `GDI_CACHE_DIR` — where the models directory and `run.lock` live (default `~/.cache/granite-document-intelligence`), and the UI's `ui/runs/` and `ui/inputs/`, which it deletes after 30 days (§18.2; never the output root). Tests point it at `tmp_path`, so no test touches the real cache.
 - `HF_HUB_OFFLINE=1` — once the models are fetched, this makes a run fully offline. `eval/score.py` sets it unless it is already set.
 
 ## Tests
 
-`tests/` — unit tests, all mocked: no model download, no real inference. One file per module (`test_api.py`, `test_batch.py`, `test_charts.py`, `test_chunk.py`, `test_cli.py`, `test_events.py`, `test_export.py`, `test_kvp.py`, `test_models.py`, `test_phase_a.py`, `test_pipeline.py`, `test_safety.py`, `test_render.py`, `test_ui_reader.py`), plus:
+`tests/` — unit tests, all mocked: no model download, no real inference. One file per module (`test_api.py`, `test_batch.py`, `test_charts.py`, `test_chunk.py`, `test_cli.py`, `test_events.py`, `test_export.py`, `test_kvp.py`, `test_models.py`, `test_phase_a.py`, `test_pipeline.py`, `test_safety.py`, `test_render.py`, `test_ui_reader.py`, `test_ui_runner.py`), plus:
 
 - `test_ui.py` — the UI's machinery: the theme guard (`TestThemeConfig`), the launcher's forced flags and its two private-name patches, executed against Streamlit's own origin check (`TestLauncher`), and `TestWithoutStreamlit`.
-- `test_ui_app.py` — the viewer under `AppTest` over one session-scoped tree built through the real `export.save()`. Layout and views are marked `apptest` (CI only); the hostile-tree walk runs everywhere.
+- `test_ui_app.py` — the viewer under `AppTest` over one session-scoped tree built through the real `export.save()`. Layout, views and conversions (`TestConvert`) are marked `apptest` (CI only); the hostile-tree walk and `TestHostileEvents` run everywhere.
+- `ui_child_stub.py` — the stand-in for the runner's `gdi convert` child, swapped in through `runner.CHILD` and driven by `$STUB_CHILD_*` variables.
 
 - `test_score.py` — the eval's scoring rules (`eval/matching.py`, `eval/score.py`), with every bad-prediction case mutation-checked (38 rule mutations, each caught; PR 7).
 - `test_s10_check.py` — S10's detector, executed in a real subprocess so a hook that stopped seeing executed code fails here, plus the check's verdict and its models-directory scan.
