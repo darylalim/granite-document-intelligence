@@ -4,7 +4,7 @@
 [![Release](https://img.shields.io/github/v/release/darylalim/granite-document-intelligence)](https://github.com/darylalim/granite-document-intelligence/releases/latest)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-**Granite Document Intelligence** turns multi-page PDFs into structured output on your Mac. It runs IBM's Granite Docling and Granite Vision models locally with [MLX](https://github.com/ml-explore/mlx). It is a Python library with a command-line tool, `gdi`. For each PDF it writes:
+**Granite Document Intelligence** turns multi-page PDFs into structured output on your Mac. It runs IBM's Granite Docling and Granite Vision models locally with [MLX](https://github.com/ml-explore/mlx). It is a Python library with a command-line tool, `gdi`, and a local web UI, `gdi ui` (see [The UI](#the-ui)). For each PDF it writes:
 
 - the whole document as **Markdown** and as lossless **DoclingDocument JSON**
 - **charts** as CSV data, a one-paragraph summary and the cropped image
@@ -195,6 +195,38 @@ result.save(Path("out/gao-07-631"))  # writes the tree above
 
 Both functions take the run lock described above; pass `wait=False` to raise `RunLockedError` instead of waiting. Before any model loads, both raise `ModelsNotReadyError` if `gdi convert-model` has not completed.
 
+## The UI
+
+`gdi ui` does what `gdi convert` does, in a browser on your Mac: pick PDFs and settings, convert them with progress and cancel, and browse the results of this run or any earlier one.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/ui-dark.png">
+  <img alt="The gdi ui window showing GAO-07-631's results: the settings in the sidebar, the PDF path and upload fields above the Convert button, a Converted notice, tiles counting 42 pages, 3 tables, 9 charts and 56 chunks, and the Charts view with two chart cards, each holding the chart's crop and the CSV Granite Vision read from it" src="docs/images/ui-light.png">
+</picture>
+
+```bash
+uv run gdi ui
+```
+
+It serves the UI on this Mac only, at `http://localhost:8501/`, and opens it in your browser. Ctrl-C in the terminal stops it. `--port N` serves on another port, and a port in use is an error rather than moved. `--no-browser` prints the address without opening a browser. The UI is themed to follow your system's light or dark setting.
+
+`uv sync` installs Streamlit, which the UI needs. In an install without it, `gdi ui` prints the command that adds it (the `ui` extra) and exits with 1. The library and `gdi convert` never need Streamlit.
+
+**Converting.**
+- Give a PDF or a folder of PDFs by its path, or upload PDFs. A folder's subfolders are not converted. Uploads stop at 200,000,000 bytes, because the browser counts a megabyte as 1,000,000 bytes. `gdi convert` counts 1,048,576 to the megabyte, so its 200 MB limit is about 9.7 MB higher, and a PDF in that gap has to be given by its path.
+- Results go to the **Output folder**, `~/gdi-out` by default. It is not under `~/Documents`, because macOS asks for permission before an app writes there.
+- Each sidebar setting is one `gdi convert` option, so a conversion from the UI is the same as one from the terminal. The Run view shows the exact command it ran. **Convert again** is `--force`.
+- Resume works as in the terminal: a PDF already converted with the same settings is skipped. Resume compares the schema's path as well as its content, so the same schema at another path converts again.
+- **Cancel** asks once more before it stops the conversion. Like Ctrl-C, it keeps every PDF that finished and leaves the previous results of the current PDF untouched.
+- Closing the tab, or stopping the server, does not stop a conversion. Open the UI again to follow it.
+- One conversion runs at a time. A `gdi convert` started in a terminal makes the UI's conversion wait, and the UI says so.
+
+**Browsing.** The **PDF** list holds every folder under the output folder that has a `run.json`, newest first. Six views show the selected PDF: Document, Tables, Charts (each chart's crop, CSV, summary and warnings), Key-values, Chunks and Run (timings, peak memory, warnings, model revisions and the command line). A failed PDF opens on the Run view with its error.
+
+**What it keeps.** Each conversion's progress, logs and command line go to `~/.cache/granite-document-intelligence/ui/runs/`, and uploaded files to `ui/inputs/` beside it. The UI deletes both after 30 days. It never deletes anything in the output folder.
+
+The UI runs each conversion as a separate `gdi convert` process, so the models' memory goes back when a conversion ends and a crash cannot take the UI down. With GAO-07-631's results open, the UI's server used 0.14 GiB of memory, and at most 0.5 GiB while it held a 200 MB upload. Measured on 2026-10-30 beside a conversion of the same PDF, the conversion's peak stayed the same, nothing went to swap and nothing slowed down.
+
 ## Performance
 
 These figures are from a 16 GB M2 Pro on AC power, measured on 2026-10-27 with docling 2.143.1, mlx 0.32.4 and mlx-vlm 0.7.10. They are the medians of three runs of the project's evaluation corpus.
@@ -238,7 +270,9 @@ Treat every PDF as untrusted, and everything derived from one, because a PDF can
 - **Parsers run in-process.** PDFs are parsed by pdfium and docling-parse, which are C and C++ code. They run with your privileges and without a sandbox. Keep the dependencies current, and do not use this tool on strangers' PDFs at volume.
 - **Text in a page can try to steer the model.** That includes text you cannot see, such as white text on white. The pipeline treats model output as data, never as instructions, and schema validation rejects off-schema output. Still, **review key-values from an untrusted document before anything acts on them.**
 - **Generated chart code is never run.** `--chart-code` writes model output that starts with an "Untrusted: review before running" header. Nothing in this package runs it, and you should read it before you do.
-- **Outputs are files, not web pages.** `table-NNN.html` and `document.md` contain text from the PDF. Escape them before rendering them in a browser or UI.
+- **Outputs are files, not web pages.** `table-NNN.html` and `document.md` contain text from the PDF. Escape them before rendering them in a browser or UI of your own.
+- **The UI fetches nothing a PDF names.** Images and links in `document.md` and in chart summaries are reduced to text, except images inside the PDF's own output folder. Every other string from a PDF or a model is shown as plain text. Generated chart code is shown, never run, and the UI has no way to run it.
+- **The UI listens on this Mac only** (`127.0.0.1`). Exposing it to a network is unsupported. Other web apps on `localhost` can reach it, and other web pages can frame it; [SECURITY.md](SECURITY.md) lists these limits.
 - **Network.** The only network access is to the Hugging Face Hub, and only to download models. To run fully offline once the models are cached, set `HF_HUB_OFFLINE=1`.
 
 Output that a model extracts from a copyrighted PDF is still derived from that PDF. Being able to extract it does not make it free to reuse.
