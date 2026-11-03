@@ -19,7 +19,7 @@ published **`v1.0.1`**. PR 12 (#17) ran the U-spikes (§18.6) and merged the rea
 viewer, `gdi ui`. PR 13 (#18) merged `gdi convert --events`, and PR 13b (#19) runs the gate's pytest on
 four workers. PR 14 (#20) merged the UI's conversions: inputs, settings, progress and cancel.
 PR 15 (#21) merged the UI's docs (README, CLAUDE.md, `SECURITY.md`).
-**PR 16 is in progress** (`chore/release-1.1.0`): the 1.1.0 release, gated on §18.8. Per-PR progress is under §18.7. **To resume, paste Appendix C into a
+**PR 16 is in review** (`chore/release-1.1.0`): the 1.1.0 release; every §18.8 item is checked on its commit. Per-PR progress is under §18.7. **To resume, paste Appendix C into a
 new session.**
 
 ## 0. At a glance
@@ -2794,6 +2794,7 @@ before push, and plan amendments in the PR that finds them.
 | 13b | merged 2026-10-31 (#19, `d6ef6dc`): `pytest-xdist` in the `dev` group, `-n 4` in both gate scopes. Hook gate 8.8–8.9 s (was 14.2–14.5 s), full gate 9.1 s (was 16.2 s); the full suite passed five times at `-n 4` and twice at `-n 8` |
 | 14 | merged 2026-10-31 (#20, `393d34b`): `ui/runner.py` (the child, run folders, the events reader, liveness and cancel, cleanup, uploads); the inputs, the sidebar's settings, the Convert row and a polling notice in `app.py`; `tests/test_ui_runner.py` and `TestConvert`/`TestHostileEvents` with a `$STUB_CHILD_*` stub. Equivalence on the whole public corpus: 7 PDFs, 110 files identical. Cancel mid-page, mid-chart and mid-KVP: lock free, no process or residue, previous trees byte-identical. U4 on the real app: server ≤ 0.50 GiB, MLX peak 6.15 GiB unchanged, no swap (spike report, "PR 14"). §18.2, §18.3 and §18.4 rule 1 amended (as built; clickjacking weighed: Cancel takes two clicks). Gate 10.4 s full, 8.7 s hook |
 | 15 | merged 2026-11-03 (#21, `d23278c`): README's UI section, with light and dark screenshots of GAO-07-631's Charts view in one `<picture>` (`docs/images/`; captured through `gdi ui` in headless Chrome over CDP, page overflow 0 in both modes), and two UI bullets under "Untrusted documents"; `SECURITY.md`'s UI section with the three §18.4 rule 1 residuals; CLAUDE.md's `runner.py`, runner tests, cache folders, screenshot recipe and UI security note. `uv run gdi ui` run as written: listening on `127.0.0.1:8501` only; a port in use exits 1 |
+| 16 | in review: `version = "1.1.0"` and `uv lock` (only the project's version moves). §18.8 re-checked on the release commit `ee626f5`: U1 from the built wheel under a hostile `~/.streamlit/config.toml` and working-directory config, 13/13 (loopback only; `Host: evil.example` and a foreign `Origin` refused with 403; an upload without the XSRF token refused; no outbound connect or DNS lookup); U2 on the hostile tree and GAO-07-631, six views each: 1,703 requests, none outside the app; §15 at six widths × both themes × six views: overflow 0, chart cards 2/1/2/2/4/5 a row; equivalence on the public corpus: 7 PDFs, 110 files identical; the six views show each PDF's counts; Cancel mid-page, mid-chart and mid-KVP: asked first, the child's `interrupted` exit (130), lock free, no process or `.partial`/`.old` left, previous trees byte-identical; gate 10.1 s hook, 11.0 s full; eval `eval/results/2026-11-03-ee626f5-release.json`: PASS, every score total equal to 1.0.1's release run, cold start 8.37 s (budget 8.91) |
 
 **Why the viewer comes before `--events`:** the viewer needs no conversion and carries
 U1 and U2, the riskiest unknowns. Building it first means the security model is settled
@@ -2810,24 +2811,24 @@ changed adversarial page joined later, §10 PR 2).
 
 ### 18.8 Definition of done for v1.x (1.1.0)
 
-- [ ] 1.0.1 is released with the swap guard (PR 11).
-- [ ] U1–U4 have verdicts, and the user approved them.
-- [ ] `gdi ui` starts with every §18.4 rule 1 key forced: the argv test, plus U1's
+- [x] 1.0.1 is released with the swap guard (PR 11).
+- [x] U1–U4 have verdicts, and the user approved them.
+- [x] `gdi ui` starts with every §18.4 rule 1 key forced: the argv test, plus U1's
       hostile `~/.streamlit/config.toml` setting each key's opposite, re-run on the
       release commit, and a `Host: evil.example` WebSocket refused.
-- [ ] The equivalence check (§18.7) passes on the whole public corpus, and the six
+- [x] The equivalence check (§18.7) passes on the whole public corpus, and the six
       views show each PDF's results.
-- [ ] Cancel works mid-page, mid-chart and mid-KVP: the child exits 130 and the lock is
+- [x] Cancel works mid-page, mid-chart and mid-KVP: the child exits 130 and the lock is
       free. Any `.partial` it leaves is removed by the next `gdi convert` of that PDF,
       and the run listing never shows one.
-- [ ] Nothing in a PDF or the output tree makes the browser issue a request: the
+- [x] Nothing in a PDF or the output tree makes the browser issue a request: the
       hostile-input test (rules 2 and 3) and U2's network-log check on the release commit.
-- [ ] The library imports and `gdi convert` runs with Streamlit blocked from import
+- [x] The library imports and `gdi convert` runs with Streamlit blocked from import
       (§18.5's test).
-- [ ] §15's layout holds on real content at the six widths in PR 12's gate, both themes
+- [x] §15's layout holds on real content at the six widths in PR 12's gate, both themes
       re-rendered (§14 step 5).
-- [ ] Gate green and ≤ 15 s; the eval meets baseline and budgets on the release commit.
-- [ ] README, CLAUDE.md and `SECURITY.md` describe the UI; every README command run as
+- [x] Gate green and ≤ 15 s; the eval meets baseline and budgets on the release commit.
+- [x] README, CLAUDE.md and `SECURITY.md` describe the UI; every README command run as
       written.
 
 ### 18.9 Risks
