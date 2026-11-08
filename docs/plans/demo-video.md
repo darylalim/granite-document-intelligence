@@ -39,7 +39,7 @@ Every shot boundary falls on a bar line (2.5 s at 96 BPM; see *Music*), and so d
 |---|---|---|---|
 | 0–5 s | 2 | Title card: PDF page → arrow → Markdown/CSV/JSON icons | "PDFs → structured data. Fully local on your Mac." |
 | 5–15 s | 4 | Terminal: `gdi convert gao-07-631.pdf --schema schema.json -o gdi-out` (run from `~`), progress replayed fast | "42 pages, 9 charts, one command" / "Sped up — the real run took N min" |
-| 15–20 s | 2 | Terminal: `tree -L 2 ~/gdi-out/gao-07-631` | "Markdown, JSON, tables, chart CSVs, key-values, RAG chunks" |
+| 15–20 s | 2 | Terminal: `ls -F gdi-out/gao-07-631` | "Markdown, JSON, tables, chart CSVs, key-values, RAG chunks" |
 | 20–22.5 s | 1 | Terminal: `gdi ui` → browser opens | "Or browse it in the UI" |
 | 22.5–30 s | 3 | UI **Document** view, slow scroll | "The whole document as Markdown, in reading order" |
 | 30–35 s | 2 | UI **Tables** | "Tables extracted as data" |
@@ -103,17 +103,26 @@ Five scripts under `demo/`, each runnable alone, all writing to the gitignored `
 
 This is the only step that runs the models. Everything after it replays.
 
-### 2. `terminal.sh`: record the command-line shots
+### 2. `terminal.py`: render the command-line shots
 
-- Tool: **VHS** (`brew install vhs`), which turns a `.tape` script into a video at a fixed size, font and typing speed. There are two tapes: 2560 × 1440 for the main video, and a narrow one with large type for the Short. Both use IBM Plex Mono and a dark Carbon-matched colour scheme.
-- A plain re-run of `gdi convert` would print "skipped", because resume (§3.8) treats the PDF as done. So the tape types the real command, but what runs is a small `replay` helper that prints the captured transcript with its timing compressed (e.g. 20×). The caption says "Sped up".
-- `tree` and `gdi ui --no-browser` run for real against the staged tree.
+This step was planned for VHS, but this Mac has no Homebrew, so VHS, its ttyd and `tree` are all missing (decided with the user on 2026-11-08). Instead, `terminal.html` draws a terminal window in IBM Plex Mono and Carbon g100 colours. Python plays the session into it and takes one screenshot per distinct screen through the same headless Chrome that step 3 uses (`demo/cdp.py`, a standard-library DevTools client).
+
+- **Output.** Each shot is a set of PNG frames plus an ffconcat timeline that `render.sh` encodes. Every change lands on a 30 fps frame, and every shot lasts a whole number of bars. A downscaled `preview.gif` per layout allows a check without ffmpeg, and `meta.json` records each shot's speed-up.
+- **Layouts.**
+  - Main video: 1280 × 720 CSS px at 2×, 90 × 14 characters. The window ends at 524 px, leaving the bottom band for captions.
+  - Short: 360 × 640 at 3×, 40 × 14 characters. 360 × 640 at 3× is exactly 1080 × 1920, which 390 px wide cannot reach with a whole height. The window ends at 363 px, above the mid-frame captions.
+- **The convert replay.** A re-run of `gdi convert` would print "skipped" (§3.8), so its shot replays stage.sh's transcript, compressed to fit: about 50× in the main video and 79× in the Short. The caption says "Sped up".
+  - Only lines in gdi's own progress format are kept. A torch warning, a weights progress bar and a transformers deprecation notice are dropped, and each dropped line is printed.
+  - `--events` is left out of the typed command, since it does not change stderr.
+- **The other commands run for real.** `ls -F gdi-out/gao-07-631` stands in for `tree`, which a stock Mac lacks. `gdi ui --no-browser` runs on the default port, and its output up to the URL line is shown at its own timing.
+- **Wrapping.** Lines wrap between words rather than mid-word, as a terminal would. At the Short's 40 columns, mid-word wrapping split "3 tables" and "gao-07-631". Only the line breaks change, never the text.
+- **Continuity.** In the main video, the scrollback carries across the three shots (4 + 2 + 1 bars), so the crossfades join near-identical frames.
 
 ### 3. `ui.py`: record the UI shots
 
 - Reuse the README screenshot recipe: `gdi ui --no-browser` against the staged tree, headless Chrome over CDP, and `Emulation.setEmulatedMedia` with `prefers-color-scheme: dark`.
   - Main video: 1280 × 720 CSS px at `deviceScaleFactor` 2, which gives 2560 × 1440.
-  - Short: 390 × 693 CSS px at `deviceScaleFactor` 2.77, which gives 1080 × 1920.
+  - Short: 360 × 640 CSS px at `deviceScaleFactor` 3, which gives exactly 1080 × 1920, as the terminal shots do. Check that the phone layout at 360 px matches §15's measurement at 390 px.
 - For each view, open `?view=<Label>`, wait for the same readiness signals (four `stMetricValue`s, every `/media/` image complete), then capture.
 - For motion, take an evenly spaced frame sequence per view (scroll the main column in steps with `Runtime.evaluate`, at 30 fps) rather than `Page.startScreencast`, whose frame timing is irregular.
 - Use the standard library only, or one client through `uvx`, with no model imports at module level, so `TestImportCost` and the 15 s gate are unaffected.
@@ -133,7 +142,7 @@ Small HTML pages in `demo/`, rendered to PNG through the same headless Chrome. C
 
 ## Repository changes
 
-- `demo/` with the five scripts, `timestamp.py` (stage.sh's line recorder), two `.tape` files, `captions.srt`, `captions-short.srt`, `title.html`, `end.html`, `thumbnail.html`, and a `README.md` holding the rebuild command and the music credit record.
+- `demo/` with the five scripts, `timestamp.py` (stage.sh's line recorder), `cdp.py` (the Chrome client), `terminal.html`, `captions.srt`, `captions-short.srt`, `title.html`, `end.html`, `thumbnail.html`, and a `README.md` holding the rebuild command and the music credit record.
 - `.gitignore`: `/demo/build/` and `/demo/assets/`, each with a `TestGitignore` case.
 - The videos are **not** committed, because they are large binaries and go stale. They live on YouTube.
 - `ui.py` passes ruff and ty. It needs no test unless it grows logic beyond driving the browser.

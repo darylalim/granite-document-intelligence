@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Terminal</title>
+<!-- The demo's terminal, drawn for screenshots (docs/plans/demo-video.md, step 2).
+     terminal.py replaces FONT_FACES with IBM Plex Mono as data URIs, sets the
+     layout's variables and calls show() once per distinct screen. -->
+<style>
+/*FONT_FACES*/
+:root {
+  /* Carbon g100 (the UI's dark theme) */
+  --background: #000000;
+  --window: #161616;
+  --bar: #262626;
+  --text: #f4f4f4;
+  --dim: #a8a8a8;
+  --prompt: #78a9ff;
+  --cursor: #f4f4f4;
+}
+html, body { margin: 0; height: 100%; background: var(--background); }
+body {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: var(--font-size);
+  line-height: var(--line-height);
+  font-variant-ligatures: none;
+  -webkit-font-smoothing: antialiased;
+}
+.window {
+  position: absolute;
+  left: 50%;
+  top: var(--top);
+  transform: translateX(-50%);
+  background: var(--window);
+  border: 1px solid #393939;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.bar {
+  height: var(--bar-height);
+  background: var(--bar);
+  display: flex;
+  align-items: center;
+  gap: calc(var(--bar-height) * 0.22);
+  padding: 0 calc(var(--bar-height) * 0.4);
+}
+.bar i { width: calc(var(--bar-height) * 0.32); aspect-ratio: 1; border-radius: 50%; background: #525252; }
+.screen {
+  padding: var(--padding);
+  width: calc(var(--cols) * 1ch);
+  height: calc(var(--rows) * var(--line-height));
+  color: var(--text);
+  white-space: pre;
+  overflow: hidden;
+}
+.prompt { color: var(--prompt); }
+.cursor { background: var(--cursor); color: var(--window); }
+</style>
+</head>
+<body>
+<div class="window">
+  <div class="bar"><i></i><i></i><i></i></div>
+  <div class="screen" id="screen"></div>
+</div>
+<script>
+// lines: [[text, isPrompt]...]; cursor: true draws a block after the last line.
+// Text goes in as textContent only.
+function show(lines, cursor) {
+  const screen = document.getElementById("screen");
+  screen.replaceChildren();
+  lines.forEach(([text, isPrompt], i) => {
+    const row = document.createElement("div");
+    if (isPrompt) {
+      const p = document.createElement("span");
+      p.className = "prompt";
+      p.textContent = text.slice(0, PROMPT.length);
+      row.append(p, text.slice(PROMPT.length));
+    } else {
+      row.textContent = text || " ";
+    }
+    if (cursor && i === lines.length - 1) {
+      const c = document.createElement("span");
+      c.className = "cursor";
+      c.textContent = " ";
+      row.append(c);
+    }
+    screen.append(row);
+  });
+  return document.fonts.ready.then(() => true);
+}
+</script>
+</body>
+</html>
