@@ -4,7 +4,7 @@
 
 docs/plans/demo-video.md has the storyboard. Each shot is a terminal window
 drawn by `terminal.html` in headless Chrome, one screenshot per distinct
-screen, plus an ffconcat timeline that `render.sh` turns into video. Every
+screen, plus an ffconcat timeline that `render.py` turns into video. Every
 shot lasts a whole number of 2.5 s bars, and every change lands on a 30 fps frame.
 
 What appears on screen is real output, never written by hand:
