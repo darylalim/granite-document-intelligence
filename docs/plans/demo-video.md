@@ -163,15 +163,26 @@ This step was planned for VHS, but this Mac has no Homebrew, so VHS, its ttyd an
   - It encodes at **CRF 10** with 24 / 12 Mbps as a ceiling only: 6.2 MB and 2.2 MB.
   - Against the source PNGs it scores mean PSNR 65 / 64 dB (minimum 51 / 56) and worst-frame SSIM 0.99984. YouTube re-encodes the upload, so the master is kept near-lossless.
 
+**Done: captions and crossfades (2026-11-08).** Both videos render in about 40 s, still exactly 2,250 and 1,200 frames.
+- **Crossfades.** There are 8 frames (0.27 s) between every pair of segments, **centred on the bar line**: the outgoing shot holds its last frame for 4 frames, the incoming its first, and the fade spans the join, so every cut stays on its bar and no length changes.
+  - Each segment is its own ffmpeg input, read on demand, so 1440p frames never queue up in memory.
+  - On the main video, frame 150 (the 5 s bar line) is the fades' midpoint and frame 154 the clean terminal.
+  - The Short's loop seam has no fade.
+- **Captions.** They are drawn as PNGs, not with ffmpeg's `subtitles` filter (decided with the user): Homebrew's `ffmpeg` has no libass, and Chrome draws the UI's own Plex Sans with no TTF conversion.
+  - `captions.html` draws each caption on a transparent full frame through `page.py`, and the frames form one ffconcat track laid over the video.
+  - The box is black at 92% with a faint edge. Carbon's `#161616` vanished into the UI's own background.
+  - Every box is measured against its safe area, and the render fails if one leaves it. On the main video, that is the bottom band below every shot. On the Short, it is x 16–298 and y 380–512, clear of the bottom 20% and right 15%; the Short's captions are therefore shorter and two-line.
+  - "{took}" in a caption becomes stage.sh's wall time ("4.5 min").
+  - `→` is drawn as SVG.
+- **SRT.** The same caption table writes `captions.srt` and `captions-short.srt` into `demo/build/`, for YouTube's captions track. That table in `render.py` is their single source, so no hand-kept `.srt` is committed.
+
 **Still to do:**
-- Short crossfades between segments (`xfade`). Each one overlaps two segments, so the timeline has to absorb the overlap to keep the cuts on bar lines.
-- The captions. Homebrew's `ffmpeg` is built without libass, so it has no `subtitles` filter. Either draw each caption as a PNG in Chrome, in the UI's own Plex Sans `woff2`, and composite it with `overlay` between its times, or install `ffmpeg-full`, which is keg-only and has libass, and convert Plex Sans to TTF for it. `captions.srt` is written either way, for YouTube's captions track.
 - `--music <file>` and `--offset <seconds>` (the first downbeat to start from), mixed as described under *Music*: AAC at 192 kbps and 48 kHz.
 - Check the Short's seam by concatenating two copies and playing them back.
 
 ## Repository changes
 
-- `demo/` with the five scripts (`stage.sh`, `terminal.py`, `ui.py`, `cards.py`, `render.py`), `timeline.py`, `page.py`, `timestamp.py` (stage.sh's line recorder), `cdp.py` (the Chrome client), `terminal.html`, `cards.html`, `captions.srt`, `captions-short.srt`, and a `README.md` holding the rebuild command and the music credit record.
+- `demo/` with the five scripts (`stage.sh`, `terminal.py`, `ui.py`, `cards.py`, `render.py`), `timeline.py`, `page.py`, `timestamp.py` (stage.sh's line recorder), `cdp.py` (the Chrome client), `terminal.html`, `cards.html`, `captions.html`, and a `README.md` holding the rebuild command and the music credit record.
 - `.gitignore`: `/demo/build/` and `/demo/assets/`, each with a `TestGitignore` case.
 - The videos are **not** committed, because they are large binaries and go stale. They live on YouTube.
 - `ui.py` passes ruff and ty. It needs no test unless it grows logic beyond driving the browser.

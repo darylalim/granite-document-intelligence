@@ -73,14 +73,29 @@ def snap(
     out: Path,
     size: tuple[int, int],
     scale: float,
+    *,
+    transparent: bool = False,
 ) -> None:
-    """Load `html` (written to `scratch`) at `size` CSS px and save a PNG."""
+    """Load `html` (written to `scratch`) at `size` CSS px and save a PNG.
+
+    `transparent` keeps the PNG's alpha where the page paints nothing, for an
+    overlay such as a caption; the page must leave its own background unset.
+    """
     scratch.write_text(html, encoding="utf-8")
     chrome.viewport(size[0], size[1], scale)
+    if transparent:
+        chrome.call(
+            "Emulation.setDefaultBackgroundColorOverride",
+            color={"r": 0, "g": 0, "b": 0, "a": 0},
+        )
     chrome.navigate(scratch.as_uri())
     chrome.evaluate(READY)
     out.parent.mkdir(parents=True, exist_ok=True)
-    chrome.screenshot(out)
+    try:
+        chrome.screenshot(out)
+    finally:
+        if transparent:
+            chrome.call("Emulation.setDefaultBackgroundColorOverride")
     with Image.open(out) as image:
         expected = (round(size[0] * scale), round(size[1] * scale))
         if image.size != expected:
