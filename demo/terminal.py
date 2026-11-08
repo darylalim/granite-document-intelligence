@@ -13,6 +13,8 @@ What appears on screen is real output, never written by hand:
   library noise (a torch warning, a weights progress bar, a transformers
   deprecation notice) is dropped, and each dropped line is listed on stderr.
 - `ls -F` runs for real against the staged tree. `tree` is not on a stock Mac.
+- `jq '.properties | map_values(.description)' schema.json` runs for real, with
+  the jq macOS ships, to show the KVP schema before its results.
 - `gdi ui --no-browser` runs for real on the default port, and its output up to
   the URL line is shown at its own timing.
 
@@ -35,7 +37,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from cdp import Chrome
-from PIL import Image
+from timeline import BAR, FPS, preview, shot_frames, write_ffconcat
 
 ROOT = Path(__file__).resolve().parent.parent
 BUILD = ROOT / "demo" / "build"
@@ -47,13 +49,13 @@ CACHE = Path(
     or Path.home() / ".cache" / "granite-document-intelligence"
 )
 
-FPS = 30
-BAR = 2.5  # one 4/4 bar at 96 BPM (plan, Music)
 PROMPT = "~ % "
 TYPE_FRAMES = 1  # frames per typed character
 CONVERT = "gdi convert gao-07-631.pdf --schema schema.json -o gdi-out"
 LS = "ls -F gdi-out/gao-07-631"
 UI = "gdi ui"
+SCHEMA_FILTER = ".properties | map_values(.description)"
+SCHEMA = f"jq '{SCHEMA_FILTER}' schema.json"
 
 # gdi's own progress lines (batch.py, phase_a.py, charts.py, kvp.py); all else drops.
 GDI_LINE = re.compile(
@@ -180,6 +182,18 @@ def ls_lines(cols: int) -> list[str]:
     return result.stdout.rstrip("\n").split("\n")
 
 
+def schema_lines() -> list[str]:
+    """The KVP schema's fields and descriptions, by the real jq macOS ships."""
+    result = subprocess.run(
+        ["/usr/bin/jq", SCHEMA_FILTER, "schema.json"],
+        cwd=HOME,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout.rstrip("\n").split("\n")
+
+
 def ui_lines() -> list[tuple[float, str]]:
     """`gdi ui`'s real startup output, timed, up to and including the URL line."""
     env = {**os.environ, "HOME": str(HOME), "GDI_CACHE_DIR": str(CACHE)}
@@ -216,6 +230,17 @@ def ls_shot(session: Session, bars: int, cols: int) -> Shot:
     for line in ls_lines(cols):
         session.output(events, t + 2 / FPS, line)
     return Shot("ls", bars, events, {})
+
+
+def schema_shot(bars: int) -> Shot:
+    """The schema before its results (storyboard, Key-values): a fresh window."""
+    session = Session()
+    events: list[tuple[float, Screen]] = []
+    session.prompt(events, 0.0)
+    t = session.type(events, 0.2, SCHEMA)
+    for line in schema_lines():
+        session.output(events, t + 2 / FPS, line)
+    return Shot("schema", bars, events, {})
 
 
 def ui_shot(session: Session, bars: int, lines: list[tuple[float, str]]) -> Shot:
@@ -282,7 +307,7 @@ def page(layout: Layout) -> str:
 
 def render(chrome: Chrome, layout: Layout, shot: Shot, folder: Path) -> list[float]:
     """Screenshot each distinct frame; write the ffconcat; return the durations."""
-    total = round(shot.bars * BAR * FPS)
+    total = shot_frames(shot.bars)
     by_frame: dict[int, Screen] = {}
     for t, screen in shot.events:
         frame = round(t * FPS)
@@ -293,43 +318,12 @@ def render(chrome: Chrome, layout: Layout, shot: Shot, folder: Path) -> list[flo
     if frames[0] != 0:
         raise ValueError(f"{shot.name}: nothing on screen at 0 s")
     folder.mkdir(parents=True)
-    durations: list[float] = []
-    concat = ["ffconcat version 1.0"]
     for i, frame in enumerate(frames):
         screen = by_frame[frame]
         lines = wrap(screen.lines, layout.cols, layout.rows)
         chrome.evaluate(f"show({json.dumps(lines)}, {json.dumps(screen.cursor)})")
-        name = f"{i:04d}.png"
-        chrome.screenshot(folder / name)
-        following = frames[i + 1] if i + 1 < len(frames) else total
-        durations.append((following - frame) / FPS)
-        concat += [f"file '{name}'", f"duration {durations[-1]:.6f}"]
-    concat.append(
-        f"file '{len(frames) - 1:04d}.png'"
-    )  # ffconcat drops the last duration otherwise
-    (folder.parent / f"{shot.name}.ffconcat").write_text(
-        "\n".join(concat) + "\n", encoding="utf-8"
-    )
-    return durations
-
-
-def preview(layout: Layout, shots: list[tuple[Path, list[float]]]) -> None:
-    frames: list[Image.Image] = []
-    durations: list[int] = []
-    for folder, shot_durations in shots:
-        for i, seconds in enumerate(shot_durations):
-            with Image.open(folder / f"{i:04d}.png") as image:
-                small = image.convert("RGB")
-                small.thumbnail((640, 640))
-                frames.append(small)
-            durations.append(max(20, round(seconds * 1000)))
-    frames[0].save(
-        OUT / layout.name / "preview.gif",
-        save_all=True,
-        append_images=frames[1:],
-        duration=durations,
-        loop=0,
-    )
+        chrome.screenshot(folder / f"{i:04d}.png")
+    return write_ffconcat(folder.parent / f"{shot.name}.ffconcat", frames, total)
 
 
 def main() -> int:
@@ -362,7 +356,7 @@ def main() -> int:
                     "frames": len(durations),
                     **shot.note,
                 }
-            preview(layout, rendered)
+            preview(OUT / layout.name / "preview.gif", rendered)
     (OUT / "meta.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(meta, indent=2))
     return 0
@@ -376,6 +370,8 @@ def _main_shots(
         convert_shot(session, 4, 2.0, lines, wall),
         ls_shot(session, 2, MAIN.cols),
         ui_shot(session, 1, ui),
+        # Cut to after the UI's Charts shot, so a window of its own.
+        schema_shot(2),
     ]
 
 

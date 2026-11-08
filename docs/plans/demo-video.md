@@ -44,7 +44,8 @@ Every shot boundary falls on a bar line (2.5 s at 96 BPM; see *Music*), and so d
 | 22.5–30 s | 3 | UI **Document** view, slow scroll | "The whole document as Markdown, in reading order" |
 | 30–35 s | 2 | UI **Tables** | "Tables extracted as data" |
 | 35–47.5 s | 5 | UI **Charts**: two or three charts, each beside its CSV and summary | "Charts → CSV + summary, read by Granite Vision" |
-| 47.5–55 s | 3 | UI **Key-values**, with the schema shown first | "Fields from your own JSON Schema" |
+| 47.5–52.5 s | 2 | Terminal: `jq '.properties \| map_values(.description)' schema.json`, the schema's fields and descriptions | "Fields from your own JSON Schema" |
+| 52.5–55 s | 1 | UI **Key-values**: the same four fields, filled in and valid | (continues) |
 | 55–60 s | 2 | UI **Chunks** | "Chunks ready for RAG" |
 | 60–62.5 s | 1 | UI **Run** | "Every run recorded: models, versions, timings" |
 | 62.5–75 s | 5 | End card: repo URL, channel handle `@DarylLim-ii7rh`, "granite-docling + Granite Vision 4.1 on MLX · 16 GB Apple Silicon", space for YouTube's end-screen buttons | — |
@@ -114,18 +115,25 @@ This step was planned for VHS, but this Mac has no Homebrew, so VHS, its ttyd an
 - **The convert replay.** A re-run of `gdi convert` would print "skipped" (§3.8), so its shot replays stage.sh's transcript, compressed to fit: about 50× in the main video and 79× in the Short. The caption says "Sped up".
   - Only lines in gdi's own progress format are kept. A torch warning, a weights progress bar and a transformers deprecation notice are dropped, and each dropped line is printed.
   - `--events` is left out of the typed command, since it does not change stderr.
-- **The other commands run for real.** `ls -F gdi-out/gao-07-631` stands in for `tree`, which a stock Mac lacks. `gdi ui --no-browser` runs on the default port, and its output up to the URL line is shown at its own timing.
+- **The other commands run for real.** `ls -F gdi-out/gao-07-631` stands in for `tree`, which a stock Mac lacks. `jq '.properties | map_values(.description)' schema.json`, with the jq macOS ships, shows the KVP schema before its results: the UI never shows the schema, and the plain file wraps past the 14 rows. It is 2 bars, typing included, which leaves the UI's Key-values view 1 bar. `gdi ui --no-browser` runs on the default port, and its output up to the URL line is shown at its own timing.
 - **Wrapping.** Lines wrap between words rather than mid-word, as a terminal would. At the Short's 40 columns, mid-word wrapping split "3 tables" and "gao-07-631". Only the line breaks change, never the text.
 - **Continuity.** In the main video, the scrollback carries across the three shots (4 + 2 + 1 bars), so the crossfades join near-identical frames.
 
 ### 3. `ui.py`: record the UI shots
 
-- Reuse the README screenshot recipe: `gdi ui --no-browser` against the staged tree, headless Chrome over CDP, and `Emulation.setEmulatedMedia` with `prefers-color-scheme: dark`.
-  - Main video: 1280 × 720 CSS px at `deviceScaleFactor` 2, which gives 2560 × 1440.
-  - Short: 360 × 640 CSS px at `deviceScaleFactor` 3, which gives exactly 1080 × 1920, as the terminal shots do. Check that the phone layout at 360 px matches §15's measurement at 390 px.
-- For each view, open `?view=<Label>`, wait for the same readiness signals (four `stMetricValue`s, every `/media/` image complete), then capture.
-- For motion, take an evenly spaced frame sequence per view (scroll the main column in steps with `Runtime.evaluate`, at 30 fps) rather than `Page.startScreencast`, whose frame timing is irregular.
-- Use the standard library only, or one client through `uvx`, with no model imports at module level, so `TestImportCost` and the 15 s gate are unaffected.
+- **Serving.** It runs the real `gdi ui --no-browser` on a free port under stage.sh's scratch `HOME`, so the sidebar reads `~/gdi-out`. Headless Chrome is set to `prefers-color-scheme: dark` through `demo/cdp.py`.
+  - Main video: 1280 × 720 CSS px at 2×, which gives 2560 × 1440. The sidebar stays open, as the app opens on a desktop.
+  - Short: 360 × 640 at 3×, which gives 1080 × 1920, as the terminal shots do. Checked by eye at 360 px: the counts sit 2 × 2, the pills wrap to two rows, and the chart cards and dataframes fit the width.
+- **Readiness.** Each shot opens its view by link (`?view=<Label>`) and waits for the README recipe's signals (four `stMetricValue`s, every `/media/` image decoded) plus 1.5 s for the dataframes' canvases.
+- **Motion.** The script only scrolls `stMain`, Streamlit's scroll container, along eased keyframes; nothing on the page is altered.
+  - A keyframe names an element: the pills (`.st-key-view`) or a chart card (`.st-key-card_chart-001`).
+  - A top edge rests 16 px below Streamlit's fixed header, which otherwise covers the top ~60 px. A bottom edge rests at the frame's bottom, lifted clear of the captions.
+  - A PNG is taken only when the position changes by a whole device pixel. `demo/timeline.py` writes the ffconcat, so held positions cost one PNG.
+- **What the shots show.**
+  - Document opens at the top of the app, then scrolls into the document.
+  - Charts rests on chart-001 and chart-002 side by side, then scrolls through their CSVs and summaries. On the Short, it scrolls through chart-001's card alone.
+  - Key-values, Run and the main video's Chunks barely scroll, because their pages are short.
+- **Cost.** It takes about 3 minutes, mostly the 2560 × 1440 screenshots.
 
 ### 4. `cards.sh`: title card, end card and thumbnail
 
