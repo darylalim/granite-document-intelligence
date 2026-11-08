@@ -15,8 +15,16 @@ cards.py: PNG frames plus an ffconcat timeline, checked against its bars.
   safe area. They form one ffconcat track, laid over the video. The same table
   writes captions.srt (and captions-short.srt) for YouTube's captions track.
 
-Silent for now: the music is the next step. Writes demo/build/gdi-demo-1440p.mp4,
-demo/build/gdi-demo-short.mp4 and their .srt files.
+- **Music**, with `--music <file> --offset <seconds>` (the track's first downbeat;
+  tempo.py measures it). The main video fades in over FADE_IN and out over
+  FADE_OUT across the end card. The Short's sound is cut to exactly its 16 bars
+  and its last SEAM seconds crossfaded into its first, so it loops without a
+  dip or a click. Both are normalised in two loudnorm passes and then measured
+  with ebur128; the render fails off LOUDNESS by more than 1 LU or above
+  TRUE_PEAK. Without --music the videos are silent.
+
+Writes demo/build/gdi-demo-1440p.mp4, demo/build/gdi-demo-short.mp4 and their
+.srt files.
 """
 
 import argparse
@@ -37,12 +45,21 @@ BUILD = ROOT / "demo" / "build"
 WORK = BUILD / "render"
 HALF_FADE = 4  # frames: each crossfade lasts 8 (0.27 s), centred on the bar line
 
+# Music (plan, Music): YouTube plays at -14 LUFS integrated, and the true peak
+# must stay at or below -1 dBTP. loudnorm aims 1 dB lower, because the AAC
+# encode overshoots its input's peak: by 0.6 dB on the Short's click-track test.
+LOUDNESS = -14.0
+TRUE_PEAK = -1.0
+PEAK_TARGET = -2.0
+FADE_IN, FADE_OUT = 1.0, 3.0  # the main video's, the fade-out across the end card
+SEAM = 0.05  # s: the Short's loop crossfade, in place of a fade-out that dips
+
 
 def ffmpeg_tool(name: str) -> str:
-    """Homebrew's ffmpeg, which a fresh shell may not have on PATH yet."""
+    """A Homebrew tool (ffmpeg, ffprobe, aubio), which a fresh shell may not have on PATH."""
     found = shutil.which(name) or shutil.which(name, path="/opt/homebrew/bin")
     if found is None:
-        raise SystemExit(f"render: {name} not found; brew install ffmpeg")
+        raise SystemExit(f"render: {name} not found; brew install ffmpeg aubio")
     return found
 
 
@@ -75,6 +92,7 @@ class Target:
     maxrate: str  # a ceiling, not a target: plan step 5's 24 / 12 Mbps
     segments: tuple[Segment, ...]
     captions: tuple[Caption, ...]
+    loops: bool = False  # the Short: its sound wraps from the end to the start
 
 
 MAIN = Target(
@@ -145,6 +163,7 @@ SHORT = Target(
         Caption(12, 3, ("Markdown, tables,", "RAG chunks")),
         Caption(15, 1, ("Open source ·", "full demo linked below")),
     ),
+    loops=True,
 )
 TARGETS = {"main": MAIN, "short": SHORT}
 
@@ -283,12 +302,121 @@ def filter_graph(target: Target, captions_input: int) -> tuple[str, int]:
     return ";".join(parts), total
 
 
-def encode(target: Target, inputs: list[Path], graph: str, frames: int) -> Path:
+@dataclass(frozen=True)
+class Music:
+    path: Path
+    offset: float  # seconds into the track: its first downbeat
+
+
+def music_chain(target: Target, source: str, seconds: float) -> str:
+    """From the track's stream `source` to [apre]: trimmed, faded or looped."""
+    base = f"{source}aresample=48000,aformat=channel_layouts=stereo"
+    if not target.loops:
+        return (
+            f"{base},atrim=0:{seconds},asetpts=PTS-STARTPTS,"
+            f"afade=t=in:d={FADE_IN},"
+            f"afade=t=out:st={seconds - FADE_OUT}:d={FADE_OUT}[apre]"
+        )
+    # The loop: the SEAM after the end is faded out over the start, which fades
+    # in (equal power), so the last sample leads into the first as the track
+    # itself would have continued.
+    return (
+        f"{base},atrim=0:{seconds + SEAM},asetpts=PTS-STARTPTS,asplit=3[ma][mb][mc];"
+        f"[ma]atrim=0:{SEAM},afade=t=in:d={SEAM}:curve=qsin[mh];"
+        f"[mb]atrim={seconds}:{seconds + SEAM},asetpts=PTS-STARTPTS,"
+        f"afade=t=out:d={SEAM}:curve=qsin[mt];"
+        f"[mh][mt]amix=inputs=2:normalize=0[mseam];"
+        f"[mc]atrim={SEAM}:{seconds},asetpts=PTS-STARTPTS[mbody];"
+        f"[mseam][mbody]concat=n=2:v=0:a=1[apre]"
+    )
+
+
+def loudness_pass(target: Target, music: Music, seconds: float) -> dict[str, str]:
+    """loudnorm's first pass: the trimmed, faded music's measured loudness."""
+    chain = music_chain(target, "[0:a]", seconds)
+    result = subprocess.run(
+        [
+            ffmpeg_tool("ffmpeg"),
+            "-hide_banner",
+            "-nostats",
+            "-ss",
+            str(music.offset),
+            "-i",
+            str(music.path),
+            "-filter_complex",
+            (
+                f"{chain};[apre]loudnorm=I={LOUDNESS}:TP={PEAK_TARGET}:LRA=20"
+                ":print_format=json[aout]"
+            ),
+            "-map",
+            "[aout]",
+            "-f",
+            "null",
+            "-",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    text = result.stderr
+    return json.loads(text[text.rindex("{") : text.rindex("}") + 1])
+
+
+def audio_graph(target: Target, music_input: int, seconds: float, music: Music) -> str:
+    m = loudness_pass(target, music, seconds)
+    return (
+        music_chain(target, f"[{music_input}:a]", seconds)
+        + f";[apre]loudnorm=I={LOUDNESS}:TP={PEAK_TARGET}:LRA=20"
+        f":measured_I={m['input_i']}:measured_TP={m['input_tp']}"
+        f":measured_LRA={m['input_lra']}:measured_thresh={m['input_thresh']}"
+        f":offset={m['target_offset']}:linear=true,aresample=48000[aout]"
+    )
+
+
+def measure_loudness(path: Path) -> tuple[float, float]:
+    """The finished file's integrated loudness (LUFS) and true peak (dBTP)."""
+    result = subprocess.run(
+        [
+            ffmpeg_tool("ffmpeg"),
+            "-hide_banner",
+            "-nostats",
+            "-i",
+            str(path),
+            "-map",
+            "0:a",
+            "-af",
+            "ebur128=peak=true",
+            "-f",
+            "null",
+            "-",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    summary = result.stderr[result.stderr.rindex("Summary:") :]
+    integrated = float(summary.split("I:")[1].split()[0])
+    peak = float(summary.split("True peak:")[1].split("Peak:")[1].split()[0])
+    return integrated, peak
+
+
+def encode(
+    target: Target,
+    inputs: list[Path],
+    graph: str,
+    frames: int,
+    music: Music | None = None,
+) -> Path:
     output = BUILD / target.output
     rate = int(target.maxrate.rstrip("M"))
     sources: list[str] = []
     for path in inputs:
         sources += ["-f", "concat", "-i", str(path)]
+    audio: list[str] = []
+    if music is not None:
+        sources += ["-ss", str(music.offset), "-i", str(music.path)]
+        graph += ";" + audio_graph(target, len(inputs), frames / FPS, music)
+        audio = ["-map", "[aout]", "-c:a", "aac", "-b:a", "192k", "-ar", "48000"]
     subprocess.run(
         [
             ffmpeg_tool("ffmpeg"),
@@ -301,6 +429,7 @@ def encode(target: Target, inputs: list[Path], graph: str, frames: int) -> Path:
             graph,
             "-map",
             "[out]",
+            *audio,
             "-frames:v",
             str(frames),
             "-c:v",
@@ -370,7 +499,14 @@ def probe(path: Path) -> dict[str, object]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("target", nargs="?", default="all", choices=[*TARGETS, "all"])
+    parser.add_argument("--music", type=Path, help="the music track (demo/assets/)")
+    parser.add_argument(
+        "--offset", type=float, default=0.0, help="its first downbeat, in seconds"
+    )
     args = parser.parse_args()
+    music = Music(args.music, args.offset) if args.music else None
+    if music is not None and not music.path.is_file():
+        parser.error(f"no music file at {music.path}")
     WORK.mkdir(parents=True, exist_ok=True)
     took = run_took()
     targets = TARGETS.values() if args.target == "all" else [TARGETS[args.target]]
@@ -382,14 +518,24 @@ def main() -> int:
             expected = round(sum(s.bars for s in target.segments) * BAR * FPS)
             track = caption_track(chrome, target, total, took)
             srt = write_srt(target, took)
-            output = encode(target, [*shots, track], graph, total)
+            output = encode(target, [*shots, track], graph, total, music)
             info = probe(output)
-            ok = info["frames"] == total == expected
+            frames_ok = info["frames"] == total == expected
+            ok = frames_ok
+            if music is not None:
+                integrated, peak = measure_loudness(output)
+                loud_ok = abs(integrated - LOUDNESS) <= 1.0 and peak <= TRUE_PEAK
+                print(
+                    f"render: music {music.path.name} from {music.offset} s: "
+                    f"{integrated:.1f} LUFS, true peak {peak:.1f} dBTP "
+                    f"({'ok' if loud_ok else f'OFF TARGET {LOUDNESS} / {TRUE_PEAK}'})"
+                )
+                ok &= loud_ok
             failed |= not ok
             print(f"render: {output.relative_to(ROOT)}: {json.dumps(info)}")
             print(
                 f"render: {total} frames, {expected} in the storyboard: "
-                f"{'ok' if ok else 'MISMATCH'}; {len(target.captions)} captions, "
+                f"{'ok' if frames_ok else 'MISMATCH'}; {len(target.captions)} captions, "
                 f"{len(shots) - 1} crossfades; {srt.relative_to(ROOT)}"
             )
     return 1 if failed else 0

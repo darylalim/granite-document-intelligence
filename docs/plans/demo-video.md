@@ -176,9 +176,24 @@ This step was planned for VHS, but this Mac has no Homebrew, so VHS, its ttyd an
   - `→` is drawn as SVG.
 - **SRT.** The same caption table writes `captions.srt` and `captions-short.srt` into `demo/build/`, for YouTube's captions track. That table in `render.py` is their single source, so no hand-kept `.srt` is committed.
 
-**Still to do:**
-- `--music <file>` and `--offset <seconds>` (the first downbeat to start from), mixed as described under *Music*: AAC at 192 kbps and 48 kHz.
-- Check the Short's seam by concatenating two copies and playing them back.
+**Done: the music pipeline (2026-11-08)**, tested on a synthetic track while the real one is chosen.
+- **`demo/tempo.py <tracks>`** measures each candidate with aubio. It prints the fitted tempo, how steadily the beats sit on it, and four `--offset` candidates, one per beat of the bar. Which is the downbeat is judged by ear.
+  - aubio's beat tracker skips beats: on a clean click track its intervals fell at 1, 3 and 4 beats, and its own estimate read 39 BPM. So the period is **fitted**: the one from 80 to 125 BPM that best explains every interval as whole beats.
+  - The phase is the beats' circular mean.
+  - It warns when a track is off 96 ± 2 BPM or unsteady.
+- **`demo/tempo.py --click <wav>`** writes a test track: 96 BPM, first downbeat at 0.3 s, a 1600 Hz click on each downbeat and 1000 Hz on the other beats, over a quiet drone. Clicks alone are too peaky to reach −14 LUFS under −1 dBTP.
+  - On it the fit reads 96.00 BPM, with offsets beginning 0.287 s (true 0.300).
+- **`render.py --music <file> --offset <s>`** mixes the music in.
+  - **Main video:** fades in over 1 s, and out over 3 s across the end card.
+  - **Short:** its sound is cut to exactly 40 s, and the 50 ms after the end is crossfaded (equal power) over the start, so it loops with no dip.
+  - **Loudness:** both are normalised by two-pass `loudnorm` to −14 LUFS, aiming the true peak at −2 dBTP because the AAC encode overshot −1.5 by 0.6 dB. ebur128 then measures the finished file, and the render fails if it is off −14 LUFS by more than 1 LU or above −1 dBTP.
+  - AAC at 192 kbps, 48 kHz.
+- **Verified on the click track:**
+  - Both files measure −14.1 LUFS, with true peaks of −1.6 and −1.7 dBTP.
+  - All 113 onsets in the main video sit within 8 ms of the 96 BPM grid (a steady −7 ms is aubio's detection bias), and all 28 bar lines inside the fades carry a downbeat.
+  - The Short played twice keeps its beats 0.624–0.627 s apart across the seam. The seam's biggest sample step (4,314) is below every other downbeat's (5,167–5,622), so the loop adds no click.
+
+**Still to do:** choose the track (*Music*, steps 1–5), then render both videos with it and record its credit in `demo/README.md`.
 
 ## Repository changes
 

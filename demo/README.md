@@ -9,7 +9,8 @@ demo/stage.sh                         # step 1: the one real conversion (about 5
 .venv/bin/python demo/terminal.py     # step 2: the terminal shots (about 30 s)
 .venv/bin/python demo/ui.py           # step 3: the UI shots (about 3 min)
 .venv/bin/python demo/cards.py        # step 4: the cards and thumbnail.png (about 10 s)
-.venv/bin/python demo/render.py       # step 5: both videos (about 30 s; brew install ffmpeg)
+.venv/bin/python demo/tempo.py demo/assets/*.mp3      # measure candidate tracks (brew install aubio)
+.venv/bin/python demo/render.py --music demo/assets/<track> --offset <s>   # step 5: both videos (about 45 s)
 ```
 
 `stage.sh` is the only step that runs the models. Run it on an idle Mac on AC power, because its wall time goes on screen. It converts `eval/corpus/gao-07-631.pdf` with the eval's key-value schema from a scratch `HOME` (`demo/build/home/`), running exactly the command the terminal shot types:
@@ -24,7 +25,7 @@ The paths are relative so that neither the replayed output nor the UI's Run view
 
 `ui.py` serves the staged tree with the real `gdi ui` and scrolls each view in headless Chrome, writing the same frames-plus-timeline layout under `build/ui/<main|short>/`. Both scripts share `timeline.py` (bar and frame timing, the ffconcat writer, the preview GIF) and `cdp.py`.
 
-`render.py` joins the shots in storyboard order into `build/gdi-demo-1440p.mp4` and `build/gdi-demo-short.mp4`, checking every shot's length against the storyboard. It crossfades each join on its bar line and burns in the captions, drawn by `captions.html`, and writes `build/captions.srt` and `build/captions-short.srt` from the same table for YouTube's captions track. For now it is silent. `cards.py` draws the title, end and Short cards and `build/thumbnail.png` from `cards.html`, through `page.py`, which the captions will also use.
+`render.py` joins the shots in storyboard order into `build/gdi-demo-1440p.mp4` and `build/gdi-demo-short.mp4`, checking every shot's length against the storyboard. It crossfades each join on its bar line and burns in the captions, drawn by `captions.html`, and writes `build/captions.srt` and `build/captions-short.srt` from the same table for YouTube's captions track. With `--music` it mixes in the track from `--offset` (its first downbeat, from `tempo.py`), loops the Short's sound seamlessly, normalises both to −14 LUFS and fails if the finished file misses that or −1 dBTP. Without `--music` the videos are silent. `tempo.py --click build/click.wav` makes a 96 BPM test track with known beat times. `cards.py` draws the title, end and Short cards and `build/thumbnail.png` from `cards.html`, through `page.py`, which the captions will also use.
 
 ## Music credit
 
