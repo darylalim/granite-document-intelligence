@@ -25,10 +25,15 @@ def main(argv: list[str]) -> int:
         with open(events, "a", encoding="utf-8") as handle:
             handle.write(text)
 
-    append(os.environ.get("STUB_CHILD_EVENTS", ""))
-    sys.stderr.write(os.environ.get("STUB_CHILD_STDERR", ""))
-    sys.stderr.flush()
+    # The writes sit inside the try: a test sends SIGINT once it can read the
+    # first event, which can be before this append has closed the file. Outside
+    # the try, that KeyboardInterrupt went uncaught and the child died of SIGINT
+    # (-2) instead of exiting 130 (288 of 300 runs when signalled the moment the
+    # line appears; test_cancel_is_ctrl_c failed this way once in CI).
     try:
+        append(os.environ.get("STUB_CHILD_EVENTS", ""))
+        sys.stderr.write(os.environ.get("STUB_CHILD_STDERR", ""))
+        sys.stderr.flush()
         time.sleep(float(os.environ.get("STUB_CHILD_HOLD", "0")))
     except KeyboardInterrupt:
         append(json.dumps({"v": 1, "event": "interrupted"}) + "\n")
