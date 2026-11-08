@@ -38,7 +38,7 @@ Every shot boundary falls on a bar line (2.5 s at 96 BPM; see *Music*), and so d
 | Time | Bars | Shot | Caption |
 |---|---|---|---|
 | 0–5 s | 2 | Title card: PDF page → arrow → Markdown/CSV/JSON icons | "PDFs → structured data. Fully local on your Mac." |
-| 5–15 s | 4 | Terminal: `gdi convert gao-07-631.pdf --schema schema.json -o ~/gdi-out`, progress replayed fast | "42 pages, 9 charts, one command" / "Sped up — the real run took N min" |
+| 5–15 s | 4 | Terminal: `gdi convert gao-07-631.pdf --schema schema.json -o gdi-out` (run from `~`), progress replayed fast | "42 pages, 9 charts, one command" / "Sped up — the real run took N min" |
 | 15–20 s | 2 | Terminal: `tree -L 2 ~/gdi-out/gao-07-631` | "Markdown, JSON, tables, chart CSVs, key-values, RAG chunks" |
 | 20–22.5 s | 1 | Terminal: `gdi ui` → browser opens | "Or browse it in the UI" |
 | 22.5–30 s | 3 | UI **Document** view, slow scroll | "The whole document as Markdown, in reading order" |
@@ -94,11 +94,12 @@ Five scripts under `demo/`, each runnable alone, all writing to the gitignored `
 
 ### 1. `stage.sh`: produce the real output once
 
-1. Make sure the models directory exists. It is currently absent from the default cache, so run `gdi convert-model` first, which takes about 3 min plus a ~9 GB download.
-2. Under a scratch `HOME`, so the UI shows the default `~/gdi-out`, run:
-   `gdi convert eval/corpus/gao-07-631.pdf --schema …/schema.json -o $HOME/gdi-out --events demo/build/events.jsonl`.
-   Capture stderr with `script -r` (macOS) so each line keeps its timestamp.
-3. Keep the tree, `events.jsonl`, the timed transcript and the wall time. Running on an idle Mac on AC power, as with the eval, keeps the "real run took" caption honest.
+1. Check the models directory against the pins with `verify_models_dir`, and run `gdi convert-model` only if that fails (about 3 min plus a ~9 GB download).
+2. Copy the PDF and schema into a scratch `HOME` (`demo/build/home/`), so the UI shows the default `~/gdi-out`. From there, run:
+   `gdi convert gao-07-631.pdf --schema schema.json -o gdi-out`, adding `--events`.
+   The paths are relative because the replayed output prints `-o` as given and the UI's Run view prints the recorded `--schema` path. Absolute paths would put this Mac's home directory on screen. `GDI_CACHE_DIR` and `HF_HOME` stay pinned to the real caches.
+   Output goes through `demo/timestamp.py`, which records each line with its time as JSON Lines. This replaced `script -r`, whose binary records carry a `^D` and header lines that the replay would have to strip.
+3. Keep the tree, `events.jsonl`, `transcript.jsonl` and `stage.json` (command, wall time, commit, date). Running on an idle Mac on AC power, as with the eval, keeps the "real run took" caption honest.
 
 This is the only step that runs the models. Everything after it replays.
 
@@ -132,7 +133,7 @@ Small HTML pages in `demo/`, rendered to PNG through the same headless Chrome. C
 
 ## Repository changes
 
-- `demo/` with the five scripts, two `.tape` files, `captions.srt`, `captions-short.srt`, `title.html`, `end.html`, `thumbnail.html`, and a `README.md` holding the rebuild command and the music credit record.
+- `demo/` with the five scripts, `timestamp.py` (stage.sh's line recorder), two `.tape` files, `captions.srt`, `captions-short.srt`, `title.html`, `end.html`, `thumbnail.html`, and a `README.md` holding the rebuild command and the music credit record.
 - `.gitignore`: `/demo/build/` and `/demo/assets/`, each with a `TestGitignore` case.
 - The videos are **not** committed, because they are large binaries and go stale. They live on YouTube.
 - `ui.py` passes ruff and ty. It needs no test unless it grows logic beyond driving the browser.
