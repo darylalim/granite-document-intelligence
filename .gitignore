@@ -14,6 +14,11 @@ __pycache__
 /eval/private/
 /eval/runs/
 
+# Demo videos (docs/plans/demo-video.md): rendered output and the music track,
+# whose Audio Library licence does not cover redistribution
+/demo/build/
+/demo/assets/
+
 # Pipeline output (§3.5) — kept out of git, ruff and the gate's fingerprint
 /out/
 *.partial/
