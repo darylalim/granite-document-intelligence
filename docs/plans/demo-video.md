@@ -48,7 +48,7 @@ Every shot boundary falls on a bar line (2.5 s at 96 BPM; see *Music*), and so d
 | 52.5–55 s | 1 | UI **Key-values**: the same four fields, filled in and valid | (continues) |
 | 55–60 s | 2 | UI **Chunks** | "Chunks ready for RAG" |
 | 60–62.5 s | 1 | UI **Run** | "Every run recorded: models, versions, timings" |
-| 62.5–75 s | 5 | End card: repo URL, channel handle `@DarylLim-ii7rh`, "granite-docling + Granite Vision 4.1 on MLX · 16 GB Apple Silicon", space for YouTube's end-screen buttons | — |
+| 62.5–75 s | 5 | End card: repo URL, channel handle `@darylalim-hnl`, "granite-docling + Granite Vision 4.1 on MLX · 16 GB Apple Silicon", space for YouTube's end-screen buttons | — |
 
 The end card runs 12.5 s, at least the 10 s needed, because YouTube's clickable end-screen elements take the last 5–20 s of a video that is at least 25 s long. The layout leaves the right half free for them.
 
@@ -135,15 +135,27 @@ This step was planned for VHS, but this Mac has no Homebrew, so VHS, its ttyd an
   - Key-values, Run and the main video's Chunks barely scroll, because their pages are short.
 - **Cost.** It takes about 3 minutes, mostly the 2560 × 1440 screenshots.
 
-### 4. `cards.sh`: title card, end card and thumbnail
+### 4. `cards.py`: title card, end card, the Short's cards and the thumbnail
 
-Small HTML pages in `demo/`, rendered to PNG through the same headless Chrome. Chrome loads the Plex `woff2` files directly, so the cards match the UI.
+`cards.py` rather than `cards.sh`, and one `cards.html` holding all five layouts over shared CSS rather than a page each. `demo/page.py` renders it through the same headless Chrome: Plex fonts read from the UI's theme config and inlined, data placed with `textContent`, each PNG checked for its exact size. The captions in step 5 reuse it. Every picture comes from the staged run, and each output a card names is checked to exist in the tree.
+
+| Card | Length | Content |
+|---|---|---|
+| Main title | 2 bars | Page 12 of the PDF (the page holding chart-001) → `document.md`, `charts/chart-001.csv`, `kvp.json`, `chunks.jsonl`; all above the caption band |
+| Main end | 5 bars | Name, one-line pitch, repo URL, models, "a 16 GB Apple Silicon Mac, offline", channel handle; the right half left empty for YouTube's end-screen elements |
+| Short opening | 1 bar | chart-001, large, with `gao-07-631.pdf · page 12` |
+| Short end | 1 bar | Name and repo for 1.5 s, then the opening frame for 1 s, so the loop's last frame is its first (decoded, they differ by at most 6 of 255, encoder noise) |
+| Thumbnail | — | "Charts → CSV, locally" over chart-001 and the first six rows of its CSV as Granite Vision wrote them; 1280 × 720, 79 KB |
+
+- **The chart.** It is rendered from the PDF as `charts.render_crop` crops it, at 4× (1440 px wide) so it stays sharp at phone width.
+  - The crop is padded by 10 points, because Docling's box clips the chart's "Source:" line. The pipeline's own crop is unchanged.
+- **Arrows are SVG.** The UI's Plex subsets have no `→` (U+2192), and a fallback glyph would not match.
 
 ### 5. `render.py`: assemble both videos with ffmpeg
 
 `render.py` rather than `render.sh`: the storyboard is data (its `MAIN` and `SHORT` segment tables), the script takes arguments, and Python gets ruff and ty, while no gate checks shell. ffmpeg comes from Homebrew (`brew install ffmpeg`, 9.0.2 on 2026-11-08).
 
-**Done: the rough render (2026-11-08).** It joins every shot end to end, silent, with plain black for the cards that step 4 will make.
+**Done: the rough render (2026-11-08).** It joins every shot end to end, silent; since step 4 the cards fill what were black gaps.
 - All segments go into one ffconcat, so ffmpeg reads each PNG once and encodes once. Both videos took 27 s.
 - Each shot's frame count is checked against its bars, and the output's against the storyboard: 2,250 frames (75.0 s) and 1,200 (40.0 s), exact.
 - **Encoding.** H.264 High, `yuv420p`, 30 fps, `+faststart`, converted from sRGB to BT.709 limited range and tagged as such.
@@ -159,7 +171,7 @@ Small HTML pages in `demo/`, rendered to PNG through the same headless Chrome. C
 
 ## Repository changes
 
-- `demo/` with the five scripts (`stage.sh`, `terminal.py`, `ui.py`, `cards`, `render.py`), `timeline.py`, `timestamp.py` (stage.sh's line recorder), `cdp.py` (the Chrome client), `terminal.html`, `captions.srt`, `captions-short.srt`, `title.html`, `end.html`, `thumbnail.html`, and a `README.md` holding the rebuild command and the music credit record.
+- `demo/` with the five scripts (`stage.sh`, `terminal.py`, `ui.py`, `cards.py`, `render.py`), `timeline.py`, `page.py`, `timestamp.py` (stage.sh's line recorder), `cdp.py` (the Chrome client), `terminal.html`, `cards.html`, `captions.srt`, `captions-short.srt`, and a `README.md` holding the rebuild command and the music credit record.
 - `.gitignore`: `/demo/build/` and `/demo/assets/`, each with a `TestGitignore` case.
 - The videos are **not** committed, because they are large binaries and go stale. They live on YouTube.
 - `ui.py` passes ruff and ty. It needs no test unless it grows logic beyond driving the browser.
@@ -169,7 +181,8 @@ Small HTML pages in `demo/`, rendered to PNG through the same headless Chrome. C
 - **Title:** says what it does, e.g. "Turn PDFs into Markdown, chart CSVs and RAG chunks — locally on a Mac".
 - **Description:** the repo URL on the first line (only the first lines show above "more", and only URLs are clickable), then a short "what you're seeing" with timestamps, the models and their licences, and the dated performance figures from the README.
 - **Captions:** upload `captions.srt` to the main video.
-- **End screen:** a "subscribe" element, plus a "Link" element to the repo if YouTube Studio offers one. The channel is verified, but external-site links in end screens have also required YouTube Partner Program membership, so check the editor. If "Link" is missing, the repo URL printed on the end card and the description cover it.
+- **Thumbnail:** upload `thumbnail.png` to the main video. Custom thumbnails need YouTube's intermediate features, which Studio showed enabled for @darylalim-hnl on 2026-11-08 (Settings → Channel → Feature eligibility).
+- **End screen:** a "subscribe" element, plus a "Link" element to the repo if YouTube Studio offers one. The channel's phone verification is done (intermediate features enabled, 2026-11-08), but external-site links in end screens have also required YouTube Partner Program membership, so check the editor. If "Link" is missing, the repo URL printed on the end card and the description cover it.
 - **Pinned comment:** the repo URL.
 - **Short:** link the main video as its "related video", so viewers can go from the Short to the full walkthrough.
 
@@ -181,4 +194,4 @@ Like `docs/images/ui-*.png`, the videos go stale when the UI layout, theme or la
 
 1. **Which music track.** Shortlist three at about 96 BPM from the Audio Library, then follow the steps under *Music*. The decision itself waits on rendered cuts.
 
-Settled on 2026-11-08: the channel is `https://www.youtube.com/@DarylLim-ii7rh` (verified), and the repo URL is `https://github.com/darylalim/granite-document-intelligence`.
+Settled on 2026-11-08: the channel is `https://www.youtube.com/@darylalim-hnl` (corrected the same day from an earlier handle), and the repo URL is `https://github.com/darylalim/granite-document-intelligence`.

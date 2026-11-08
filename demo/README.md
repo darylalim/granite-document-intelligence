@@ -8,6 +8,7 @@ The scripts that build the YouTube demo videos. The plan, and the reason for eac
 demo/stage.sh                         # step 1: the one real conversion (about 5 min); --force to redo
 .venv/bin/python demo/terminal.py     # step 2: the terminal shots (about 30 s)
 .venv/bin/python demo/ui.py           # step 3: the UI shots (about 3 min)
+.venv/bin/python demo/cards.py        # step 4: the cards and thumbnail.png (about 10 s)
 .venv/bin/python demo/render.py       # step 5: both videos (about 30 s; brew install ffmpeg)
 ```
 
@@ -23,7 +24,7 @@ The paths are relative so that neither the replayed output nor the UI's Run view
 
 `ui.py` serves the staged tree with the real `gdi ui` and scrolls each view in headless Chrome, writing the same frames-plus-timeline layout under `build/ui/<main|short>/`. Both scripts share `timeline.py` (bar and frame timing, the ffconcat writer, the preview GIF) and `cdp.py`.
 
-`render.py` joins the shots in storyboard order into `build/gdi-demo-1440p.mp4` and `build/gdi-demo-short.mp4`, checking every shot's length against the storyboard. For now it is the rough render: silent, with no captions or crossfades, and black where the cards (step 4) will go.
+`render.py` joins the shots in storyboard order into `build/gdi-demo-1440p.mp4` and `build/gdi-demo-short.mp4`, checking every shot's length against the storyboard. For now it is silent, with no captions or crossfades. `cards.py` draws the title, end and Short cards and `build/thumbnail.png` from `cards.html`, through `page.py`, which the captions will also use.
 
 ## Music credit
 

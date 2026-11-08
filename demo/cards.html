@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cards</title>
+<!-- The demo's still cards (docs/plans/demo-video.md, step 4). cards.py fills
+     FONT_FACES with IBM Plex as data URIs and DATA with one card's content;
+     only that card's section is shown. Text goes in through textContent only. -->
+<style>
+/*FONT_FACES*/
+:root {
+  /* Carbon g100, the UI's dark theme */
+  --background: #161616;
+  --layer: #262626;
+  --border: #393939;
+  --text: #f4f4f4;
+  --dim: #a8a8a8;
+  --accent: #78a9ff;
+  --accent-strong: #4589ff;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; width: 100%; height: 100%; background: var(--background); }
+body {
+  color: var(--text);
+  font-family: "IBM Plex Sans", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+.mono { font-family: "IBM Plex Mono", monospace; }
+.dim { color: var(--dim); }
+section { display: none; position: absolute; inset: 0; }
+section.on { display: block; }
+.paper { background: #fff; border-radius: 4px; display: block; }
+.arrow { fill: var(--accent); }
+h1 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+
+/* Title: 1280 x 720 CSS px; everything above y 524, the captions' band. */
+#title h1 { position: absolute; left: 88px; top: 64px; font-size: 48px; }
+#title .sub { position: absolute; left: 90px; top: 132px; font-size: 20px; }
+#title .row {
+  position: absolute; left: 88px; right: 88px; top: 190px; height: 316px;
+  display: flex; align-items: center; gap: 56px;
+}
+#title .page { display: flex; flex-direction: column; gap: 10px; align-items: center; }
+#title .page img { height: 284px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); }
+#title .page span { font-size: 14px; }
+#title .outputs { display: flex; flex-direction: column; gap: 14px; }
+.chip {
+  display: flex; align-items: center; gap: 18px; width: 470px; height: 64px;
+  padding: 0 20px; background: var(--layer); border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.chip b {
+  width: 64px; font-size: 13px; font-weight: 600; text-align: center;
+  color: var(--background); background: var(--accent); border-radius: 3px;
+  padding: 3px 0; letter-spacing: 0.04em;
+}
+.chip .mono { font-size: 21px; flex: 1; }
+.chip .what { font-size: 16px; color: var(--dim); }
+
+/* End card: the right half stays empty for YouTube's end-screen elements. */
+#end .col {
+  position: absolute; left: 88px; top: 0; bottom: 0; width: 560px;
+  display: flex; flex-direction: column; justify-content: center; gap: 28px;
+}
+#end h1 { font-size: 44px; line-height: 1.1; }
+#end .lede { font-size: 20px; line-height: 1.45; margin: 0; }
+#end dl { margin: 0; display: grid; grid-template-columns: 96px max-content; row-gap: 14px; }
+#end dt { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--dim); padding-top: 4px; }
+#end dd { margin: 0; font-size: 18px; }
+#end dd.mono { font-size: 16px; color: var(--accent); white-space: nowrap; }
+
+/* Short: 360 x 640 CSS px. Content stays above y 360: the captions sit
+   mid-frame, and YouTube's buttons cover the bottom 20%. */
+#short-open .label { position: absolute; left: 12px; right: 12px; top: 64px; font-size: 12px; }
+#short-open img { position: absolute; left: 12px; top: 92px; width: 336px; }
+#short-end .col {
+  position: absolute; left: 20px; right: 20px; top: 88px;
+  display: flex; flex-direction: column; gap: 18px;
+}
+#short-end h1 { font-size: 32px; line-height: 1.1; }
+#short-end .repo { font-size: 14px; line-height: 1.5; color: var(--accent); }
+#short-end .note { font-size: 15px; }
+
+/* Thumbnail: 1280 x 720 at 1x, read at a few hundred px wide in YouTube's grid. */
+#thumbnail h1 {
+  position: absolute; left: 64px; top: 40px; font-size: 92px; font-weight: 700;
+  display: flex; align-items: center; gap: 24px; white-space: nowrap;
+}
+#thumbnail h1 svg { width: 96px; height: 60px; }
+#thumbnail .row {
+  position: absolute; left: 64px; right: 64px; top: 210px; bottom: 56px;
+  display: flex; align-items: center; gap: 40px;
+}
+#thumbnail img { width: 600px; }
+#thumbnail table { border-collapse: collapse; font-size: 34px; }
+#thumbnail th { color: var(--dim); font-weight: 400; font-size: 22px; text-align: left; padding: 0 28px 10px 0; white-space: nowrap; }
+#thumbnail td { padding: 4px 28px 4px 0; border-top: 1px solid var(--border); }
+#thumbnail td + td { color: var(--accent); }
+</style>
+</head>
+<body>
+<section id="title">
+  <h1>Granite Document Intelligence</h1>
+  <div class="sub dim">IBM Granite models on MLX, orchestrated by Docling</div>
+  <div class="row">
+    <div class="page"><img data-src="page_image" class="paper" alt=""><span class="mono dim" data-text="source"></span></div>
+    <svg width="72" height="40" viewBox="0 0 72 40"><path class="arrow" d="M0 17h56L44 5l4-4 19 19-19 19-4-4 12-12H0z"/></svg>
+    <div class="outputs" id="outputs"></div>
+  </div>
+</section>
+
+<section id="end">
+  <div class="col">
+    <h1>Granite Document Intelligence</h1>
+    <p class="lede dim">Turn PDFs into Markdown, tables, chart CSVs, key-values and RAG chunks, locally on a Mac.</p>
+    <dl>
+      <dt>Code</dt><dd class="mono" data-text="repo"></dd>
+      <dt>Models</dt><dd>granite-docling + Granite Vision 4.1 on MLX</dd>
+      <dt>Runs on</dt><dd>A 16 GB Apple Silicon Mac, offline</dd>
+      <dt>Channel</dt><dd data-text="handle"></dd>
+    </dl>
+  </div>
+</section>
+
+<section id="short-open">
+  <div class="label mono dim" data-text="source"></div>
+  <img data-src="chart_image" class="paper" alt="">
+</section>
+
+<section id="short-end">
+  <div class="col">
+    <h1>Granite Document Intelligence</h1>
+    <div class="repo mono" data-text="repo_wrapped" style="white-space: pre"></div>
+    <div class="note dim">Open source, Apache-2.0. Runs on a Mac.</div>
+  </div>
+</section>
+
+<section id="thumbnail">
+  <h1><span>Charts</span><svg viewBox="0 0 72 40"><path class="arrow" d="M0 17h56L44 5l4-4 19 19-19 19-4-4 12-12H0z"/></svg><span>CSV, locally</span></h1>
+  <div class="row">
+    <img data-src="chart_image" class="paper" alt="">
+    <table class="mono" id="csv"></table>
+  </div>
+</section>
+
+<script>
+const DATA = /*DATA*/;
+document.getElementById(DATA.card).classList.add("on");
+for (const el of document.querySelectorAll("[data-text]")) {
+  el.textContent = DATA[el.dataset.text] ?? "";
+}
+for (const img of document.querySelectorAll("img[data-src]")) {
+  if (DATA[img.dataset.src]) img.src = DATA[img.dataset.src];
+}
+for (const [ext, name, what] of DATA.outputs ?? []) {
+  const chip = document.createElement("div");
+  chip.className = "chip";
+  const tag = document.createElement("b");
+  tag.textContent = ext;
+  const file = document.createElement("span");
+  file.className = "mono";
+  file.textContent = name;
+  const label = document.createElement("span");
+  label.className = "what";
+  label.textContent = what;
+  chip.append(tag, file, label);
+  document.getElementById("outputs").append(chip);
+}
+if (DATA.csv) {
+  const table = document.getElementById("csv");
+  const head = table.insertRow();
+  for (const cell of DATA.csv.header) {
+    const th = document.createElement("th");
+    th.textContent = cell;
+    head.append(th);
+  }
+  for (const row of DATA.csv.rows) {
+    const tr = table.insertRow();
+    for (const cell of row) tr.insertCell().textContent = cell;
+  }
+}
+</script>
+</body>
+</html>
