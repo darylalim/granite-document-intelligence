@@ -24,7 +24,7 @@ The paths are relative so that neither the replayed output nor the UI's Run view
 
 `ui.py` serves the staged tree with the real `gdi ui` and scrolls each view in headless Chrome, writing the same frames-plus-timeline layout under `build/ui/<main|short>/`. Both scripts share `timeline.py` (bar and frame timing, the ffconcat writer, the preview GIF) and `cdp.py`.
 
-`render.py` joins the shots in storyboard order into `build/gdi-demo-1440p.mp4` and `build/gdi-demo-short.mp4`, checking every shot's length against the storyboard. For now it is silent, with no captions or crossfades. `cards.py` draws the title, end and Short cards and `build/thumbnail.png` from `cards.html`, through `page.py`, which the captions will also use.
+`render.py` joins the shots in storyboard order into `build/gdi-demo-1440p.mp4` and `build/gdi-demo-short.mp4`, checking every shot's length against the storyboard. It crossfades each join on its bar line and burns in the captions, drawn by `captions.html`, and writes `build/captions.srt` and `build/captions-short.srt` from the same table for YouTube's captions track. For now it is silent. `cards.py` draws the title, end and Short cards and `build/thumbnail.png` from `cards.html`, through `page.py`, which the captions will also use.
 
 ## Music credit
 
