@@ -3,7 +3,7 @@
 Every shot lasts a whole number of 2.5 s bars (96 BPM, plan *Music*), and every
 change on screen lands on a 30 fps frame. A shot is written as one PNG per
 distinct frame plus an ffconcat timeline giving each PNG's duration, which
-`render.sh` encodes.
+`render.py` encodes.
 """
 
 from pathlib import Path

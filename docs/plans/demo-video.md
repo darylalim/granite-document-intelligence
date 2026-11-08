@@ -79,12 +79,12 @@ A vertical frame uses the UI's measured phone-width layout (390 px, plan §15), 
   - **No strong melody hook**, which makes the loop seam obvious and wears thin by the third loop.
 - **Choosing the track:**
   1. Shortlist three tracks that pass the filters.
-  2. Measure each one's tempo with `aubio tempo` (`brew install aubio`), because listed BPMs are sometimes missing or wrong. Note where the first downbeat falls, which `render.sh` needs as an offset.
-  3. Render the Short with each one (`render.sh --music <file> --offset <s> short`).
+  2. Measure each one's tempo with `aubio tempo` (`brew install aubio`), because listed BPMs are sometimes missing or wrong. Note where the first downbeat falls, which `render.py` needs as an offset.
+  3. Render the Short with each one (`render.py --music <file> --offset <s> short`).
   4. Watch each **looped three times on a phone**, both muted and with sound. Most Short viewers see it more than once, so the seam and any tiresome phrase show up there.
   5. Render the main video with the winner only, and record it in `demo/README.md`.
 - **Music is secondary.** Many viewers watch muted, so captions and pictures must work alone. The track only has to avoid sounding broken, which is why steady and calm beats catchy.
-- **The track file is not committed.** The Audio Library licence covers use in YouTube videos, not redistribution from a public git repository. `demo/README.md` records the track's title, artist, licence and download date, and `render.sh` reads the file from the gitignored `demo/assets/`.
+- **The track file is not committed.** The Audio Library licence covers use in YouTube videos, not redistribution from a public git repository. `demo/README.md` records the track's title, artist, licence and download date, and `render.py` reads the file from the gitignored `demo/assets/`.
 - **Main video:** fade in over 1 s and out over 3 s at the end card, normalised to −14 LUFS integrated, YouTube's playback loudness, with true peak at or below −1 dBTP (`loudnorm` in two passes).
 - **Short:** trim to a whole number of bars so the end meets the beginning, and use a short crossfade (about 50 ms) at the seam instead of a fade-out. A fade-out would make every loop dip in volume. Same loudness target.
 - Music is the only sound: no typing sounds or UI clicks, which would need syncing to replayed footage that is not real time.
@@ -108,7 +108,7 @@ This is the only step that runs the models. Everything after it replays.
 
 This step was planned for VHS, but this Mac has no Homebrew, so VHS, its ttyd and `tree` are all missing (decided with the user on 2026-11-08). Instead, `terminal.html` draws a terminal window in IBM Plex Mono and Carbon g100 colours. Python plays the session into it and takes one screenshot per distinct screen through the same headless Chrome that step 3 uses (`demo/cdp.py`, a standard-library DevTools client).
 
-- **Output.** Each shot is a set of PNG frames plus an ffconcat timeline that `render.sh` encodes. Every change lands on a 30 fps frame, and every shot lasts a whole number of bars. A downscaled `preview.gif` per layout allows a check without ffmpeg, and `meta.json` records each shot's speed-up.
+- **Output.** Each shot is a set of PNG frames plus an ffconcat timeline that `render.py` encodes. Every change lands on a 30 fps frame, and every shot lasts a whole number of bars. A downscaled `preview.gif` per layout allows a check without ffmpeg, and `meta.json` records each shot's speed-up.
 - **Layouts.**
   - Main video: 1280 × 720 CSS px at 2×, 90 × 14 characters. The window ends at 524 px, leaving the bottom band for captions.
   - Short: 360 × 640 at 3×, 40 × 14 characters. 360 × 640 at 3× is exactly 1080 × 1920, which 390 px wide cannot reach with a whole height. The window ends at 363 px, above the mid-frame captions.
@@ -139,18 +139,27 @@ This step was planned for VHS, but this Mac has no Homebrew, so VHS, its ttyd an
 
 Small HTML pages in `demo/`, rendered to PNG through the same headless Chrome. Chrome loads the Plex `woff2` files directly, so the cards match the UI.
 
-### 5. `render.sh`: assemble both videos with ffmpeg
+### 5. `render.py`: assemble both videos with ffmpeg
 
-- Join the segments in storyboard order with short crossfades (`xfade`).
-- Burn in the captions with the `subtitles` filter. libass cannot read `woff2`, so first decompress Plex Sans to TTF (`uvx --from 'fonttools[woff]' fonttools ttLib.woff2 decompress`) into `demo/build/fonts/` and point `fontsdir` there.
-- Takes `--music <file>` and `--offset <seconds>` (the first downbeat to start from) and a target, `main` or `short`, so one script renders each shortlisted track.
-- Mix in the music as described above, encoding AAC at 192 kbps and 48 kHz.
-- Encode H.264, High profile, `yuv420p`, 30 fps, with `-movflags +faststart`, at about 24 Mbps for 1440p and 12 Mbps for the Short.
+`render.py` rather than `render.sh`: the storyboard is data (its `MAIN` and `SHORT` segment tables), the script takes arguments, and Python gets ruff and ty, while no gate checks shell. ffmpeg comes from Homebrew (`brew install ffmpeg`, 9.0.2 on 2026-11-08).
+
+**Done: the rough render (2026-11-08).** It joins every shot end to end, silent, with plain black for the cards that step 4 will make.
+- All segments go into one ffconcat, so ffmpeg reads each PNG once and encodes once. Both videos took 27 s.
+- Each shot's frame count is checked against its bars, and the output's against the storyboard: 2,250 frames (75.0 s) and 1,200 (40.0 s), exact.
+- **Encoding.** H.264 High, `yuv420p`, 30 fps, `+faststart`, converted from sRGB to BT.709 limited range and tagged as such.
+  - The plan's 24 / 12 Mbps assumed a constant rate. Most frames are held still, so an average-bitrate target undershot to ~0.9 Mbps and meant nothing.
+  - It encodes at **CRF 10** with 24 / 12 Mbps as a ceiling only: 6.2 MB and 2.2 MB.
+  - Against the source PNGs it scores mean PSNR 65 / 64 dB (minimum 51 / 56) and worst-frame SSIM 0.99984. YouTube re-encodes the upload, so the master is kept near-lossless.
+
+**Still to do:**
+- Short crossfades between segments (`xfade`). Each one overlaps two segments, so the timeline has to absorb the overlap to keep the cuts on bar lines.
+- The captions. Homebrew's `ffmpeg` is built without libass, so it has no `subtitles` filter. Either draw each caption as a PNG in Chrome, in the UI's own Plex Sans `woff2`, and composite it with `overlay` between its times, or install `ffmpeg-full`, which is keg-only and has libass, and convert Plex Sans to TTF for it. `captions.srt` is written either way, for YouTube's captions track.
+- `--music <file>` and `--offset <seconds>` (the first downbeat to start from), mixed as described under *Music*: AAC at 192 kbps and 48 kHz.
 - Check the Short's seam by concatenating two copies and playing them back.
 
 ## Repository changes
 
-- `demo/` with the five scripts, `timestamp.py` (stage.sh's line recorder), `cdp.py` (the Chrome client), `terminal.html`, `captions.srt`, `captions-short.srt`, `title.html`, `end.html`, `thumbnail.html`, and a `README.md` holding the rebuild command and the music credit record.
+- `demo/` with the five scripts (`stage.sh`, `terminal.py`, `ui.py`, `cards`, `render.py`), `timeline.py`, `timestamp.py` (stage.sh's line recorder), `cdp.py` (the Chrome client), `terminal.html`, `captions.srt`, `captions-short.srt`, `title.html`, `end.html`, `thumbnail.html`, and a `README.md` holding the rebuild command and the music credit record.
 - `.gitignore`: `/demo/build/` and `/demo/assets/`, each with a `TestGitignore` case.
 - The videos are **not** committed, because they are large binaries and go stale. They live on YouTube.
 - `ui.py` passes ruff and ty. It needs no test unless it grows logic beyond driving the browser.
