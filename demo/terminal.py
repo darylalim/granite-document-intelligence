@@ -23,7 +23,6 @@ meta.json (each shot's length and the replay's speed-up) and a downscaled
 preview.gif per layout, for checking without ffmpeg.
 """
 
-import base64
 import json
 import os
 import re
@@ -32,24 +31,24 @@ import subprocess
 import sys
 import textwrap
 import time
-import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
 from cdp import Chrome
+from page import font_faces
 from timeline import BAR, FPS, preview, shot_frames, write_ffconcat
 
 ROOT = Path(__file__).resolve().parent.parent
 BUILD = ROOT / "demo" / "build"
 HOME = BUILD / "home"
 OUT = BUILD / "terminal"
-PACKAGE = ROOT / "src" / "granite_document_intelligence" / "ui"
 CACHE = Path(
     os.environ.get("GDI_CACHE_DIR")
     or Path.home() / ".cache" / "granite-document-intelligence"
 )
 
 PROMPT = "~ % "
+MONO = ("IBM Plex Mono", 400)
 TYPE_FRAMES = 1  # frames per typed character
 CONVERT = "gdi convert gao-07-631.pdf --schema schema.json -o gdi-out"
 LS = "ls -F gdi-out/gao-07-631"
@@ -275,22 +274,6 @@ def wrap(lines: list[Line], cols: int, rows: int) -> list[Line]:
     return out[-rows:]
 
 
-def font_faces() -> str:
-    config = tomllib.loads((PACKAGE / ".streamlit" / "config.toml").read_text())
-    css = []
-    for face in config["theme"]["fontFaces"]:
-        if face["family"] != "IBM Plex Mono" or face["weight"] != 400:
-            continue
-        path = PACKAGE / "static" / "fonts" / Path(face["url"]).name
-        data = base64.b64encode(path.read_bytes()).decode()
-        css.append(
-            "@font-face { font-family: 'IBM Plex Mono'; font-weight: 400; "
-            f"src: url(data:font/woff2;base64,{data}) format('woff2'); "
-            f"unicode-range: {face['unicodeRange']}; }}"
-        )
-    return "\n".join(css)
-
-
 def page(layout: Layout) -> str:
     html = (ROOT / "demo" / "terminal.html").read_text(encoding="utf-8")
     variables = (
@@ -300,7 +283,7 @@ def page(layout: Layout) -> str:
         f"--padding: {layout.padding}px; --bar-height: {layout.bar_height}px; }}"
     )
     script = f"<script>const PROMPT = {json.dumps(PROMPT)};</script>"
-    return html.replace("/*FONT_FACES*/", font_faces() + "\n" + variables).replace(
+    return html.replace("/*FONT_FACES*/", font_faces(MONO) + "\n" + variables).replace(
         "<script>", script + "\n<script>", 1
     )
 

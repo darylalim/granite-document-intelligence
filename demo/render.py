@@ -3,13 +3,12 @@
     .venv/bin/python demo/render.py [main|short|all]
 
 docs/plans/demo-video.md has the storyboard; MAIN and SHORT below are its segments.
-Each segment is a shot rendered by terminal.py or ui.py (frames plus an ffconcat
-timeline), or a gap for what is not built yet: the title and end cards (step 4).
-A gap is plain black for its exact length, so the cut points already match the
-storyboard.
+Each segment is a shot rendered by terminal.py, ui.py or cards.py (frames plus
+an ffconcat timeline), or a gap: plain black for its exact length, kept for
+roughing in a shot that is not built yet, so the cuts still match the storyboard.
 
-This first version is the rough render: shots joined end to end, silent, with
-no captions, crossfades or music. It checks that the timelines encode to the
+For now the shots are joined end to end, silent, with no captions, crossfades
+or music. It checks that the timelines encode to the
 storyboard's lengths frame for frame, before any of that is layered on.
 
 All segments go into one ffconcat, so ffmpeg reads each PNG once and encodes
@@ -64,7 +63,7 @@ MAIN = Target(
     1440,
     "24M",
     (
-        Segment("", 2, "title card"),
+        Segment("cards/main/title", 2, ""),
         Segment("terminal/main/convert", 4, ""),
         Segment("terminal/main/ls", 2, ""),
         Segment("terminal/main/ui", 1, ""),
@@ -75,7 +74,7 @@ MAIN = Target(
         Segment("ui/main/kvp", 1, ""),
         Segment("ui/main/chunks", 2, ""),
         Segment("ui/main/run", 1, ""),
-        Segment("", 5, "end card"),
+        Segment("cards/main/end", 5, ""),
     ),
 )
 SHORT = Target(
@@ -85,14 +84,14 @@ SHORT = Target(
     1920,
     "12M",
     (
-        Segment("", 1, "opening chart"),
+        Segment("cards/short/open", 1, ""),
         Segment("terminal/short/convert", 3, ""),
         Segment("ui/short/charts", 5, ""),
         Segment("ui/short/kvp", 3, ""),
         Segment("ui/short/document", 1, ""),
         Segment("ui/short/tables", 1, ""),
         Segment("ui/short/chunks", 1, ""),
-        Segment("", 1, "repo name, back to the opening chart"),
+        Segment("cards/short/end", 1, ""),
     ),
 )
 TARGETS = {"main": MAIN, "short": SHORT}
@@ -102,7 +101,7 @@ def shot_entries(source: str, bars: int) -> list[tuple[str, int]]:
     """A shot's (PNG path relative to BUILD, frames shown), checked against its bars."""
     concat = BUILD / f"{source}.ffconcat"
     if not concat.is_file():
-        raise SystemExit(f"render: {concat} missing; run terminal.py and ui.py")
+        raise SystemExit(f"render: {concat} missing; run terminal.py, ui.py, cards.py")
     entries: list[tuple[str, int]] = []
     lines = concat.read_text(encoding="utf-8").splitlines()[1:]
     # Pairs of `file` and `duration`; the final repeated `file` has no duration.
