@@ -1,6 +1,6 @@
 # Demo video plan
 
-Two captioned demo videos with music for a YouTube channel: a 16:9 main video and a 9:16 Short. Both show `gdi convert` and `gdi ui` and every output. Status: **built**, 2026-11-08: both videos render from `demo/` (see `demo/README.md`); uploading is the user's.
+Two captioned demo videos with music for a YouTube channel: a 16:9 main video and a 9:16 Short. Both show `gdi convert` and `gdi ui` and every output. Status: **published**, 2026-11-09. Both videos render from `demo/` (see `demo/README.md`, built 2026-11-08) and are Public: the [main video](https://youtu.be/J73E2ixI84g) and the [Short](https://youtube.com/shorts/zXjk2n0bAq4), whose related video is the main one. The README links both.
 
 ## Decisions
 
