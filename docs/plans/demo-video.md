@@ -1,6 +1,6 @@
 # Demo video plan
 
-Two captioned demo videos with music for a YouTube channel: a 16:9 main video and a 9:16 Short. Both show `gdi convert` and `gdi ui` and every output. Status: **draft**, 2026-11-07.
+Two captioned demo videos with music for a YouTube channel: a 16:9 main video and a 9:16 Short. Both show `gdi convert` and `gdi ui` and every output. Status: **built**, 2026-11-08: both videos render from `demo/` (see `demo/README.md`); uploading is the user's.
 
 ## Decisions
 
@@ -193,7 +193,10 @@ This step was planned for VHS, but this Mac has no Homebrew, so VHS, its ttyd an
   - All 113 onsets in the main video sit within 8 ms of the 96 BPM grid (a steady −7 ms is aubio's detection bias), and all 28 bar lines inside the fades carry a downbeat.
   - The Short played twice keeps its beats 0.624–0.627 s apart across the seam. The seam's biggest sample step (4,314) is below every other downbeat's (5,167–5,622), so the loop adds no click.
 
-**Still to do:** choose the track (*Music*, steps 1–5), then render both videos with it and record its credit in `demo/README.md`.
+**Done: the track (2026-11-08).** It is *Pulsar*, from 102.243 s, stretched 105.3 → 96 BPM: −13.9 / −14.0 LUFS, true peak about −4 dBTP.
+- **Tempo screening.** The first screen pinned seven tracks at the fit's 125 BPM ceiling, so the range is now 70–139.9 BPM, one octave, and a fit at its edge is flagged.
+- **Stretch check.** The finished audio correlates 0.989 with the stretched section (−0.02 unstretched), and the stretched section measures 96 BPM.
+- **Offset.** It was corrected by 0.093 s from the section's own beats. aubio places this ambient track's beats only to about ±50 ms, which is below what the 0.27 s crossfades reveal; further nudges chased that noise.
 
 ## Repository changes
 
@@ -218,6 +221,11 @@ Like `docs/images/ui-*.png`, the videos go stale when the UI layout, theme or la
 
 ## Open questions
 
-1. **Which music track.** Shortlist three at about 96 BPM from the Audio Library, then follow the steps under *Music*. The decision itself waits on rendered cuts.
+None. The last one, which track, was settled on 2026-11-08:
+- **The track is *Pulsar*** (The Grey Room / Density & Time; Audio Library, attribution not required), stretched from 105.3 to 96 BPM.
+- **Screening.** `tempo.py` screened 12 candidates. Steady Audio Library electronic tracks clustered at 125–135 BPM, and the calm ambient ones mostly lacked a steady beat. Pulsar was the steadiest near 96.
+- **Stretch.** `render.py --music-bpm` slows it 8.8% with `atempo`, pitch kept, and refuses a stretch of more than 15%.
+- **Approval.** The user listened to both videos and approved them.
+- **Credit and rebuild.** Both are in `demo/README.md`.
 
 Settled on 2026-11-08: the channel is `https://www.youtube.com/@darylalim-hnl` (corrected the same day from an earlier handle), and the repo URL is `https://github.com/darylalim/granite-document-intelligence`.

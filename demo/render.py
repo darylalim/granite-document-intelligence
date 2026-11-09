@@ -16,7 +16,8 @@ cards.py: PNG frames plus an ffconcat timeline, checked against its bars.
   writes captions.srt (and captions-short.srt) for YouTube's captions track.
 
 - **Music**, with `--music <file> --offset <seconds>` (the track's first downbeat;
-  tempo.py measures it). The main video fades in over FADE_IN and out over
+  tempo.py measures it), and `--music-bpm <bpm>` to stretch a track that is not
+  96 BPM to it with atempo, pitch kept (at most MAX_STRETCH). The main video fades in over FADE_IN and out over
   FADE_OUT across the end card. The Short's sound is cut to exactly its 16 bars
   and its last SEAM seconds crossfaded into its first, so it loops without a
   dip or a click. Both are normalised in two loudnorm passes and then measured
@@ -53,6 +54,10 @@ TRUE_PEAK = -1.0
 PEAK_TARGET = -2.0
 FADE_IN, FADE_OUT = 1.0, 3.0  # the main video's, the fade-out across the end card
 SEAM = 0.05  # s: the Short's loop crossfade, in place of a fade-out that dips
+EDIT_BPM = 4 * 60 / BAR  # 96: a 4/4 bar per 2.5 s
+# --music-bpm stretches a track to EDIT_BPM with atempo, which keeps its pitch.
+# Beyond about 10% the stretch tends to be audible; past 15% it is refused.
+MAX_STRETCH = 0.15
 
 
 def ffmpeg_tool(name: str) -> str:
@@ -305,12 +310,24 @@ def filter_graph(target: Target, captions_input: int) -> tuple[str, int]:
 @dataclass(frozen=True)
 class Music:
     path: Path
-    offset: float  # seconds into the track: its first downbeat
+    offset: float  # seconds into the track as published: its first downbeat
+    bpm: float | None = None  # its measured tempo, to stretch it to the edit's
+
+    @property
+    def tempo(self) -> float:
+        """atempo's factor: 96 / the track's BPM, or 1 to play it as published."""
+        return 1.0 if self.bpm is None else EDIT_BPM / self.bpm
 
 
-def music_chain(target: Target, source: str, seconds: float) -> str:
-    """From the track's stream `source` to [apre]: trimmed, faded or looped."""
+def music_chain(target: Target, source: str, seconds: float, tempo: float = 1.0) -> str:
+    """From the track's stream `source` to [apre]: stretched, trimmed, faded or looped.
+
+    The input is already seeked to the offset (-ss, in the track's own time), so
+    the stretch starts on the downbeat and every later beat lands on the grid.
+    """
     base = f"{source}aresample=48000,aformat=channel_layouts=stereo"
+    if tempo != 1.0:
+        base += f",atempo={tempo:.6f}"
     if not target.loops:
         return (
             f"{base},atrim=0:{seconds},asetpts=PTS-STARTPTS,"
@@ -333,7 +350,7 @@ def music_chain(target: Target, source: str, seconds: float) -> str:
 
 def loudness_pass(target: Target, music: Music, seconds: float) -> dict[str, str]:
     """loudnorm's first pass: the trimmed, faded music's measured loudness."""
-    chain = music_chain(target, "[0:a]", seconds)
+    chain = music_chain(target, "[0:a]", seconds, music.tempo)
     result = subprocess.run(
         [
             ffmpeg_tool("ffmpeg"),
@@ -365,7 +382,7 @@ def loudness_pass(target: Target, music: Music, seconds: float) -> dict[str, str
 def audio_graph(target: Target, music_input: int, seconds: float, music: Music) -> str:
     m = loudness_pass(target, music, seconds)
     return (
-        music_chain(target, f"[{music_input}:a]", seconds)
+        music_chain(target, f"[{music_input}:a]", seconds, music.tempo)
         + f";[apre]loudnorm=I={LOUDNESS}:TP={PEAK_TARGET}:LRA=20"
         f":measured_I={m['input_i']}:measured_TP={m['input_tp']}"
         f":measured_LRA={m['input_lra']}:measured_thresh={m['input_thresh']}"
@@ -503,10 +520,20 @@ def main() -> int:
     parser.add_argument(
         "--offset", type=float, default=0.0, help="its first downbeat, in seconds"
     )
+    parser.add_argument(
+        "--music-bpm",
+        type=float,
+        help="its measured tempo (tempo.py), to stretch it to 96 BPM, pitch kept",
+    )
     args = parser.parse_args()
-    music = Music(args.music, args.offset) if args.music else None
+    music = Music(args.music, args.offset, args.music_bpm) if args.music else None
     if music is not None and not music.path.is_file():
         parser.error(f"no music file at {music.path}")
+    if music is not None and abs(music.tempo - 1) > MAX_STRETCH:
+        parser.error(
+            f"stretching {music.bpm} BPM to {EDIT_BPM:g} is {abs(music.tempo - 1):.0%}; "
+            f"more than {MAX_STRETCH:.0%} is refused"
+        )
     WORK.mkdir(parents=True, exist_ok=True)
     took = run_took()
     targets = TARGETS.values() if args.target == "all" else [TARGETS[args.target]]
@@ -525,8 +552,13 @@ def main() -> int:
             if music is not None:
                 integrated, peak = measure_loudness(output)
                 loud_ok = abs(integrated - LOUDNESS) <= 1.0 and peak <= TRUE_PEAK
+                stretch = (
+                    ""
+                    if music.bpm is None
+                    else f", {music.bpm:g} -> {EDIT_BPM:g} BPM (x{music.tempo:.3f})"
+                )
                 print(
-                    f"render: music {music.path.name} from {music.offset} s: "
+                    f"render: music {music.path.name} from {music.offset} s{stretch}: "
                     f"{integrated:.1f} LUFS, true peak {peak:.1f} dBTP "
                     f"({'ok' if loud_ok else f'OFF TARGET {LOUDNESS} / {TRUE_PEAK}'})"
                 )
