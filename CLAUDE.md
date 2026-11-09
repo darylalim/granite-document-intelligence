@@ -244,7 +244,7 @@ Further rules from §3.10:
 `pyproject.toml` holds:
 - packaging: `uv_build`, the `gdi` console script and a `src/` layout, so tests import the installed package and there is no `pythonpath`;
 - ruff lint: `extend-select = ["I"]` turns on isort atop ruff's defaults, with `combine-as-imports`;
-- ty: `python-version = "3.12"`, plus `extra-paths = ["eval"]`, because `eval/score.py` imports `eval/matching.py` as a sibling script;
+- ty: `python-version = "3.12"`, plus `extra-paths = ["eval", "demo"]`, because `eval/score.py` imports `eval/matching.py` as a sibling script, and `demo/`'s scripts import `demo/cdp.py` and its neighbours the same way;
 - `default-groups = ["dev", "ui"]`.
 
 `LICENSE` — Apache-2.0 for the project's code, declared via PEP 639 `license` / `license-files`. `THIRD_PARTY_NOTICES.md` carries the MIT notice for the KVP prompt copied from Docling (`kvp.extraction_prompt`; private in Docling, so it cannot be imported). Both are `license-files` entries, and `TestPackaging` asserts that every entry exists. The models are downloaded, not vendored, under their own licences (§9.1). The local 8-bit conversion is a modified copy of Apache-2.0 weights, so publishing it would require the licence and a notice of the modification.
@@ -255,9 +255,14 @@ Further rules from §3.10:
 
 `docs/images/ui-light.png` and `ui-dark.png` — the README's UI screenshots, one `<picture>` that follows the reader's GitHub theme. A theme, layout or label change dates them, and so does a model change, since the chart CSVs in frame are model output; the alt text names the counts (42 pages, 3 tables, 9 charts, 56 chunks). Captured on 2026-11-03 (PR 15) from the release eval's GAO-07-631 tree (`eval/runs/2026-10-30-2323d1c-release/r1/`) copied to `$HOME/gdi-out` under a scratch `HOME`, so the field shows the default `~/gdi-out`. The server was `gdi ui --no-browser`, and the browser headless Chrome over CDP: `Emulation.setDeviceMetricsOverride` at 1280 × 1400 CSS px, `deviceScaleFactor` 2; `Emulation.setEmulatedMedia` with `prefers-color-scheme` for each mode (the theme follows it); and `?view=Charts`. Wait for four `stMetricValue`s and every `/media/` image to complete before `Page.captureScreenshot`.
 
+`demo/` — the scripts that build the YouTube demo videos ([`docs/plans/demo-video.md`](docs/plans/demo-video.md); rebuild steps and the music credit in `demo/README.md`). `stage.sh` runs the one real conversion of GAO-07-631. `terminal.py`, `ui.py` and `cards.py` render the shots as PNGs through headless Chrome (`cdp.py`, `page.py`). `render.py` assembles both videos with Homebrew's ffmpeg: crossfades on the bar lines, captions drawn as PNGs (its build has no libass), and the music.
+
+- **What dates the videos.** Like the screenshots above, the videos go stale when the UI layout, theme or labels change, or when a model changes, since the chart CSVs and summaries on screen are model output. On any of those, re-run the steps in `demo/README.md` from `stage.sh`. That needs the gitignored music file, `demo/assets/pulsar.mp3`, downloaded again from the YouTube Audio Library.
+- **What the gate covers.** ruff and ty check `demo/`, and `TestGitignore` covers its two ignored folders, but no test runs any of it. None of it imports a model, so it never touches the 15 s gate.
+
 `.python-version` — pins the project interpreter to `3.12`, matching `requires-python = ">=3.12"` and the ty target.
 
-`.gitignore` — keeps pipeline output (`/out/`), model weights, PDFs at the root, `eval/private/`, `eval/runs/` and Docling's `debug_*/` out of git, ruff and the gate's fingerprint. An unignored output folder would put model-generated `chart-NNN.py` under the ruff gates and make the memo never match. `TestGitignore` runs `git check-ignore --no-index` on each pattern.
+`.gitignore` — keeps pipeline output (`/out/`), model weights, PDFs at the root, `eval/private/`, `eval/runs/`, the demo videos' `demo/build/` and `demo/assets/` (the music, whose licence does not cover redistribution) and Docling's `debug_*/` out of git, ruff and the gate's fingerprint. An unignored output folder would put model-generated `chart-NNN.py` under the ruff gates and make the memo never match. `TestGitignore` runs `git check-ignore --no-index` on each pattern.
 
 `scripts/gate.sh` — the four Commands in one place, invoked by both CI and the Stop hook. Its header comment argues each point at length; four properties are load-bearing, each pinned by an *executing* test in `TestHooksConfig` because source-level substring checks proved too weak to catch a mutated failure path (see Tests):
 
