@@ -12,6 +12,8 @@
 - **key-values** filled in against a JSON Schema you supply (optional)
 - **RAG-ready chunks** that follow the headings and carry page numbers, as JSON Lines
 
+**Watch the demo:** a [75-second walkthrough](https://youtu.be/J73E2ixI84g) of `gdi convert` and `gdi ui` on GAO-07-631, the report the examples below use, or the [40-second Short](https://youtube.com/shorts/zXjk2n0bAq4).
+
 > Version 1.0.0 is the PDF pipeline's first release. Releases before it, up to [v0.6.0](https://github.com/darylalim/granite-document-intelligence/releases/tag/v0.6.0), are the earlier Streamlit text-analysis app, which this project replaces.
 
 ## Requirements
