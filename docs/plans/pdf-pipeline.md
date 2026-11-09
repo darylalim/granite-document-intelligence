@@ -168,10 +168,15 @@ second per PDF, so switching buys nothing in v1.
 **Reopen** when Docling makes both imports lazy. Unchanged on `main` as of 2026-10-25:
 `models/utils/hf_stopping_criteria.py` and `utils/accelerator_utils.py::decide_device`.
 **We do not report this upstream (decided with the user, 2026-10-25).** The payoff is
-~0.3 GB of memory and ~0.7 GB of install size, and v1 waits on neither. The first import
-is already reported as docling-project/docling#4966, from the remote-API side; the
-`decide_device` one is not reported anywhere. Watch #4966 rather than commenting on it
-or opening a PR, and do not re-offer an issue.
+~0.3 GB of memory and ~0.7 GB of install size, and v1 waits on neither. Do not comment,
+open a PR or re-offer an issue. This section once said to watch docling-project/docling#4966
+for the first import; that issue closed on 2026-10-26 (docling PR 4967, in 2.143.1) and
+concerned the remote-API pipeline, so it never tracked either import. Instead, re-check
+both sites on each docling upgrade. Re-checked on 2.149.0 (2026-11-09):
+`hf_stopping_criteria.py` still imports torch at module level, and `decide_device` imports
+it inside the function, which the default `providers` still call. The first torch import
+under `VlmPipeline` is now `datamodel/asr_model_specs.py`'s hardware probe, reached from
+`pipeline_options`, but that one is guarded by `except ImportError` and does not block.
 Depend on `docling-slim[format-pdf,feat-chunking,models-onnxruntime]` (108 packages,
 989 MB instead of 1.7 GB), and run the classifier with
 `OnnxRuntimeImageClassificationEngineOptions` and a `providers` list other than the
