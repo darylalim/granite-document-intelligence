@@ -217,7 +217,7 @@ This step was planned for VHS, but this Mac has no Homebrew, so VHS, its ttyd an
 
 ## Keeping it current
 
-Like `docs/images/ui-*.png`, the videos go stale when the UI layout, theme or labels change, or when a model changes, because the chart CSVs and summaries on screen are model output. On any of those, re-run `stage.sh` and the rest. Note this beside the screenshot note in `CLAUDE.md`.
+Like `docs/images/ui-*.png`, the videos go stale when the UI layout, theme or labels change, or when a model changes, because the chart CSVs and summaries on screen are model output. On any of those, re-run `stage.sh` and the rest. `CLAUDE.md` notes this beside the screenshot note.
 
 ## Open questions
 
