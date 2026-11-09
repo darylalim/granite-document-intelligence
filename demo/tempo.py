@@ -29,6 +29,10 @@ from timeline import BAR
 BPM = 4 * 60 / BAR  # 96: the storyboard's tempo
 TOLERANCE = 2.0  # BPM either way (plan, Music)
 STEADY = 0.1  # RMS miss of the fitted grid, in beats
+# The fit's range: one octave, so a tempo and its half or double are never both
+# candidates (a period always fits at least as well as twice it). 80-125 first
+# pinned seven Audio Library tracks at its 125 BPM edge.
+LOW_BPM, HIGH_BPM = 70.0, 139.9
 NEEDS = 75.0  # seconds of music after the offset: the main video's length
 
 
@@ -63,13 +67,14 @@ def fit_period(beats: list[float]) -> tuple[float, float]:
 
     aubio's beat tracker skips beats (on a clean click track its intervals fall
     at 1, 3 and 4 beats), so neither its tempo nor a median interval holds. Each
-    candidate period from 80 to 125 BPM is scored by how far each interval lies
-    from a whole number of periods; the range excludes half and double tempo.
+    candidate period from LOW_BPM to HIGH_BPM is scored by how far each interval
+    lies from a whole number of periods; the range is one octave, so it excludes
+    half and double tempo.
     Returns the period and its RMS miss, as a fraction of a beat.
     """
     intervals = [b - a for a, b in pairwise(beats)]
     best = (float("inf"), 0.0)
-    for step in range(int(60 / 125 / 0.0001), int(60 / 80 / 0.0001) + 1):
+    for step in range(int(60 / HIGH_BPM / 0.0001) + 1, int(60 / LOW_BPM / 0.0001) + 1):
         period = step * 0.0001
         misses = [(i / period - max(1, round(i / period))) ** 2 for i in intervals]
         best = min(best, (math.sqrt(statistics.fmean(misses)), period))
@@ -99,7 +104,8 @@ def measure(path: Path) -> bool:
     length = duration(path)
     on_tempo = abs(bpm - BPM) <= TOLERANCE
     steady = miss < STEADY
-    ok = on_tempo and steady
+    at_edge = min(abs(bpm - LOW_BPM), abs(bpm - HIGH_BPM)) < 0.5
+    ok = on_tempo and steady and not at_edge
     print(
         f"{path.name}: {bpm:.2f} BPM fitted (beats every {period:.4f} s, "
         f"RMS miss {miss:.3f} beat; aubio's own estimate {reported:.2f})"
@@ -114,6 +120,10 @@ def measure(path: Path) -> bool:
             else f"  (only {room:.1f} s after it; needs {NEEDS:.0f})"
         )
         print(f"    --offset {offset:.3f}{note}")
+    if at_edge:
+        print(
+            f"  the fit hit the edge of {LOW_BPM:g}-{HIGH_BPM:g} BPM: the tempo is outside it"
+        )
     if not on_tempo:
         print(
             f"  not {BPM:.0f} ± {TOLERANCE:.0f} BPM: the cuts would drift off its bars"

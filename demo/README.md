@@ -29,4 +29,19 @@ The paths are relative so that neither the replayed output nor the UI's Run view
 
 ## Music credit
 
-Not chosen yet (plan, *Music*). Record the track's title, artist, licence and download date here once it is. The file goes in the gitignored `demo/assets/`.
+| | |
+|---|---|
+| Track | *Pulsar* |
+| Artist | The Grey Room / Density & Time |
+| Source | YouTube Audio Library (Ambient, Calm, 4:08) |
+| Licence | Audio Library, "Attribution not required": no credit line needed in the video or description |
+| Downloaded | 2026-11-08, into the gitignored `demo/assets/pulsar.mp3` |
+
+The track is not committed: the Audio Library licence covers use in YouTube videos, not redistribution from a public repository. To rebuild the final videos, download it again from the Audio Library as `demo/assets/pulsar.mp3` and run:
+
+```bash
+.venv/bin/python demo/render.py --music demo/assets/pulsar.mp3 --offset 102.243 --music-bpm 105.30
+```
+
+- **Tempo.** Pulsar measures 105.3 BPM and is stretched 8.8% to 96 with `atempo`, pitch kept. None of 12 screened Audio Library tracks was near 96, and Pulsar's beat was the steadiest. The user listened to the result and approved it on 2026-11-08.
+- **Offset.** 102.243 s puts the start in the track's full, steady section (about 100–210 s), past its 20 s build. The value was corrected from 102.150 by measuring the stretched section, whose beats then fell at 0.102 s. Two bass-energy tests agree it is a downbeat. aubio resolves this track's beats to only about ±50 ms, so treat the last digits as approximate.
