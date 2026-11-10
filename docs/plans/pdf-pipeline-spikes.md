@@ -1226,6 +1226,9 @@ directory, which lives in the user's own cache.
   safetensors. One leak: the model-card step reads `README.md` through `refs/main`
   (`37d591f`), ignoring `--revision`. That is metadata only, and it is why S2 saw a
   README-only `main` snapshot appear.
+  **Closed on 2026-11-10:** `gdi convert-model` now downloads the pinned snapshot
+  through mlx-vlm's own `get_model_path` and passes `convert()` its local path. Given a
+  path, the model-card step fetches nothing, and `models.py` writes the card itself.
 - **Tokenizer:** the revision reaches its loader. Pinned, it reads
   `trees/47ea694….json` and never `refs/main`. Unpinned, it reads `refs/main`. A SHA
   that is not cached fails offline. Nothing executes.

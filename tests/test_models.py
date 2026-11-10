@@ -15,6 +15,9 @@ import pytest
 from granite_document_intelligence import config, models
 from granite_document_intelligence.models import ModelsNotReadyError
 
+# Where the fake `_source_snapshot` says the pinned bf16 source landed.
+SNAPSHOT = Path("/hf-cache/granite-vision-4.1-4b/snapshots/pinned")
+
 # What mlx-vlm's conversion of granite-vision-4.1-4b writes beside the weights:
 # the repo's four Python files, and `auto_map` at the top level of two configs
 # and nested under `image_processor` in a third (S10).
@@ -191,6 +194,7 @@ class _FakeBackends:
             models, "_fetch_tokenizer", lambda: self.events.append("fetch-tokenizer")
         )
         monkeypatch.setattr(models, "_load_test", self.load_test)
+        monkeypatch.setattr(models, "_source_snapshot", lambda: SNAPSHOT)
         monkeypatch.setattr(
             models, "_hf_cached_source", lambda: (8_000_000_000, ["dd48e97"])
         )
@@ -212,7 +216,10 @@ class _FakeBackends:
     def convert(self, **kwargs: object) -> None:
         self.events.append("convert")
         self.convert_kwargs = kwargs
-        _mlx_vlm_output(Path(str(kwargs["mlx_path"])))
+        out = Path(str(kwargs["mlx_path"]))
+        _mlx_vlm_output(out)
+        # mlx-vlm's card from a local path: its template, with no base model.
+        (out / "README.md").write_text("---\nlanguage:\n- en\n---\n")
 
     def load_test(self, folder: Path) -> None:
         self.events.append("load-test")
@@ -260,6 +267,47 @@ class TestConvertModel:
         assert fakes.convert_kwargs["revision"] == config.GRANITE_VISION_SOURCE.revision
         assert fakes.convert_kwargs["q_bits"] == config.GRANITE_VISION_Q_BITS
         assert fakes.convert_kwargs["quantize"] is True
+
+    def test_converts_from_the_pinned_local_snapshot_not_the_repo_id(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Given a repo id, mlx-vlm's model-card step reads README.md at `main`,
+        # ignoring `revision`; given a path, it fetches nothing (S10).
+        fakes = _FakeBackends(monkeypatch)
+        models.convert_model(tmp_path, log=lambda _: None)
+        assert fakes.convert_kwargs["hf_path"] == str(SNAPSHOT)
+
+    def test_the_source_snapshot_is_fetched_at_its_pin(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen: dict[str, Any] = {}
+
+        def get_model_path(path_or_hf_repo: str, **kwargs: Any) -> Path:
+            seen.update(kwargs, repo=path_or_hf_repo)
+            return SNAPSHOT
+
+        package = types.ModuleType("mlx_vlm")
+        utils = types.ModuleType("mlx_vlm.utils")
+        utils.get_model_path = get_model_path  # ty: ignore[missing-attribute]
+        package.utils = utils  # ty: ignore[missing-attribute]
+        monkeypatch.setitem(sys.modules, "mlx_vlm", package)
+        monkeypatch.setitem(sys.modules, "mlx_vlm.utils", utils)
+        assert models._source_snapshot() == SNAPSHOT
+        assert seen == {
+            "repo": config.GRANITE_VISION_SOURCE.repo_id,
+            "revision": config.GRANITE_VISION_SOURCE.revision,
+        }
+
+    def test_the_model_card_is_ours_and_names_the_pin(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _FakeBackends(monkeypatch)
+        models_dir = models.convert_model(tmp_path, log=lambda _: None)
+        card = (models_dir / config.GRANITE_VISION_FOLDER / "README.md").read_text()
+        assert card.startswith("---\n")
+        assert f"base_model: {config.GRANITE_VISION_SOURCE.repo_id}\n" in card
+        assert config.GRANITE_VISION_SOURCE.revision in card
+        assert "language:" not in card  # mlx-vlm's template was replaced
 
     def test_fetches_each_docling_model_at_its_pin(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
