@@ -77,8 +77,7 @@ def _install(log: str, roots: tuple[str, ...]) -> None:
                     if (fn := getattr(module, name, None)) is not None:
                         setattr(module, name, recorded(name, fn))
 
-            # Patches this loader instance only; ty reads it as replacing the method.
-            spec.loader.exec_module = exec_and_wrap  # ty: ignore[invalid-assignment]
+            spec.loader.exec_module = exec_and_wrap  # patches this loader instance only
             return spec
 
     def report() -> None:

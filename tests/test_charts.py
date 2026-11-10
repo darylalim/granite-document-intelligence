@@ -263,9 +263,9 @@ class TestGraniteVisionLoad:
             return object(), object()
 
         package = types.ModuleType("mlx_vlm")
-        package.load = load  # ty: ignore[unresolved-attribute]
+        package.load = load  # ty: ignore[missing-attribute]
         utils = types.ModuleType("mlx_vlm.utils")
-        utils.load_config = lambda _: {}  # ty: ignore[unresolved-attribute]
+        utils.load_config = lambda _: {}  # ty: ignore[missing-attribute]
         monkeypatch.setitem(sys.modules, "mlx_vlm", package)
         monkeypatch.setitem(sys.modules, "mlx_vlm.utils", utils)
         charts.GraniteVision(Path("/models"))

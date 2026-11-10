@@ -199,8 +199,8 @@ class _FakeBackends:
         # seconds of every gate (§3.14 rule 9).
         package = types.ModuleType("mlx_vlm")
         module = types.ModuleType("mlx_vlm.convert")
-        module.convert = self.convert  # ty: ignore[unresolved-attribute]
-        package.convert = module  # ty: ignore[unresolved-attribute]
+        module.convert = self.convert  # ty: ignore[missing-attribute]
+        package.convert = module  # ty: ignore[missing-attribute]
         monkeypatch.setitem(sys.modules, "mlx_vlm", package)
         monkeypatch.setitem(sys.modules, "mlx_vlm.convert", module)
 
