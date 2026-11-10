@@ -10,7 +10,7 @@ Each is justified in the section named. The reasons are non-obvious and were pai
 
 - **Never hand-edit `uv.lock`** — regenerate it with `uv lock`; the hook blocks edits to it. → *Commands*
 - **Bump `version` and run `uv lock`, then land *both* files.** A lone `pyproject.toml` bump fails CI at `uv sync --locked`, and no release is cut. → *Commands*
-- **A move of `docling`, `docling-core`, `mlx`, `mlx-vlm`, `transformers`, `huggingface-hub` or `pillow` — or any model, revision, quantization or prompt change — runs the eval by hand before merge.** No test executes a line of `mlx`. Upgrade one package at a time (`uv lock --upgrade-package <name>`), never inside a blanket `uv lock --upgrade`. → *Verifying a dependency upgrade*
+- **A move of `docling`, `docling-core`, `mlx`, `mlx-vlm`, `transformers`, `huggingface-hub`, `pillow` or `pypdfium2` — or any model, revision, quantization or prompt change — runs the eval by hand before merge.** No test executes a line of `mlx`. Upgrade one package at a time (`uv lock --upgrade-package <name>`), never inside a blanket `uv lock --upgrade`. → *Verifying a dependency upgrade*
 - **`VlmPipelineOptions.images_scale` stays at 1.0.** Any other value puts every DocTags box in image pixels and crops every chart from the wrong region, still with `status=success`. → *Architecture*
 - **No model-repo code runs, and every model is pinned to a commit SHA.** Never pass `trust_remote_code=True`, and never load from anywhere but the stripped, manifest-checked models directory. → *Security*
 - **No test or library module imports `docling`, `torch`, `mlx`, `mlx_vlm` or `transformers` at module level**, nor `streamlit` outside `ui/app.py`, and the Stop hook's gate stays ≤ 15 s. → *Tests*
@@ -53,16 +53,16 @@ When working with Python, invoke the relevant `/astral:<skill>` for uv, ty, and 
 
 Green gates say nothing about the models: every test mocks at the Docling / `mlx_vlm` boundary, so no test executes a line of `mlx`. The quality eval does. Run it by hand on the development Mac:
 
-- after moving `docling`, `docling-core`, `mlx`, `mlx-vlm`, `transformers`, `huggingface-hub` or `pillow` (plan §2.2);
+- after moving `docling`, `docling-core`, `mlx`, `mlx-vlm`, `transformers`, `huggingface-hub`, `pillow` or `pypdfium2` (plan §2.2);
 - after any model, revision or quantization change — a bump of a pinned SHA in `config.py` counts as a model change (§3.13 rule 1);
 - after any change to a prompt, including the KVP prompt in `kvp.py`, or to a tuned value (`IMAGES_SCALE`, `CHART_CROP_SCALE`, `KVP_PAGE_SCALE`, a token cap).
 
 ```bash
-uv run python eval/score.py                      # cold run + 3 timed runs, about 30 min
-uv run python eval/score.py --repeats 1 --no-cold --label try-x   # a quick look
+caffeinate -i uv run python eval/score.py        # cold run + 3 timed runs, about 30 min
+caffeinate -i uv run python eval/score.py --repeats 1 --no-cold --label try-x   # a quick look
 ```
 
-**Run it on an idle Mac, on AC power, with nothing else running** — not a test, a `uvx` install or a second model. The timings are the budgets' input, and the cold start is a single measurement with no median to absorb noise: on 2026-10-30 a pip-audit install and a pytest run overlapping the release run's cold run took cold start from 8.01 s to 10.48 s, past its 8.91 s budget, with the code unchanged. A budget failure from a run that overlapped other work is re-measured, not treated as a regression.
+**Run it on an idle Mac, on AC power, with nothing else running** — not a test, a `uvx` install or a second model. The timings are the budgets' input, and the cold start is a single measurement with no median to absorb noise: on 2026-10-30 a pip-audit install and a pytest run overlapping the release run's cold run took cold start from 8.01 s to 10.48 s, past its 8.91 s budget, with the code unchanged. A budget failure from a run that overlapped other work is re-measured, not treated as a regression. **`caffeinate -i` keeps an idle Mac awake**: on 2026-11-09 one went to sleep for ~22 min in the middle of the transformers eval, so a ~45 min run took ~85. Its timings stayed valid, because `perf_counter` does not advance during sleep. A closed lid still sleeps. If a run is slow, look for sleep in `pmset -g log` before suspecting a regression.
 
 It reads the corpus in `eval/corpus/` and `eval/expected/`. It runs offline (`HF_HUB_OFFLINE=1` unless already set), converts into the gitignored `eval/runs/`, prints a Markdown report and writes `eval/results/<date>-<sha>[-<label>].json`.
 
@@ -122,7 +122,8 @@ Floors are the versions PR 4's hand run executed the models on, not researched o
 | `transformers` | `>=5.21.0,<6` | the darwin floor above |
 | `pillow` | `>=13.0.0` | on the model's input path (mlx-vlm resizes every image with it); 12.3.0 → 13.0.0 changed one chart summary on a byte-identical crop, so it moves under the eval |
 | `jsonschema`, `referencing` | floors only | the KVP validator's fetch-nothing registry (§3.13 rule 8) |
-| `pypdfium2`, `huggingface-hub` | floors only | the chart crop and `gdi convert-model` import them |
+| `pypdfium2` | floor only | renders the chart crop and the KVP page, so it is on the model's input path: 5.14.0 → 5.15.2 drew one rule of a chart crop grey instead of black, which changed that chart's summary, so it moves under the eval |
+| `huggingface-hub` | floor only | `gdi convert-model` imports it |
 | `python-dotenv` | floor only | `.env` for `HF_TOKEN` |
 | `mlx` | **not declared** | floats under `mlx-vlm`; the lock pins it |
 

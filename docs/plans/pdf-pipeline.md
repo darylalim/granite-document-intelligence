@@ -206,10 +206,12 @@ docling-core 21, mlx 4.
 | `referencing` | `>=0.37.0` (locked) | added in PR 5: the KVP validator passes an empty `referencing.Registry` explicitly, so it is imported directly (§3.13 rule 8); floor-only, like `jsonschema` |
 | `pillow` | `>=13.0.0` | added in PR 4 and moved off 12.3.0 in the same PR: 12.3.0 carried 41 Dependabot alerts (5 critical), all fixed in 13.0.0, and Pillow decodes every PDF-derived image (§3.13). **Pillow is on the model's input path**: mlx-vlm resizes each image with it, and 12.3.0 → 13.0.0 changed one of nine chart summaries on a byte-identical crop (deterministically, checked twice under each version), so it moves under the eval like the packages below |
 
+**pypdfium2 joined the eval-gated list in step 3 of the dependency refresh (2026-11-10).** It renders our 1.5× chart crop and the KVP page image, so, like Pillow, it is on Granite Vision's input path. 5.14.0 → 5.15.2 drew a one-pixel rule at the top of GAO-07-631's chart 1 grey (81) instead of black, across the whole crop. That changed the chart's summary (20 → 18 numbers, `summary_unsupported_pct` 13.95 → 14.04, within tolerance). Its CSV, the other eight charts, the DocTags and the KVP output were byte-identical (`eval/results/2026-11-10-06ce9fd-non-model-batch.json`).
+
 `uv.lock` pins exact versions as today. **Upgrades are deliberate and per package**
 (`uv lock --upgrade-package docling`), never folded into a blanket `uv lock --upgrade`
 alongside unrelated moves. Moving `docling`, `docling-core`, `mlx`, `mlx-vlm`,
-`transformers`, `huggingface-hub` or `pillow` (added by PR 4, above) requires, before merge: the eval (§8.1) at or above
+`transformers`, `huggingface-hub`, `pillow` (added by PR 4, above) or `pypdfium2` (added 2026-11-10, above) requires, before merge: the eval (§8.1) at or above
 baseline, S10's no-repo-code check re-run (§3.13 rule 2 says what it watches), and the
 vulnerability audit (§3.13 rule 6).
 Moving a cap (`<0.8`, `<3`) is its own PR.
