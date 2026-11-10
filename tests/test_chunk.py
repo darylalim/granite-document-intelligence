@@ -111,7 +111,7 @@ class TestLoadTokenizer:
         module = types.ModuleType(
             "docling_core.transforms.chunker.tokenizer.huggingface"
         )
-        module.HuggingFaceTokenizer = HuggingFaceTokenizer  # ty: ignore[unresolved-attribute]
+        module.HuggingFaceTokenizer = HuggingFaceTokenizer  # ty: ignore[missing-attribute]
         monkeypatch.setitem(sys.modules, module.__name__, module)
         assert chunk.load_tokenizer(256) == "tokenizer"
         assert seen == {
