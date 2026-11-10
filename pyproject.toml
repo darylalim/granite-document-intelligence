@@ -60,7 +60,18 @@ ui = [
 default-groups = ["dev", "ui"]
 
 [tool.ruff.lint]
-extend-select = ["I"]
+# isort, plus the seven flake8-datetimez rules that ruff 0.17 dropped from its
+# defaults: a linter upgrade must not narrow the gate unreviewed (CLAUDE.md).
+extend-select = [
+    "I",
+    "DTZ001",
+    "DTZ005",
+    "DTZ006",
+    "DTZ007",
+    "DTZ011",
+    "DTZ012",
+    "DTZ901",
+]
 
 [tool.ruff.lint.isort]
 combine-as-imports = true
