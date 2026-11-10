@@ -194,21 +194,53 @@ def _load_test(folder: Path) -> None:
     memory.release()
 
 
+def _source_snapshot() -> Path:
+    """The bf16 source at its pin, downloaded by mlx-vlm's own `get_model_path`.
+
+    That is the call `convert()` makes for a repo id, so the same files are fetched.
+    """
+    from mlx_vlm.utils import get_model_path
+
+    source = config.GRANITE_VISION_SOURCE
+    return get_model_path(source.repo_id, revision=source.revision)
+
+
+def _model_card() -> str:
+    """The conversion's README.md, written from config alone."""
+    source = config.GRANITE_VISION_SOURCE
+    return (
+        "---\n"
+        f"base_model: {source.repo_id}\n"
+        "library_name: mlx\n"
+        "license: apache-2.0\n"
+        "pipeline_tag: image-text-to-text\n"
+        "tags:\n"
+        "- mlx\n"
+        "---\n\n"
+        f"A local {config.GRANITE_VISION_Q_BITS}-bit MLX conversion of {source.repo_id} "
+        f"at {source.revision}, made by `{FIX_COMMAND}`, with the repository's code "
+        "stripped (see manifest.json). It is a modified copy of Apache-2.0 weights.\n"
+    )
+
+
 def _convert_granite_vision(destination: Path) -> None:
     # The function, unlike mlx-vlm's CLI, defaults trust_remote_code to True and
     # imported the repo's configuration.py when left to it (S10).
     from mlx_vlm.convert import convert
 
-    source = config.GRANITE_VISION_SOURCE
+    # A local path, not the repo id: given a repo id, convert()'s model-card step
+    # reads README.md at `main`, ignoring `revision` (S10). Given a path, it fetches
+    # nothing, and the card is ours.
     convert(
-        hf_path=source.repo_id,
+        hf_path=str(_source_snapshot()),
         mlx_path=str(destination),
         quantize=True,
         q_bits=config.GRANITE_VISION_Q_BITS,
         q_group_size=config.GRANITE_VISION_Q_GROUP_SIZE,
-        revision=source.revision,
+        revision=config.GRANITE_VISION_SOURCE.revision,
         trust_remote_code=False,
     )
+    (destination / "README.md").write_text(_model_card(), encoding="utf-8")
 
 
 def _fetch(repo_id: str, revision: str, destination: Path) -> None:
